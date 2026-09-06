@@ -29,6 +29,14 @@ enum HallwayTheme: String, CaseIterable {
     case fire
     case chainLink
     case myPhotos
+    // Eddie, Sept 6: "add a wall/floor/ceiling style... one that looks
+    // more like an office... beige walls with gradient." No bundled
+    // photo -- there's nothing to shoot a picture of, it's a plain
+    // painted gradient generated in code (see HallwayScene's
+    // resolveThemeImage/officeWallGradientName), same "no bundled image,
+    // something else supplies it live" shape as myPhotos, just
+    // synchronous/procedural instead of an async camera-roll fetch.
+    case office
 
     /// Bundled file name (no extension — HallwayScene loads
     /// "<name>.jpg" from the app bundle), or nil to keep that surface's
@@ -42,6 +50,7 @@ enum HallwayTheme: String, CaseIterable {
         case .fire: return "Fire"
         case .chainLink: return "ChainLink"
         case .myPhotos: return nil // live from the camera roll, see PhotoRollProvider
+        case .office: return HallwayScene.officeWallGradientName
         }
     }
 
@@ -52,6 +61,7 @@ enum HallwayTheme: String, CaseIterable {
     var ceilingImageName: String? {
         switch self {
         case .paisley: return "Paisley" // Eddie's ask: try it on walls AND ceiling
+        case .office: return HallwayScene.officeCeilingGradientName // a beige wall under a near-black ceiling read as broken, not "office"
         default: return nil // myPhotos included — its ceiling photo is also live, not bundled
         }
     }
@@ -65,6 +75,7 @@ enum HallwayTheme: String, CaseIterable {
         case .fire: return "Fire"
         case .chainLink: return "Chain-Link"
         case .myPhotos: return "My Photos"
+        case .office: return "Office"
         }
     }
 

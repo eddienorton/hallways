@@ -14,21 +14,30 @@
 //  (lowercase): M/m moveto, L/l lineto, H/h horizontal lineto, V/v
 //  vertical lineto, C/c cubic Bezier, S/s smooth cubic (reflects the
 //  previous curve's second control point), Q/q quadratic Bezier, T/t
-//  smooth quadratic, Z/z close path. Also handles SVG's "implicit
-//  command repetition" — bare coordinate pairs/values after a command
-//  letter reuse that same command, and bare pairs right after an
-//  initial M/m become implicit L/l, per the SVG spec.
+//  smooth quadratic, A/a elliptical arc, Z/z close path. Also handles
+//  SVG's "implicit command repetition" — bare coordinate pairs/values
+//  after a command letter reuse that same command, and bare pairs
+//  right after an initial M/m become implicit L/l, per the SVG spec.
 //
-//  NOT supported: A/a elliptical arc. Deliberately left out — arcs are
-//  rare in simple icon glyphs, and the math to convert an SVG arc's
-//  (rx ry x-axis-rotation large-arc-flag sweep-flag x y) parameters
-//  into Bezier-equivalent curves is easy to get subtly wrong, which
-//  isn't worth risking unverified on a system nobody here can compile
-//  or preview. If a chosen icon turns out to use arcs, this will need
-//  extending (or that icon avoided) — parse(_:) does not throw or
-//  warn on an unsupported command, it simply stops consuming further
-//  commands, so an icon that hits this returns whatever was
-//  successfully drawn up to that point.
+//  A/a support added Sept 4 once real icon libraries (Font Awesome)
+//  turned out to lean on arcs constantly for anything circular — heads,
+//  wheels, buttons, dots. Converts the arc's (rx ry x-axis-rotation
+//  large-arc-flag sweep-flag x y) parameters to a center/angle form via
+//  the W3C SVG spec's own endpoint-to-center formulas (Appendix F.6),
+//  then walks the sweep in <=90-degree slices, each approximated as one
+//  cubic Bezier via the standard 4/3*tan(angle/4) control-point
+//  construction for a circular arc. This is mechanical, well-defined
+//  math (not a guess the way the heart/star upside-down flip was) —
+//  still its first real run on-device, so a mistyped sign or transposed
+//  term in the transcription is the realistic risk, not conceptual
+//  ambiguity. If an arc-using icon renders with a visibly wrong bulge
+//  or a gap where a curve should close, this function is where to look.
+//
+//  On any command still not handled (nothing currently — this list is
+//  now the full set the SVG path grammar defines, aside from
+//  deprecated/rare variants), or on malformed data, parse(_:) does not
+//  throw or warn: it simply stops consuming further commands and
+//  returns whatever was successfully drawn up to that point.
 //
 
 import UIKit
@@ -170,6 +179,17 @@ enum SVGPathParser {
                 path.close()
                 current = subpathStart
 
+            case "A":
+                repeat {
+                    guard let rx = scanner.nextNumber(), let ry = scanner.nextNumber(),
+                          let rotation = scanner.nextNumber(),
+                          let largeArc = scanner.nextFlag(), let sweep = scanner.nextFlag(),
+                          let x = scanner.nextNumber(), let y = scanner.nextNumber() else { return path }
+                    let end = resolvedPoint(x, y)
+                    appendArc(to: path, from: current, rx: rx, ry: ry, xAxisRotationDegrees: rotation, largeArcFlag: largeArc, sweepFlag: sweep, end: end)
+                    current = end
+                } while scanner.peekNumberPair() != nil
+
             default:
                 // Unsupported command (arcs, or anything malformed) —
                 // stop here rather than guess; see the file header.
@@ -184,6 +204,99 @@ enum SVGPathParser {
         }
 
         return path
+    }
+
+    /// Converts one SVG elliptical-arc segment into a sequence of cubic
+    /// Beziers appended directly to `path` (mutated in place — a
+    /// UIBezierPath is a reference type). `start` is wherever the path
+    /// currently is; this function only appends curves, it never
+    /// issues a moveto. See the file header for the algorithm and its
+    /// honesty caveat.
+    private static func appendArc(to path: UIBezierPath, from start: CGPoint, rx rxIn: CGFloat, ry ryIn: CGFloat, xAxisRotationDegrees: CGFloat, largeArcFlag: Bool, sweepFlag: Bool, end: CGPoint) {
+        // Degenerate per spec: coincident endpoints draw nothing; a
+        // zero radius in either axis collapses the arc to a straight
+        // line.
+        if start.x == end.x, start.y == end.y { return }
+        var rx = abs(rxIn)
+        var ry = abs(ryIn)
+        if rx == 0 || ry == 0 {
+            path.addLine(to: end)
+            return
+        }
+
+        let phi = xAxisRotationDegrees * .pi / 180
+        let cosPhi = cos(phi)
+        let sinPhi = sin(phi)
+
+        // W3C SVG Appendix F.6.5: endpoint -> center parameterization.
+        let dx2 = (start.x - end.x) / 2
+        let dy2 = (start.y - end.y) / 2
+        let x1p = cosPhi * dx2 + sinPhi * dy2
+        let y1p = -sinPhi * dx2 + cosPhi * dy2
+
+        let lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry)
+        if lambda > 1 {
+            let scale = lambda.squareRoot()
+            rx *= scale
+            ry *= scale
+        }
+
+        let rxSq = rx * rx, rySq = ry * ry
+        let x1pSq = x1p * x1p, y1pSq = y1p * y1p
+        let sign: CGFloat = (largeArcFlag == sweepFlag) ? -1 : 1
+        let numerator = max(0, rxSq * rySq - rxSq * y1pSq - rySq * x1pSq)
+        let denominator = rxSq * y1pSq + rySq * x1pSq
+        let co = denominator == 0 ? 0 : sign * (numerator / denominator).squareRoot()
+        let cxp = co * (rx * y1p / ry)
+        let cyp = co * (-ry * x1p / rx)
+
+        let cx = cosPhi * cxp - sinPhi * cyp + (start.x + end.x) / 2
+        let cy = sinPhi * cxp + cosPhi * cyp + (start.y + end.y) / 2
+
+        // Signed angle from vector (ux,uy) to (vx,vy), via atan2 of the
+        // 2D cross/dot product -- more numerically stable near +-1 than
+        // an acos-based version.
+        func signedAngle(_ ux: CGFloat, _ uy: CGFloat, _ vx: CGFloat, _ vy: CGFloat) -> CGFloat {
+            atan2(ux * vy - uy * vx, ux * vx + uy * vy)
+        }
+
+        let ux = (x1p - cxp) / rx, uy = (y1p - cyp) / ry
+        let vx = (-x1p - cxp) / rx, vy = (-y1p - cyp) / ry
+        let theta1 = signedAngle(1, 0, ux, uy)
+        var deltaTheta = signedAngle(ux, uy, vx, vy)
+        if !sweepFlag, deltaTheta > 0 { deltaTheta -= 2 * .pi }
+        if sweepFlag, deltaTheta < 0 { deltaTheta += 2 * .pi }
+
+        // Maps a point on the UNIT circle through the ellipse's own
+        // radii, rotation, and center -- shared by every segment below.
+        func mapUnit(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            let ex = rx * x
+            let ey = ry * y
+            return CGPoint(x: cosPhi * ex - sinPhi * ey + cx, y: sinPhi * ex + cosPhi * ey + cy)
+        }
+
+        // Walk the sweep in <=90-degree slices -- the standard
+        // 4/3*tan(angle/4) cubic construction only stays visually
+        // accurate for a circular arc up to about a quarter-turn per
+        // segment.
+        let segmentCount = max(1, Int(ceil(abs(deltaTheta) / (.pi / 2))))
+        let segmentSweep = deltaTheta / CGFloat(segmentCount)
+
+        var theta = theta1
+        for i in 0..<segmentCount {
+            let nextTheta = theta + segmentSweep
+            let t = (4.0 / 3.0) * tan(segmentSweep / 4)
+            let c1 = mapUnit(cos(theta) - t * sin(theta), sin(theta) + t * cos(theta))
+            let c2 = mapUnit(cos(nextTheta) + t * sin(nextTheta), sin(nextTheta) - t * cos(nextTheta))
+            // The very last segment snaps to the caller's own `end`
+            // rather than the parametric point, so floating-point
+            // drift across segments can never leave the path short of
+            // (or past) where the SVG data actually said it should
+            // land -- matters for whatever command comes right after.
+            let segEnd = (i == segmentCount - 1) ? end : mapUnit(cos(nextTheta), sin(nextTheta))
+            path.addCurve(to: segEnd, controlPoint1: c1, controlPoint2: c2)
+            theta = nextTheta
+        }
     }
 
     /// Minimal hand-rolled scanner over an SVG path string: pulls off
@@ -247,6 +360,22 @@ enum SVGPathParser {
             guard let value = Double(substring) else { return nil }
             index = i
             return CGFloat(value)
+        }
+
+        /// A/a's large-arc-flag and sweep-flag are always exactly one
+        /// character, '0' or '1' — unlike an ordinary number, a flag
+        /// must NOT swallow digits that immediately follow it with no
+        /// separator, since minified arc data commonly packs adjacent
+        /// flags together (e.g. "1 1 0 0" written as "1100", or two
+        /// flags as "10" with no space at all). Reading exactly one
+        /// digit here, instead of reusing nextNumber(), is what makes
+        /// that packed form parse correctly.
+        mutating func nextFlag() -> Bool? {
+            skipSeparators()
+            guard index < chars.count, chars[index] == "0" || chars[index] == "1" else { return nil }
+            let value = chars[index] == "1"
+            index += 1
+            return value
         }
 
         /// Non-consuming lookahead used by every command's "implicit

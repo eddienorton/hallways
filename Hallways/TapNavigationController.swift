@@ -572,6 +572,22 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         isAnimating = true
     }
 
+    /// One tick of held walking. Use the existing pivot/glide animations;
+    /// never queue a walk after the pivot, so releasing cancels continuation.
+    func advanceWhileHeld() {
+        guard canRotate else { return }
+        if canGoForward {
+            advance()
+            return
+        }
+        let turns = [facing.left, facing.right].filter { openDirections.contains($0) }
+        // A genuine L has the passage behind us plus one side exit.
+        // A T has two side exits; a dead end offers only a U-turn.
+        guard openDirections.contains(facing.opposite), turns.count == 1 else { return }
+        navLog("held walk turning at \(currentCell) from \(facing) toward \(turns[0])")
+        rotate(toward: turns[0])
+    }
+
     /// The forward D-pad button (and a bare tap): walks from currentCell
     /// in whatever direction you're currently facing, all the way to
     /// the next real decision, dead end, or the target.

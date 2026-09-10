@@ -1221,28 +1221,17 @@ struct HallwaySceneView: UIViewRepresentable {
             controller.rotate(toward: controller.facing.opposite)
         }
 
-        // Auto-repeats advance() on a short poll while the press is
-        // held -- NOT its own movement/pacing system. advance() itself
-        // already no-ops harmlessly whenever canGoForward is false (an
-        // ordinary tap does the exact same no-op if you tap too early),
-        // so polling every 0.12s just keeps "knocking" until the
-        // controller's own glide finishes and lets the next one
-        // through. That's what gives the "little delay for each box"
-        // Eddie asked for -- it's just each real glide's own duration,
-        // not an invented speed -- and it's also what makes this safe
-        // at a fork: the moment advance()'s own truncation-scan stops
-        // you for a real decision (see its comment), canGoForward goes
-        // false right along with it, so holding harder never plows
-        // through something that's supposed to make you stop and
-        // choose -- you have to actually let go and press again.
+        // Poll only while held. The controller advances straight or pivots
+        // around an unambiguous L; a blocked T still waits for a choice.
+        // Release stops polling, including during a corner's pivot.
         @objc func handleLongPressForward(_ gesture: UILongPressGestureRecognizer) {
             switch gesture.state {
             case .began:
                 navLog("long-press forward began")
-                navigationController?.advance()
+                navigationController?.advanceWhileHeld()
                 forwardHoldTimer?.invalidate()
                 let timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
-                    self?.navigationController?.advance()
+                    self?.navigationController?.advanceWhileHeld()
                 }
                 RunLoop.main.add(timer, forMode: .common)
                 forwardHoldTimer = timer

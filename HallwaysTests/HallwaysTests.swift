@@ -208,4 +208,58 @@ struct HallwaysTests {
         }
     }
 
+    @Test func heldWalkingTurnsAtBothLCornersButTapsDoNot() async {
+        for side in [Direction.east, .west] {
+            let start = GridCoordinate(row: 2, col: 2)
+            let corner = GridCoordinate(row: 1, col: 2)
+            let exit = GridCoordinate(row: 1, col: 2 + side.delta.col)
+            let scene = SCNScene(), camera = SCNNode()
+            scene.rootNode.addChildNode(camera)
+            let controller = TapNavigationController(cameraNode: camera, scene: scene,
+                cells: [start, corner, exit], cellSize: 3.2,
+                startCell: start, startFacing: .north, endCell: exit)
+            let renderer = SCNRenderer(device: nil, options: nil)
+            var time = 1.0
+            controller.advanceWhileHeld()
+            await finishMove(controller, renderer: renderer, time: &time)
+            #expect(controller.currentCell == corner)
+            controller.advance() // Ordinary taps still cannot turn for you.
+            #expect(!controller.isAnimating)
+            #expect(controller.facing == .north)
+            controller.advanceWhileHeld()
+            #expect(controller.isAnimating)
+            controller.advanceWhileHeld() // Polling during the pivot queues nothing.
+            await finishMove(controller, renderer: renderer, time: &time)
+            #expect(controller.facing == side)
+            #expect(controller.currentCell == corner)
+            // No next tick means release: finishing the pivot does not start walking.
+            #expect(!controller.isAnimating)
+            controller.advanceWhileHeld()
+            await finishMove(controller, renderer: renderer, time: &time)
+            #expect(controller.currentCell == exit)
+            controller.advanceWhileHeld() // No automatic U-turn at the dead end.
+            #expect(!controller.isAnimating)
+            #expect(controller.facing == side)
+        }
+    }
+
+    @Test func heldWalkingWaitsAtBlockedTJunction() async {
+        let start = GridCoordinate(row: 2, col: 2)
+        let junction = GridCoordinate(row: 1, col: 2)
+        let scene = SCNScene(), camera = SCNNode()
+        scene.rootNode.addChildNode(camera)
+        let controller = TapNavigationController(cameraNode: camera, scene: scene,
+            cells: [start, junction, GridCoordinate(row: 1, col: 1), GridCoordinate(row: 1, col: 3)],
+            cellSize: 3.2, startCell: start, startFacing: .north,
+            endCell: GridCoordinate(row: 1, col: 3))
+        let renderer = SCNRenderer(device: nil, options: nil)
+        var time = 1.0
+        controller.advanceWhileHeld()
+        await finishMove(controller, renderer: renderer, time: &time)
+        for _ in 0..<3 { controller.advanceWhileHeld() }
+        #expect(controller.currentCell == junction)
+        #expect(controller.facing == .north)
+        #expect(!controller.isAnimating)
+    }
+
 }

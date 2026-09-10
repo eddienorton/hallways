@@ -192,4 +192,26 @@ enum SoundEffects {
         }
         return started
     }
+    private static let mailPickupPlayer = loadPlayer("mail-pick-up.mp3")
+    private static let mailDeliveryPlayer = loadPlayer("mail-letter-drop-in-door-slot.mp3")
+
+    @discardableResult
+    static func playMailPickup() -> Bool { playMailSound(mailPickupPlayer) }
+
+    @discardableResult
+    static func playMailDelivery() -> Bool { playMailSound(mailDeliveryPlayer) }
+
+    private static func playMailSound(_ player: AVAudioPlayer?) -> Bool {
+        guard let player else { return false }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            print("SoundEffects: could not activate mail audio: \(error)")
+        }
+        player.currentTime = 0
+        return player.play()
+    }
+
 }

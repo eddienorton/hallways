@@ -132,4 +132,14 @@ struct HallwaysTests {
         #expect(result.objectNodes.values.allSatisfy { !$0.childNodes.isEmpty || $0.geometry != nil })
     }
 
+    @Test func mailAudioAssetsDecodeAndPlay() throws {
+        for name in ["mail-pick-up", "mail-letter-drop-in-door-slot"] {
+            let url = try #require(Bundle.main.url(forResource: name, withExtension: "mp3"))
+            let player = try AVAudioPlayer(contentsOf: url)
+            #expect(player.duration > 0)
+        }
+        #expect(SoundEffects.playMailPickup())
+        #expect(SoundEffects.playMailDelivery())
+    }
+
 }

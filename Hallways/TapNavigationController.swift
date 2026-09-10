@@ -795,6 +795,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 return
             }
             carriedMail.append(CarriedRoomItem(id: coord, roomNumber: room))
+            SoundEffects.playMailPickup()
         }
         collectedCoords.insert(coord)
         objectNodes[coord]?.removeFromParentNode()
@@ -931,6 +932,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let ids = Set(matching.map(\.id))
         carriedMail.removeAll { ids.contains($0.id) }
         deliveredMail.formUnion(ids)
+        SoundEffects.playMailDelivery()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         showMessage(isMissionComplete ? "All mail delivered! Return to the elevator." : "Delivered to Room \(door.roomNumber).")
         if let roomNode = scene?.rootNode.childNode(withName: "roomDoor_\(door.roomNumber)", recursively: true) {

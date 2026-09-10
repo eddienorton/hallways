@@ -407,10 +407,61 @@
           "row": 13
         },
         "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 3
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 12
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 3
+        },
+        "direction": "south"
       }
     ],
     "spotlights": [],
-    "nextMazeID": 3
+    "nextMazeID": 3,
+    "mirrors": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 8
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 12
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 3
+        },
+        "direction": "west"
+      }
+    ]
   },
   {
     "id": 3,
@@ -681,29 +732,321 @@
         "col": 7
       }
     ],
-    "pictures": [],
-    "nextMazeID": 4
+    "pictures": [
+      {
+        "coord": {
+          "row": 5,
+          "col": 3
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 11
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 3
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 11
+        },
+        "direction": "south"
+      }
+    ],
+    "nextMazeID": 4,
+    "mirrors": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 6
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 8
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 3
+        },
+        "direction": "west"
+      }
+    ]
   },
   {
     "id": 4,
     "cells": [
       {
+        "row": 5,
+        "col": 3
+      },
+      {
+        "row": 5,
+        "col": 4
+      },
+      {
+        "row": 5,
+        "col": 5
+      },
+      {
+        "row": 5,
+        "col": 6
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 8
+      },
+      {
+        "row": 5,
+        "col": 9
+      },
+      {
+        "row": 5,
+        "col": 10
+      },
+      {
+        "row": 5,
+        "col": 11
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 3
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 3
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 3
+      },
+      {
+        "row": 8,
+        "col": 4
+      },
+      {
+        "row": 8,
+        "col": 5
+      },
+      {
+        "row": 8,
+        "col": 6
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 8
+      },
+      {
+        "row": 8,
+        "col": 9
+      },
+      {
+        "row": 8,
+        "col": 10
+      },
+      {
+        "row": 8,
+        "col": 11
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 3
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 3
+      },
+      {
         "row": 10,
         "col": 7
       },
       {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 3
+      },
+      {
         "row": 11,
         "col": 7
+      },
+      {
+        "row": 11,
+        "col": 8
+      },
+      {
+        "row": 11,
+        "col": 9
+      },
+      {
+        "row": 11,
+        "col": 10
+      },
+      {
+        "row": 11,
+        "col": 11
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 3
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 3
+      },
+      {
+        "row": 13,
+        "col": 5
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 15,
+        "col": 3
+      },
+      {
+        "row": 15,
+        "col": 4
+      },
+      {
+        "row": 15,
+        "col": 5
+      },
+      {
+        "row": 15,
+        "col": 6
+      },
+      {
+        "row": 15,
+        "col": 7
+      },
+      {
+        "row": 15,
+        "col": 8
+      },
+      {
+        "row": 15,
+        "col": 9
+      },
+      {
+        "row": 15,
+        "col": 10
+      },
+      {
+        "row": 15,
+        "col": 11
+      },
+      {
+        "row": 15,
+        "col": 12
       }
     ],
-    "objects": [],
+    "objects": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 8
+        },
+        "kind": "paintBucket"
+      }
+    ],
     "destinations": [],
     "exitSigns": [],
-    "floorMaps": [],
+    "floorMaps": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 11
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 4
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 12
+        },
+        "direction": "east"
+      }
+    ],
     "spotlights": [],
-    "missionSigns": [],
-    "pictures": [],
-    "mirrors": [
+    "missionSigns": [
       {
         "coord": {
           "row": 11,
@@ -712,10 +1055,78 @@
         "direction": "south"
       }
     ],
+    "pictures": [
+      {
+        "coord": {
+          "row": 6,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 10
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 12,
+          "col": 3
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 7
+        },
+        "direction": "south"
+      }
+    ],
+    "mirrors": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 9
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 6
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 10
+        },
+        "direction": "south"
+      }
+    ],
     "roomDoors": [],
     "itemRooms": [],
     "picturesUseCameraRoll": false,
-    "missionHeading": "4th Floor",
-    "missionBody": ""
+    "missionHeading": "4th Floor \u2014 A Fresh Coat",
+    "missionBody": "Pick up the blue paint bucket. Walk through every hallway to paint its walls. Use the wall maps to find unfinished areas, then return to the elevator.",
+    "missionObjectKind": "paintBucket"
   }
 ]

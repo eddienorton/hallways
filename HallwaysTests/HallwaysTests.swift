@@ -116,6 +116,11 @@ struct HallwaysTests {
         #expect(letters.keys.allSatisfy { coord in
             store.itemRooms[coord].map { rooms.contains($0) } ?? false
         })
+        store.switchTo(id: 4)
+        #expect(store.missionObjectKind == .paintBucket)
+        #expect(store.objects.values.contains(.paintBucket))
+        #expect(store.cells.count == 55)
+        #expect(store.mirrors.count == 3)
         let url = try #require(Bundle.main.url(forResource: "trash-chute", withExtension: "mp3"))
         let player = try AVAudioPlayer(contentsOf: url)
         #expect(player.duration > 2)
@@ -144,34 +149,29 @@ struct HallwaysTests {
 
     @Test func mirrorEditsSurviveFloorSwitchExportAndUndo() throws {
         let store = MazeStore()
-        store.switchTo(id: 3)
-        #expect(store.nextMazeID == 4)
-        store.switchTo(id: 4)
-        let coord = MazeStore.missionCoordinate
-        #expect(store.mirrors == [coord: .south])
-        #expect(store.missionObjectKind == nil)
-        store.snapshotForUndo()
-        store.removeMirror(at: coord)
-        #expect(store.mirrors.isEmpty)
-        store.undo()
-        #expect(store.mirrors[coord] == .south)
-        store.placeMirror(.north, at: coord) // The elevator is an open neighbor, not a wall.
-        #expect(store.mirrors[coord] == .south)
-        store.placeMirror(.east, at: coord)
         store.switchTo(id: 2)
-        #expect(store.mirrors.isEmpty)
-        store.switchTo(id: 4)
-        #expect(store.mirrors[coord] == .east)
+        let coord = GridCoordinate(row: 5, col: 4)
+        #expect(store.canPlaceMirror(.north, at: coord))
+        store.placeMirror(.north, at: coord)
+        #expect(store.mirrors[coord] == .north)
+        store.placeMirror(.south, at: MazeStore.elevatorCoordinate) // Open neighbor, not a wall.
+        #expect(store.mirrors[MazeStore.elevatorCoordinate] == nil)
+        store.switchTo(id: 3)
+        store.switchTo(id: 2)
+        #expect(store.mirrors[coord] == .north)
         let json = try #require(store.exportLibraryJSON()?.data(using: .utf8))
         let floors = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
-        let fourth = try #require(floors.first { $0["id"] as? Int == 4 })
-        let mirrors = try #require(fourth["mirrors"] as? [[String: Any]])
-        #expect(mirrors.count == 1)
-        #expect(mirrors[0]["direction"] as? String == "east")
-        store.clear()
-        #expect(store.mirrors.isEmpty)
+        let second = try #require(floors.first { $0["id"] as? Int == 2 })
+        let mirrors = try #require(second["mirrors"] as? [[String: Any]])
+        #expect(mirrors.contains { item in
+            let placed = item["coord"] as? [String: Int]
+            return placed?["row"] == 5 && placed?["col"] == 4 && item["direction"] as? String == "north"
+        })
+        store.snapshotForUndo()
+        store.removeMirror(at: coord)
+        #expect(store.mirrors[coord] == nil)
         store.undo()
-        #expect(store.mirrors[coord] == .east)
+        #expect(store.mirrors[coord] == .north)
     }
 
     @Test func mirrorsStopWalkingOnReturnTrips() async {
@@ -289,6 +289,51 @@ struct HallwaysTests {
             await finishMove(controller, renderer: renderer, time: &time)
             #expect(controller.currentCell == neighbors[0])
         }
+    }
+
+    @Test func paintBucketPaintsEveryArrivalThenResetRestoresProgress() async {
+        let start = GridCoordinate(row: 0, col: 0)
+        let bucket = GridCoordinate(row: 0, col: 1)
+        let far = GridCoordinate(row: 0, col: 2)
+        let cells: Set = [start, bucket, far]
+        let built = HallwayScene.build(fromMaze: cells, cellSize: 3.2, wallHeight: 3,
+                                       objects: [bucket: .paintBucket],
+                                       missionObjectKind: .paintBucket,
+                                       playerStart: start, playerEnd: start)
+        let left = SCNNode(), right = SCNNode()
+        built.scene.rootNode.addChildNode(left)
+        built.scene.rootNode.addChildNode(right)
+        let controller = TapNavigationController(
+            cameraNode: built.cameraNode, scene: built.scene, cells: cells, cellSize: 3.2,
+            startCell: start, startFacing: .west, endCell: start,
+            objects: [bucket: .paintBucket], objectNodes: built.objectNodes,
+            elevatorLeftDoor: left, elevatorRightDoor: right, elevatorMountDirection: .west,
+            missionObjectKind: .paintBucket)
+        let renderer = SCNRenderer(device: nil, options: nil)
+        var time = 1.0
+        controller.pinchForward()
+        #expect(controller.elevatorRejected != nil)
+        #expect(controller.paintedCells.isEmpty)
+        controller.rotate(toward: .east); await finishMove(controller, renderer: renderer, time: &time)
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.hasPaintBucket)
+        #expect(controller.paintedCells == [bucket])
+        #expect(!controller.isMissionComplete)
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.paintedCells == [bucket, far])
+        controller.rotate(toward: .west); await finishMove(controller, renderer: renderer, time: &time)
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.currentCell == start)
+        #expect(controller.paintedCells == cells)
+        #expect(controller.isMissionComplete)
+        controller.reset()
+        #expect(!controller.hasPaintBucket)
+        #expect(controller.paintedCells.isEmpty)
+        #expect(!controller.isMissionComplete)
+        controller.rotate(toward: .east); await finishMove(controller, renderer: renderer, time: &time)
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.hasPaintBucket)
+        #expect(controller.paintedCells == [bucket])
     }
 
 }

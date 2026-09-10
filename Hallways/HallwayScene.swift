@@ -430,6 +430,9 @@ enum HallwayScene {
                 }
                 geo.materials = [stripMaterial(width: alongLength, height: verticalHeight)]
                 let node = SCNNode(geometry: geo)
+                let owner = GridCoordinate(row: Int((wallCenterZ / cellSize - CGFloat(direction.delta.row) / 2).rounded()),
+                                           col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
+                node.name = WallPainter.nodeName(owner)
                 node.position = SCNVector3(Float(x), Float(verticalCenter), Float(z))
                 root.addChildNode(node)
             }
@@ -1331,6 +1334,7 @@ enum HallwayScene {
             // picture on the wall"), same wall-skip check as the floor
             // map/mission sign.
             let pictureDirection = pictures[coord]
+            let mirrorDirection = mirrors[coord]
 
             // One fresh material per wall segment (see the comment
             // above wallMaterials) — either a dead-end cap or a regular
@@ -1342,20 +1346,21 @@ enum HallwayScene {
                 geo.materials = [material]
                 wallMaterials.append(material)
                 let node = SCNNode(geometry: geo)
+                node.name = WallPainter.nodeName(coord)
                 node.position = SCNVector3(Float(x), Float(wallHeight / 2), Float(z))
                 root.addChildNode(node)
             }
 
-            if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && pictureDirection != .north {
+            if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && pictureDirection != .north && mirrorDirection != .north {
                 addWall(width: cellSize, length: 0.1, x: x, z: z - half)
             }
-            if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south && missionDirection != .south && pictureDirection != .south {
+            if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south && missionDirection != .south && pictureDirection != .south && mirrorDirection != .south {
                 addWall(width: cellSize, length: 0.1, x: x, z: z + half)
             }
-            if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east && missionDirection != .east && pictureDirection != .east {
+            if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east && missionDirection != .east && pictureDirection != .east && mirrorDirection != .east {
                 addWall(width: 0.1, length: cellSize, x: x + half, z: z)
             }
-            if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && pictureDirection != .west {
+            if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && pictureDirection != .west && mirrorDirection != .west {
                 addWall(width: 0.1, length: cellSize, x: x - half, z: z)
             }
 
@@ -1908,6 +1913,8 @@ enum HallwayScene {
             return makeCash100Node(size: size)
         case .envelope:
             return makeEnvelopeNode(size: size)
+        case .paintBucket:
+            return makePaintBucketNode(size: size)
         case .key:
             // Keep the existing key object renderable while its mission evolves.
             return makeIconNode(
@@ -2045,7 +2052,7 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, maxRow: Int, maxCol: Int, playerAt: GridCoordinate, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:]) -> UIImage {
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, maxRow: Int, maxCol: Int, playerAt: GridCoordinate, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], paintedCells: Set<GridCoordinate>? = nil) -> UIImage {
         let cellPx: CGFloat = 48
         let margin: CGFloat = 16
         let width = CGFloat(maxCol + 1) * cellPx + margin * 2
@@ -2072,6 +2079,13 @@ enum HallwayScene {
             for coord in cells {
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
                 cg.fill(rect)
+            }
+
+            if let paintedCells {
+                PaintPalette.blue.setFill()
+                for coord in paintedCells {
+                    cg.fill(CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx))
+                }
             }
 
             // Thin grout between open cells so the corridor SHAPE reads
@@ -2517,6 +2531,39 @@ enum HallwayScene {
 
     private static func makeCash100Node(size: CGFloat) -> SCNNode {
         makeCashNode(value: 100, size: size)
+    }
+
+    private static func makePaintBucketNode(size: CGFloat) -> SCNNode {
+        let root = SCNNode()
+        let paint = SCNMaterial()
+        paint.diffuse.contents = PaintPalette.blue
+        paint.emission.contents = UIColor(red: 0.06, green: 0.16, blue: 0.38, alpha: 1)
+        paint.lightingModel = .physicallyBased
+        let metal = SCNMaterial()
+        metal.diffuse.contents = UIColor(white: 0.55, alpha: 1)
+        metal.metalness.contents = 0.85
+        metal.roughness.contents = 0.28
+        metal.lightingModel = .physicallyBased
+
+        let body = SCNCylinder(radius: size * 0.22, height: size * 0.36)
+        body.materials = [paint]
+        let bodyNode = SCNNode(geometry: body)
+        bodyNode.position.y = Float(size * 0.02)
+        root.addChildNode(bodyNode)
+
+        let rim = SCNTorus(ringRadius: size * 0.22, pipeRadius: size * 0.025)
+        rim.materials = [metal]
+        let rimNode = SCNNode(geometry: rim)
+        rimNode.position.y = Float(size * 0.18)
+        root.addChildNode(rimNode)
+
+        let handle = SCNTorus(ringRadius: size * 0.16, pipeRadius: size * 0.018)
+        handle.materials = [metal]
+        let handleNode = SCNNode(geometry: handle)
+        handleNode.eulerAngles.x = .pi / 2
+        handleNode.position.y = Float(size * 0.28)
+        root.addChildNode(handleNode)
+        return root
     }
 
 

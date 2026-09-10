@@ -68,6 +68,7 @@ private extension ObjectKind {
         case .cash100: return "💵"
         case .envelope: return "✉️"
         case .key: return "🔑"
+        case .paintBucket: return "🪣"
         }
     }
     var editorColor: Color {
@@ -84,6 +85,7 @@ private extension ObjectKind {
         case .cash100: return Color(red: 0.8, green: 0.6, blue: 0.1)
         case .envelope: return Color(red: 0.55, green: 0.42, blue: 0.22)
         case .key: return .yellow
+        case .paintBucket: return .blue
         }
     }
 }
@@ -720,6 +722,18 @@ struct GridEditorView: View {
             // up. Square badge instead of a circle so the two rows read
             // as different modes at a glance.
             HStack(spacing: 8) {
+                Button {
+                    objectKindToPlace = objectKindToPlace == .paintBucket ? nil : .paintBucket
+                    if objectKindToPlace != nil {
+                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil
+                        destinationKindToPlace = nil; exitDirectionToPlace = nil
+                        floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
+                    }
+                } label: {
+                    Label("Paint", systemImage: "paintbrush.fill")
+                        .foregroundStyle(objectKindToPlace == .paintBucket ? Color.blue : .black)
+                }
+                .accessibilityLabel("Place blue paint bucket")
                 Button {
                     objectKindToPlace = objectKindToPlace == .key ? nil : .key
                     if objectKindToPlace != nil {

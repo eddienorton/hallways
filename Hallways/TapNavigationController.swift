@@ -157,6 +157,21 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// starts the floor over instead of leaving already-picked-up
     /// objects permanently missing.
     private var collectedCoords: Set<GridCoordinate> = []
+    @Published private(set) var paintedCells: Set<GridCoordinate> = []
+    @Published private(set) var hasPaintBucket = false
+    private var wallPainter: WallPainter?
+    var paintProgress: String? {
+        missionObjectKind == .paintBucket ? "Painted \(paintedCells.count)/\(cells.count)" : nil
+    }
+
+    func updatePaintBase(for material: SCNMaterial) { wallPainter?.updateBase(for: material) }
+
+    private func paintIfCarryingBucket(at coord: GridCoordinate) {
+        guard missionObjectKind == .paintBucket, hasPaintBucket, paintedCells.insert(coord).inserted else { return }
+        wallPainter?.paint(coord)
+        if paintedCells == cells { showMessage("Every hallway is painted! Return to the elevator.") }
+    }
+
     /// Every object picked up this run, oldest first -- what the HUD
     /// strip in ContentView actually displays.
     @Published private(set) var collectedObjects: [ObjectKind] = []
@@ -382,6 +397,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.objectKinds = objects
         self.objectNodes = objectNodes
         self.missionObjectKind = missionObjectKind
+        self.wallPainter = missionObjectKind == .paintBucket ? WallPainter(scene: scene) : nil
         self.destinationKinds = destinations
         self.destinationNodes = destinationNodes
         self.destinationClosedPositions = destinationNodes.mapValues { $0.position }
@@ -721,6 +737,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// clears, so Reset genuinely restarts the floor rather than leaving
     /// already-gobbled objects permanently missing.
     func reset() {
+        paintedCells.removeAll()
+        hasPaintBucket = false
+        wallPainter?.reset()
         isAnimating = false
         isDragRotating = false
         SoundEffects.stopWalking()
@@ -804,7 +823,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// comment rather than a stub, since there's nothing meaningful to
     /// call yet.
     private func collectObjectIfPresent(at coord: GridCoordinate) {
-        defer { refreshFloorMapTexture() }
+        defer {
+            paintIfCarryingBucket(at: coord)
+            refreshFloorMapTexture()
+        }
         guard let kind = objectKinds[coord], !collectedCoords.contains(coord) else { return }
         if kind == .envelope {
             guard let room = itemRooms[coord], roomDoors.values.contains(where: { $0.roomNumber == room }) else {
@@ -813,6 +835,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
             carriedMail.append(CarriedRoomItem(id: coord, roomNumber: room))
             SoundEffects.playMailPickup()
+        }
+        if kind == .paintBucket {
+            hasPaintBucket = true
+            showMessage("Blue paint ready. Walk through every hallway; maps show your progress.")
         }
         collectedCoords.insert(coord)
         objectNodes[coord]?.removeFromParentNode()
@@ -983,7 +1009,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard !floorMapPlaneNodes.isEmpty else { return }
         let missionItemCells = objectKinds.filter { $0.value == missionObjectKind && !collectedCoords.contains($0.key) }.map { $0.key }
         let missionDestinationCells = destinationKinds.filter { $0.value == missionObjectKind }.map { $0.key }
-        let image = HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, roomDoors: roomDoors, itemRooms: itemRooms)
+        let image = HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, roomDoors: roomDoors, itemRooms: itemRooms, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil)
         for plane in floorMapPlaneNodes {
             plane.geometry?.materials.first?.diffuse.contents = image
         }
@@ -1022,6 +1048,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// get in and go to the next floor."
     var isMissionComplete: Bool {
         guard let kind = missionObjectKind else { return true }
+        if kind == .paintBucket { return hasPaintBucket && paintedCells == cells }
         let requiredCoords = objectKinds.filter { $0.value == kind }.keys
         if kind == .envelope { return requiredCoords.allSatisfy { deliveredMail.contains($0) } }
         guard requiredCoords.allSatisfy({ collectedCoords.contains($0) }) else { return false }
@@ -1431,7 +1458,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
               let direction = elevatorMountDirection, let kind = missionObjectKind else { return }
         let remaining = objectKinds.filter { $0.value == kind && !collectedCoords.contains($0.key) }.count
         let carried = kind == .envelope ? carriedMail.count : collectedObjects.filter { $0 == kind }.count
-        let message = "ELEVATOR LOCKED\n\(kind.missionLegendLabel): \(remaining) left to collect\n\(carried) still to drop off"
+        let message = kind == .paintBucket
+            ? "ELEVATOR LOCKED\n\(cells.count - paintedCells.count) hallway cells need paint\n\(hasPaintBucket ? "Check the wall maps" : "Find the blue paint bucket")"
+            : "ELEVATOR LOCKED\n\(kind.missionLegendLabel): \(remaining) left to collect\n\(carried) still to drop off"
         let size = CGSize(width: 900, height: 360)
         let texture = UIGraphicsImageRenderer(size: size).image { context in
             UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()

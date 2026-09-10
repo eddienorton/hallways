@@ -90,6 +90,7 @@ enum ObjectKind: String, Codable, CaseIterable {
     // kind and a different chute label (see missionLegendLabel below).
     case envelope
     case key
+    case paintBucket
 }
 
 /// Non-nil only for cash kinds -- the dollar amount that gets added to
@@ -127,6 +128,7 @@ extension ObjectKind {
         case .cash100: return "💵"
         case .envelope: return "✉️"
         case .key: return "🔑"
+        case .paintBucket: return "🪣"
         }
     }
 }
@@ -143,6 +145,7 @@ extension ObjectKind {
         case .trashCan: return "Trash"
         case .envelope: return "Mail"
         case .key: return "Keys"
+        case .paintBucket: return "Paint"
         default: return rawValue.capitalized
         }
     }

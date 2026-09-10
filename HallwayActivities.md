@@ -82,6 +82,13 @@ Deduplicated and grouped by what kind of thought each one is trying to produce. 
 - **Follow-Me / Avoid-Me** — a moving object you have to chase or dodge.
 - **Grow / Shrink** — changes your size, and therefore which openings you can fit through.
 
+## Future Mission Concepts
+
+These are intentionally simple, object-first office-building tasks that keep the same Hallways philosophy: one obvious interaction, one clear physical object in the corridor, and a mission that reads instantly without a tutorial. Both fit the existing world as building maintenance / compliance / workplace absurdity rather than a fantasy quest.
+
+- **Fire Safety Floor** (Hall+Wall, Carry) — A wall-mounted fire extinguisher sits in a hallway like a real office safety fixture. The player breaks the glass or otherwise triggers the extinguisher pickup, then obvious animated flames start appearing in the corridors. They have to walk up and use the extinguisher on each required fire. The fire is a loud, visual, high-contrast event rather than a subtle puzzle: flames spin, glow, and clearly read as “put this out.” The elevator stays locked until every required fire is extinguished, so the floor mission is simple and unambiguous.
+- **Employee Photo Booth Floor** (Wall+Hall, Instant / Multi-step) — Several wall-mounted photo booth stations sit around the floor, each with a simple instruction such as smile, raise eyebrows, open mouth, or look serious. The booth uses the front camera to detect whether the player performs the requested expression. On success, the booth flashes, accepts the photo, and gives a satisfying shutter/approval response. Each booth may ask for a different expression, and the elevator unlocks only after all required booths are completed. This keeps the interaction grounded in ordinary office objects, with a slightly absurd corporate tone and no heavy explanation.
+
 ## What's Next
 
 Still can't answer "what is Hallways" in one sentence — but there's a working thesis now: it's not a maze-solving game, it's a spatial-relationship playground where the corridors are the stage, not the challenge. Three things worth actually building, in this order:

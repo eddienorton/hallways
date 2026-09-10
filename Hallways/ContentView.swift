@@ -531,7 +531,7 @@ private struct NavigationOverlay: View {
 
     var body: some View {
         VStack {
-            if !controller.collectedObjects.isEmpty || !controller.carriedMail.isEmpty {
+            if !controller.collectedObjects.isEmpty || !controller.carriedMail.isEmpty || controller.paintProgress != nil {
                 collectedStrip
                     .padding(.top, 12)
             }
@@ -570,6 +570,9 @@ private struct NavigationOverlay: View {
             HStack(spacing: 8) {
                 ForEach(Array(controller.collectedObjects.enumerated()), id: \.offset) { _, kind in
                     Text(kind.displayEmoji).font(.system(size: 22))
+                }
+                if let progress = controller.paintProgress {
+                    Text(progress).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                 }
                 ForEach(controller.carriedMail) { letter in
                     Label("Rm \(letter.roomNumber)", systemImage: "envelope.fill")
@@ -1282,6 +1285,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 material.diffuse.contents = fallbackColor
                 material.diffuse.contentsTransform = SCNMatrix4Identity
             }
+            navigationController?.updatePaintBase(for: material)
             SCNTransaction.commit()
         }
 
@@ -1335,6 +1339,7 @@ struct HallwaySceneView: UIViewRepresentable {
                     material.diffuse.wrapS = .clamp
                     material.diffuse.wrapT = .clamp
                     material.diffuse.contentsTransform = SCNMatrix4Identity
+                    self.navigationController?.updatePaintBase(for: material)
                 }
 
                 for material in self.wallMaterials { apply(material) }

@@ -581,9 +581,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             return
         }
         let turns = [facing.left, facing.right].filter { openDirections.contains($0) }
-        // A genuine L has the passage behind us plus one side exit.
-        // A T has two side exits; a dead end offers only a U-turn.
-        guard openDirections.contains(facing.opposite), turns.count == 1 else { return }
+        // Starting against a wall works just like arriving at one: exactly
+        // one side exit is unambiguous, regardless of the passage behind us.
+        // Two side exits wait for a swipe; never choose a U-turn automatically.
+        guard turns.count == 1 else { return }
         navLog("held walk turning at \(currentCell) from \(facing) toward \(turns[0])")
         rotate(toward: turns[0])
     }

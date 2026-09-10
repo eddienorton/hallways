@@ -262,4 +262,33 @@ struct HallwaysTests {
         #expect(!controller.isAnimating)
     }
 
+    @Test func longPressFromWallChoosesOnlyUnambiguousSide() async {
+        for sides in [[Direction.east], [.west], [.east, .west]] {
+            let start = GridCoordinate(row: 1, col: 1)
+            let neighbors = sides.map { GridCoordinate(row: 1, col: 1 + $0.delta.col) }
+            let scene = SCNScene(), camera = SCNNode()
+            scene.rootNode.addChildNode(camera)
+            let controller = TapNavigationController(cameraNode: camera, scene: scene,
+                cells: Set([start] + neighbors), cellSize: 3.2,
+                startCell: start, startFacing: .north, endCell: neighbors[0])
+            let renderer = SCNRenderer(device: nil, options: nil)
+            var time = 1.0
+            controller.advanceWhileHeld()
+            if sides.count == 2 {
+                for _ in 0..<3 { controller.advanceWhileHeld() }
+                #expect(!controller.isAnimating)
+                #expect(controller.currentCell == start)
+                #expect(controller.facing == .north)
+                // A swipe-selected direction unlocks continuation.
+                controller.rotate(toward: .east)
+            }
+            await finishMove(controller, renderer: renderer, time: &time)
+            #expect(controller.facing == sides[0])
+            #expect(controller.currentCell == start)
+            controller.advanceWhileHeld()
+            await finishMove(controller, renderer: renderer, time: &time)
+            #expect(controller.currentCell == neighbors[0])
+        }
+    }
+
 }

@@ -41,6 +41,49 @@ final class PhotoRollProvider {
     /// the single shared photo this replaced.
     static let maxPoolSize = 24
 
+    /// Independent random picks across the entire accessible image library.
+    /// No date window or fetch limit; iCloud originals are eligible too.
+    /// Reports each result on the main queue so pictures can appear as they load.
+    func randomImages(count: Int, onImage: @escaping (Int, UIImage?) -> Void) {
+        guard count > 0 else { return }
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    for index in 0..<count { onImage(index, nil) }
+                }
+                return
+            }
+            let assets = PHAsset.fetchAssets(with: .image, options: nil)
+            guard assets.count > 0 else {
+                DispatchQueue.main.async {
+                    for index in 0..<count { onImage(index, nil) }
+                }
+                return
+            }
+            let options = PHImageRequestOptions()
+            options.isNetworkAccessAllowed = true
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .fast
+            for index in 0..<count {
+                let asset = assets.object(at: Int.random(in: 0..<assets.count))
+                var delivered = false
+                PHImageManager.default().requestImage(
+                    for: asset,
+                    targetSize: CGSize(width: 512, height: 512),
+                    contentMode: .aspectFit,
+                    options: options
+                ) { image, info in
+                    guard (info?[PHImageResultIsDegradedKey] as? Bool) != true else { return }
+                    DispatchQueue.main.async {
+                        guard !delivered else { return }
+                        delivered = true
+                        onImage(index, image)
+                    }
+                }
+            }
+        }
+    }
+
     /// Requests photo library access if needed and hands back up to
     /// `count` (capped at maxPoolSize) photos, square and ready to
     /// texture a wall with. Calls back on the main thread. Returns an

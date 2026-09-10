@@ -1,0 +1,686 @@
+[
+  {
+    "cells": [
+      {
+        "col": 7,
+        "row": 14
+      },
+      {
+        "col": 7,
+        "row": 10
+      },
+      {
+        "col": 7,
+        "row": 15
+      },
+      {
+        "col": 7,
+        "row": 12
+      },
+      {
+        "col": 7,
+        "row": 13
+      },
+      {
+        "col": 7,
+        "row": 16
+      },
+      {
+        "col": 7,
+        "row": 11
+      }
+    ],
+    "destinations": [],
+    "exitSigns": [],
+    "floorMaps": [],
+    "id": 1,
+    "missionBody": "YOUR MISSION: \nFind all the trash cans and dump them down the garbage chutes.",
+    "missionHeading": "1st Floor",
+    "missionSigns": [],
+    "nextMazeID": 2,
+    "objects": [],
+    "spotlights": []
+  },
+  {
+    "cells": [
+      {
+        "col": 13,
+        "row": 15
+      },
+      {
+        "col": 12,
+        "row": 15
+      },
+      {
+        "col": 8,
+        "row": 5
+      },
+      {
+        "col": 3,
+        "row": 6
+      },
+      {
+        "col": 7,
+        "row": 10
+      },
+      {
+        "col": 3,
+        "row": 15
+      },
+      {
+        "col": 3,
+        "row": 10
+      },
+      {
+        "col": 11,
+        "row": 15
+      },
+      {
+        "col": 3,
+        "row": 13
+      },
+      {
+        "col": 10,
+        "row": 15
+      },
+      {
+        "col": 7,
+        "row": 5
+      },
+      {
+        "col": 4,
+        "row": 5
+      },
+      {
+        "col": 12,
+        "row": 7
+      },
+      {
+        "col": 5,
+        "row": 5
+      },
+      {
+        "col": 5,
+        "row": 15
+      },
+      {
+        "col": 9,
+        "row": 5
+      },
+      {
+        "col": 12,
+        "row": 11
+      },
+      {
+        "col": 3,
+        "row": 12
+      },
+      {
+        "col": 6,
+        "row": 15
+      },
+      {
+        "col": 11,
+        "row": 11
+      },
+      {
+        "col": 3,
+        "row": 14
+      },
+      {
+        "col": 4,
+        "row": 15
+      },
+      {
+        "col": 10,
+        "row": 5
+      },
+      {
+        "col": 7,
+        "row": 11
+      },
+      {
+        "col": 6,
+        "row": 5
+      },
+      {
+        "col": 3,
+        "row": 5
+      },
+      {
+        "col": 3,
+        "row": 9
+      },
+      {
+        "col": 3,
+        "row": 11
+      },
+      {
+        "col": 12,
+        "row": 6
+      },
+      {
+        "col": 12,
+        "row": 10
+      },
+      {
+        "col": 8,
+        "row": 15
+      },
+      {
+        "col": 3,
+        "row": 7
+      },
+      {
+        "col": 12,
+        "row": 9
+      },
+      {
+        "col": 9,
+        "row": 15
+      },
+      {
+        "col": 7,
+        "row": 15
+      },
+      {
+        "col": 12,
+        "row": 8
+      },
+      {
+        "col": 10,
+        "row": 11
+      },
+      {
+        "col": 12,
+        "row": 5
+      },
+      {
+        "col": 3,
+        "row": 8
+      },
+      {
+        "col": 11,
+        "row": 5
+      },
+      {
+        "col": 9,
+        "row": 11
+      },
+      {
+        "col": 8,
+        "row": 11
+      }
+    ],
+    "destinations": [
+      {
+        "coord": {
+          "col": 13,
+          "row": 15
+        },
+        "kind": "trashCan"
+      }
+    ],
+    "exitSigns": [],
+    "floorMaps": [
+      {
+        "coord": {
+          "col": 5,
+          "row": 15
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "col": 3,
+          "row": 12
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "col": 3,
+          "row": 6
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "col": 5,
+          "row": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "col": 12,
+          "row": 6
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "col": 11,
+          "row": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "col": 12,
+          "row": 10
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "col": 11,
+          "row": 15
+        },
+        "direction": "north"
+      }
+    ],
+    "id": 2,
+    "missionBody": "Mission\n\nCollect and throw out trash",
+    "missionHeading": "2nd Floor",
+    "missionObjectKind": "trashCan",
+    "missionSigns": [
+      {
+        "coord": {
+          "col": 7,
+          "row": 11
+        },
+        "direction": "south"
+      }
+    ],
+    "objects": [
+      {
+        "coord": {
+          "col": 8,
+          "row": 5
+        },
+        "kind": "trashCan"
+      },
+      {
+        "coord": {
+          "col": 3,
+          "row": 10
+        },
+        "kind": "trashCan"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 15
+        },
+        "kind": "trashCan"
+      },
+      {
+        "coord": {
+          "col": 12,
+          "row": 8
+        },
+        "kind": "trashCan"
+      }
+    ],
+    "pictures": [
+      {
+        "coord": {
+          "col": 12,
+          "row": 7
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 5
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 4,
+          "row": 15
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 10,
+          "row": 15
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 9,
+          "row": 11
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "col": 10,
+          "row": 11
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 3,
+          "row": 7
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "col": 6,
+          "row": 5
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 9,
+          "row": 5
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 10,
+          "row": 5
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "col": 3,
+          "row": 9
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "col": 3,
+          "row": 13
+        },
+        "direction": "east"
+      }
+    ],
+    "spotlights": [],
+    "nextMazeID": 3
+  },
+  {
+    "id": 3,
+    "cells": [
+      {
+        "row": 5,
+        "col": 3
+      },
+      {
+        "row": 5,
+        "col": 4
+      },
+      {
+        "row": 5,
+        "col": 5
+      },
+      {
+        "row": 5,
+        "col": 6
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 8
+      },
+      {
+        "row": 5,
+        "col": 9
+      },
+      {
+        "row": 5,
+        "col": 10
+      },
+      {
+        "row": 5,
+        "col": 11
+      },
+      {
+        "row": 6,
+        "col": 3
+      },
+      {
+        "row": 6,
+        "col": 11
+      },
+      {
+        "row": 7,
+        "col": 3
+      },
+      {
+        "row": 7,
+        "col": 11
+      },
+      {
+        "row": 8,
+        "col": 3
+      },
+      {
+        "row": 8,
+        "col": 11
+      },
+      {
+        "row": 9,
+        "col": 3
+      },
+      {
+        "row": 9,
+        "col": 11
+      },
+      {
+        "row": 10,
+        "col": 3
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 11
+      },
+      {
+        "row": 11,
+        "col": 3
+      },
+      {
+        "row": 11,
+        "col": 4
+      },
+      {
+        "row": 11,
+        "col": 5
+      },
+      {
+        "row": 11,
+        "col": 6
+      },
+      {
+        "row": 11,
+        "col": 7
+      },
+      {
+        "row": 11,
+        "col": 8
+      },
+      {
+        "row": 11,
+        "col": 9
+      },
+      {
+        "row": 11,
+        "col": 10
+      },
+      {
+        "row": 11,
+        "col": 11
+      }
+    ],
+    "objects": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 5
+        },
+        "kind": "envelope"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 3
+        },
+        "kind": "envelope"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 9
+        },
+        "kind": "envelope"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 11
+        },
+        "kind": "envelope"
+      }
+    ],
+    "mailAddresses": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 5
+        },
+        "roomNumber": 303
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 3
+        },
+        "roomNumber": 304
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 9
+        },
+        "roomNumber": 301
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 11
+        },
+        "roomNumber": 302
+      }
+    ],
+    "roomDoors": [
+      {
+        "coord": {
+          "row": 8,
+          "col": 3
+        },
+        "direction": "west",
+        "roomNumber": 301
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 5
+        },
+        "direction": "north",
+        "roomNumber": 302
+      },
+      {
+        "coord": {
+          "row": 7,
+          "col": 11
+        },
+        "direction": "east",
+        "roomNumber": 303
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 10
+        },
+        "direction": "south",
+        "roomNumber": 304
+      }
+    ],
+    "destinations": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 3
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 11
+        },
+        "direction": "west"
+      }
+    ],
+    "floorMaps": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 8
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 7
+        },
+        "direction": "north"
+      }
+    ],
+    "missionSigns": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 7
+        },
+        "direction": "south"
+      }
+    ],
+    "missionHeading": "3rd Floor",
+    "missionBody": "MAIL DELIVERY\nFind every letter and deliver it to the room on its address.\n\nTap a numbered door to deliver. Then return to the elevator.",
+    "missionObjectKind": "envelope",
+    "spotlights": [
+      {
+        "row": 11,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      }
+    ],
+    "pictures": []
+  }
+]

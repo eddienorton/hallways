@@ -66,6 +66,8 @@ private extension ObjectKind {
         case .cakeCandles: return "🎂"
         case .trashCan: return "🗑️"
         case .cash100: return "💵"
+        case .envelope: return "✉️"
+        case .key: return "🔑"
         }
     }
     var editorColor: Color {
@@ -80,6 +82,8 @@ private extension ObjectKind {
         case .cakeCandles: return .orange
         case .trashCan: return Color(white: 0.55)
         case .cash100: return Color(red: 0.8, green: 0.6, blue: 0.1)
+        case .envelope: return Color(red: 0.55, green: 0.42, blue: 0.22)
+        case .key: return .yellow
         }
     }
 }
@@ -161,6 +165,19 @@ struct GridEditorView: View {
     /// Sign, the wall a map hangs on has to actually BE a wall --
     /// paint(at:) checks that before ever calling placeFloorMap.
     @State private var floorMapDirectionToPlace: Direction? = nil
+    /// Same idea once more, for placing a decorative Picture --
+    /// mutually exclusive with every other placement mode and with
+    /// wall painting. Eddie, Sept 9: "make the picture appear as a
+    /// picture on the wall (like we do to the mission and maps)" --
+    /// same "editor picks the cell AND the wall" split as Exit Signs/
+    /// floor maps, and same wall-required check as floor maps (nothing
+    /// to hang a picture on across an open doorway). Unlike either of
+    /// those, no image is picked here -- HallwayScene.build(fromMaze:)
+    /// grabs a random one from the bundled Pictures folder at build
+    /// time, so this screen only ever decides where, never which photo.
+    @State private var pictureDirectionToPlace: Direction? = nil
+    @State private var doorDirectionToPlace: Direction? = nil
+    @State private var mailRoomToPlace: Int? = nil
     /// Same idea once more, for placing a ceiling spotlight -- mutually
     /// exclusive with all 4 other placement modes and with wall
     /// painting. Eddie, Sept 6: "how difficult to have a spotlight that
@@ -168,6 +185,19 @@ struct GridEditorView: View {
     /// (it hangs dead-center in the ceiling), so this is a plain on/off
     /// toggle like the Chute one, not a 4-direction row like Exit/Map.
     @State private var placingSpotlight = false
+    /// Same idea once more, for placing a Floor Mission sign --
+    /// mutually exclusive with all 5 other placement modes and with
+    /// Drives the mission-editor sheet -- the "pop open a text input
+    /// field" Eddie asked for, rather than hard-coding mission text
+    /// per floor in an array.
+    @State private var showMissionEditor = false
+    /// Local drafts, seeded from mazeStore.missionHeading/missionBody
+    /// when the sheet opens and written back via setMissionText only
+    /// on Save -- so backing out with Cancel genuinely discards
+    /// in-progress typing instead of live-editing the real value on
+    /// every keystroke.
+    @State private var missionHeadingDraft = ""
+    @State private var missionBodyDraft = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -175,6 +205,13 @@ struct GridEditorView: View {
             controlBar
         }
         .statusBarHidden()
+        .onChange(of: mazeStore.version) { _ in
+            // Persist committed edits while the editor stays open, too.
+            mazeStore.save()
+        }
+        .sheet(isPresented: $showMissionEditor) {
+            missionEditorSheet
+        }
     }
 
     /// The grid itself and nothing else — no controls drawn over any
@@ -275,6 +312,18 @@ struct GridEditorView: View {
                 }
             }
             .overlay {
+                // Same eligibility preview as the Map row above, for
+                // Picture placement -- pink to match that toolbar row.
+                if let direction = pictureDirectionToPlace, mazeStore.isOpen(coord) {
+                    let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+                    if !mazeStore.isOpen(neighbor) {
+                        Rectangle()
+                            .fill(Color.pink.opacity(0.35))
+                            .overlay(Rectangle().stroke(Color.pink, lineWidth: 2))
+                    }
+                }
+            }
+            .overlay {
                 // "You are here" — bright red, drawn under the S/E
                 // labels so both can show if they ever land on the same
                 // cell (fresh spawn, or standing right at the end
@@ -366,6 +415,44 @@ struct GridEditorView: View {
                 }
             }
             .overlay {
+                // Decorative Picture -- top-center, the one spot still
+                // free once destination/exit-sign/floor-map/spotlight
+                // claim all 4 corners and the mission sign claims dead
+                // center.
+                if let direction = mazeStore.pictureDirection(at: coord) {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: cellSize * 0.3, weight: .heavy))
+                                .foregroundStyle(Color.pink)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .padding(2)
+                                .background(Color.white.opacity(0.85), in: Circle())
+                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+                            Spacer()
+                        }
+                        Spacer()
+                    }
+                    .padding(3)
+                }
+            }
+            .overlay {
+                // Floor Mission sign -- dead center, since all 4
+                // corners are already spoken for (destination top-right,
+                // exit sign bottom-left, floor map bottom-right,
+                // spotlight top-left). Eddie, Sept 7.
+                if let direction = mazeStore.missionSignDirection(at: coord) {
+                    Image(systemName: "signpost.right.fill")
+                        .font(.system(size: cellSize * 0.32, weight: .heavy))
+                        .foregroundStyle(Color.purple)
+                        .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                        .padding(2)
+                        .background(Color.white.opacity(0.85), in: Circle())
+                        .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+                }
+            }
+            .overlay {
                 // Ceiling spotlight -- top-left corner, the one spot
                 // destination (top-right), exit sign (bottom-left), and
                 // floor map (bottom-right) leave free.
@@ -385,6 +472,7 @@ struct GridEditorView: View {
                     .padding(3)
                 }
             }
+            .overlay { roomAndMailBadge(at: coord, cellSize: cellSize) }
             .overlay {
                 // The building's one elevator -- MazeStore.startCoordinate
                 // and .endCoordinate are always the same fixed cell now
@@ -399,12 +487,60 @@ struct GridEditorView: View {
                 // imposing rules and error messages in the map editor"),
                 // so this is the one visual reminder of where it has to
                 // connect to.
-                if coord == mazeStore.startCoordinate {
+                // Eddie, Sept 8: this used to just mark
+                // mazeStore.startCoordinate, back when the start and
+                // the elevator were always literally the same cell --
+                // floor 1 split them apart (Sept 7), and this screen
+                // kept marking only the start (the dead end you walk
+                // in from), leaving the ACTUAL elevator -- always the
+                // fixed MazeStore.elevatorCoordinate, whether or not
+                // this floor's drawing even reaches it -- completely
+                // invisible here. That's almost certainly why floor
+                // 1's hallway ended up not actually connected to the
+                // elevator: there was no way to see where it even was
+                // while drawing. Both show now, distinctly, whenever
+                // they differ.
+                if coord == MazeStore.elevatorCoordinate {
                     Text("🛗")
                         .font(.system(size: cellSize * 0.55))
                         .shadow(color: .black.opacity(0.6), radius: 1.5)
                 }
+                if coord == mazeStore.startCoordinate, coord != MazeStore.elevatorCoordinate {
+                    Text("🚪")
+                        .font(.system(size: cellSize * 0.55))
+                        .shadow(color: .black.opacity(0.6), radius: 1.5)
+                }
             }
+    }
+
+    @ViewBuilder
+    private func roomAndMailBadge(at coord: GridCoordinate, cellSize: CGFloat) -> some View {
+        if let door = mazeStore.roomDoors[coord] {
+            VStack(spacing: 0) {
+                Image(systemName: "door.left.hand.closed")
+                    .rotationEffect(.degrees(facingRotationDegrees(door.direction)))
+                Text("\(door.roomNumber)")
+            }
+            .font(.system(size: max(8, cellSize * 0.25), weight: .bold))
+            .foregroundStyle(.white)
+            .padding(2)
+            .background(Color.brown, in: RoundedRectangle(cornerRadius: 3))
+        } else if mazeStore.object(at: coord) == .envelope || mazeStore.object(at: coord) == .key {
+            VStack {
+                Spacer()
+                Text(mazeStore.itemRooms[coord].map { "\($0)" } ?? "?")
+                    .font(.system(size: max(8, cellSize * 0.28), weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 2)
+                    .background(.white)
+            }
+        } else if let direction = doorDirectionToPlace, mazeStore.isOpen(coord) {
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            if !mazeStore.isOpen(neighbor), coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate,
+               mazeStore.floorMaps[coord] == nil, mazeStore.pictures[coord] == nil, mazeStore.destinations[coord] == nil {
+                Rectangle().stroke(Color.brown, lineWidth: 3)
+            }
+        }
     }
 
     /// Every control that used to overlay the grid, now a normal
@@ -473,6 +609,23 @@ struct GridEditorView: View {
                         .background(.ultraThinMaterial, in: Circle())
                 }
 
+                // Eddie, Sept 8: export button for the "paste maps to
+                // Claude, get back a static bundled version" workflow --
+                // copies every floor drawn so far to the clipboard as
+                // JSON, ready to paste into chat.
+                Button {
+                    if let json = mazeStore.exportLibraryJSON() {
+                        UIPasteboard.general.string = json
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                } label: {
+                    Image(systemName: "doc.on.clipboard")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+
                 Divider().frame(height: 28)
 
                 // One toggle per object kind — tapping one turns
@@ -483,7 +636,7 @@ struct GridEditorView: View {
                 // active.
                 Button {
                     objectKindToPlace = (objectKindToPlace == .trashCan) ? nil : .trashCan
-                    if objectKindToPlace != nil { destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     // Was green -- Eddie, Sept 5, twice now: "extremely
                     // difficult to see" against this same
@@ -506,11 +659,27 @@ struct GridEditorView: View {
                 // model needed.
                 Button {
                     objectKindToPlace = (objectKindToPlace == .cash100) ? nil : .cash100
-                    if objectKindToPlace != nil { destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: objectKindToPlace == .cash100 ? "dollarsign.circle.fill" : "dollarsign.circle")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(objectKindToPlace == .cash100 ? Color(red: 0.8, green: 0.6, blue: 0.1) : .black)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+
+                // Fourth Hallway Activity, Sept 7: the Mail Mission --
+                // a floating envelope, picked up and delivered exactly
+                // like trash (same shared objectKindToPlace var, same
+                // paint(at:) logic below -- nothing kind-specific to
+                // add there at all).
+                Button {
+                    objectKindToPlace = (objectKindToPlace == .envelope) ? nil : .envelope
+                    if objectKindToPlace != nil { doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                } label: {
+                    Image(systemName: objectKindToPlace == .envelope ? "envelope.fill" : "envelope")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(objectKindToPlace == .envelope ? Color.white : .black)
                         .frame(width: 36, height: 36)
                         .background(.ultraThinMaterial, in: Circle())
                 }
@@ -523,16 +692,40 @@ struct GridEditorView: View {
             // up. Square badge instead of a circle so the two rows read
             // as different modes at a glance.
             HStack(spacing: 8) {
+                Button {
+                    objectKindToPlace = objectKindToPlace == .key ? nil : .key
+                    if objectKindToPlace != nil {
+                        doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil
+                        floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
+                    }
+                } label: {
+                    Label("Key", systemImage: "key.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(objectKindToPlace == .key ? Color.orange : .black)
+                }
+            }
+
+            HStack(spacing: 8) {
                 Text("Chute:")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundStyle(.black.opacity(0.6))
                 Button {
                     destinationKindToPlace = (destinationKindToPlace == .trashCan) ? nil : .trashCan
-                    if destinationKindToPlace != nil { objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                    if destinationKindToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: destinationKindToPlace == .trashCan ? "arrow.down.square.fill" : "arrow.down.square")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(destinationKindToPlace == .trashCan ? Color.blue : .black)
+                        .frame(width: 32, height: 32)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                Button {
+                    destinationKindToPlace = (destinationKindToPlace == .envelope) ? nil : .envelope
+                    if destinationKindToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                } label: {
+                    Image(systemName: destinationKindToPlace == .envelope ? "envelope.fill" : "envelope")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(destinationKindToPlace == .envelope ? Color(red: 0.55, green: 0.42, blue: 0.22) : .black)
                         .frame(width: 32, height: 32)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                 }
@@ -551,7 +744,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         exitDirectionToPlace = (exitDirectionToPlace == direction) ? nil : direction
-                        if exitDirectionToPlace != nil { objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                        if exitDirectionToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "location.north.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -577,7 +770,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         floorMapDirectionToPlace = (floorMapDirectionToPlace == direction) ? nil : direction
-                        if floorMapDirectionToPlace != nil { objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; placingSpotlight = false }
+                        if floorMapDirectionToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "map.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -586,6 +779,82 @@ struct GridEditorView: View {
                             .frame(width: 28, height: 28)
                             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                     }
+                }
+            }
+
+            // Decorative Picture placement -- Eddie, Sept 9: "instead,
+            // make the picture appear as a picture on the wall (like we
+            // do to the mission and maps)... I will give you pictures
+            // to put in a separate folder." Same 4-direction toggle
+            // shape as the Map row just above (wall-required, same
+            // place-vs-erase paint(at:) logic below), purple instead of
+            // blue so the 2 rows read as different modes at a glance.
+            // No kind/image to pick -- HallwayScene.build(fromMaze:)
+            // grabs a random bundled photo at build time, this row only
+            // ever decides where.
+            HStack(spacing: 8) {
+                Text("Picture:")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+                ForEach(Direction.allCases, id: \.self) { direction in
+                    Button {
+                        pictureDirectionToPlace = (pictureDirectionToPlace == direction) ? nil : direction
+                        if pictureDirectionToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                    } label: {
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(pictureDirectionToPlace == direction ? Color.pink : .black)
+                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                            .frame(width: 28, height: 28)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                Toggle(isOn: Binding(
+                    get: { mazeStore.picturesUseCameraRoll },
+                    set: { mazeStore.setPicturesUseCameraRoll($0) }
+                )) {
+                    Text(mazeStore.picturesUseCameraRoll ? "Camera roll" : "Folder")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.black)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                .toggleStyle(.switch)
+                .tint(.pink)
+                .fixedSize()
+                .accessibilityLabel("Use camera roll for this floor's pictures")
+
+            }
+
+            HStack(spacing: 8) {
+                Text("Door:")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+                ForEach(Direction.allCases, id: \.self) { direction in
+                    Button {
+                        doorDirectionToPlace = doorDirectionToPlace == direction ? nil : direction
+                        if doorDirectionToPlace != nil {
+                            objectKindToPlace = nil; destinationKindToPlace = nil
+                            exitDirectionToPlace = nil; floorMapDirectionToPlace = nil
+                            pictureDirectionToPlace = nil; placingSpotlight = false
+                        }
+                    } label: {
+                        Image(systemName: "door.left.hand.closed")
+                            .foregroundStyle(doorDirectionToPlace == direction ? Color.brown : .black)
+                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                            .frame(width: 28, height: 28)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .accessibilityLabel("Place door facing \(direction.rawValue)")
+                }
+                if objectKindToPlace == .envelope || objectKindToPlace == .key {
+                    Picker("To room", selection: $mailRoomToPlace) {
+                        Text("Auto address").tag(Int?.none)
+                        ForEach(mazeStore.roomNumbers, id: \.self) { room in
+                            Text("Rm \(room)").tag(Int?.some(room))
+                        }
+                    }
+                    .tint(.brown)
                 }
             }
 
@@ -599,12 +868,37 @@ struct GridEditorView: View {
                     .foregroundStyle(.black.opacity(0.6))
                 Button {
                     placingSpotlight.toggle()
-                    if placingSpotlight { objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil }
+                    if placingSpotlight { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil }
                 } label: {
                     Image(systemName: placingSpotlight ? "lightbulb.fill" : "lightbulb")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(placingSpotlight ? Color(red: 0.95, green: 0.75, blue: 0.15) : .black)
                         .frame(width: 32, height: 32)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            // Floor Mission sign -- Eddie, Sept 7: "you no longer have to
+            // give me the control to place the mission statement in a
+            // specific box... just follow the rule of one mission
+            // statement per floor, and its always in front of the
+            // elevator." MazeStore auto-seeds the one fixed mission
+            // cell/wall on init and Clear, so all that's left here is
+            // the pencil button that pops the mission-editor sheet for
+            // typing the heading/mission body.
+            HStack(spacing: 8) {
+                Text("Mission:")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+                Button {
+                    missionHeadingDraft = mazeStore.missionHeading
+                    missionBodyDraft = mazeStore.missionBody
+                    showMissionEditor = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.purple)
+                        .frame(width: 28, height: 28)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
@@ -672,6 +966,17 @@ struct GridEditorView: View {
         guard col >= 0, col < columns, row >= 0, row < rows else { return }
         let coord = GridCoordinate(row: row, col: col)
 
+        if let direction = doorDirectionToPlace {
+            guard mazeStore.isOpen(coord) else { return }
+            if isStart { paintMode = mazeStore.roomDoors[coord]?.direction != direction }
+            if paintMode {
+                if mazeStore.roomDoors[coord]?.direction != direction { mazeStore.placeRoomDoor(direction, at: coord) }
+            } else {
+                mazeStore.removeRoomDoor(at: coord)
+            }
+            return
+        }
+
         if let kind = objectKindToPlace {
             // Objects only make sense on real hallway cells — dragging
             // across a wall cell in this mode just does nothing there.
@@ -680,12 +985,13 @@ struct GridEditorView: View {
                 // Starting on a cell that already holds exactly this
                 // kind begins an erase stroke; anything else (empty, or
                 // a different kind) begins a place-this-kind stroke.
-                paintMode = mazeStore.object(at: coord) != kind
+                paintMode = mazeStore.object(at: coord) != kind || ((kind == .envelope || kind == .key) && mailRoomToPlace != nil && mazeStore.itemRooms[coord] != mailRoomToPlace)
             }
             if paintMode {
                 if mazeStore.object(at: coord) != kind {
                     mazeStore.placeObject(kind, at: coord)
                 }
+                if kind == .envelope || kind == .key, let room = mailRoomToPlace { mazeStore.setItemRoom(room, at: coord) }
             } else {
                 if mazeStore.object(at: coord) != nil {
                     mazeStore.removeObject(at: coord)
@@ -766,6 +1072,28 @@ struct GridEditorView: View {
             return
         }
 
+        if let direction = pictureDirectionToPlace {
+            // Same open-cell, place-vs-erase, wall-required shape as
+            // floor maps above -- a picture hangs ON a wall too, so the
+            // neighbor in `direction` has to actually be closed.
+            guard mazeStore.isOpen(coord) else { return }
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard !mazeStore.isOpen(neighbor) else { return }
+            if isStart {
+                paintMode = mazeStore.pictureDirection(at: coord) != direction
+            }
+            if paintMode {
+                if mazeStore.pictureDirection(at: coord) != direction {
+                    mazeStore.placePicture(direction, at: coord)
+                }
+            } else {
+                if mazeStore.pictureDirection(at: coord) != nil {
+                    mazeStore.removePicture(at: coord)
+                }
+            }
+            return
+        }
+
         if placingSpotlight {
             // Same open-cell-only, place-vs-erase shape as the Chute
             // toggle -- no direction/neighbor-wall check needed since a
@@ -794,6 +1122,51 @@ struct GridEditorView: View {
             mazeStore.setOpen(coord)
         } else {
             mazeStore.setClosed(coord)
+        }
+    }
+
+    /// The "pop open a text input field" Eddie asked for (Sept 7) --
+    /// edits mazeStore.missionHeading/missionBody/missionObjectKind
+    /// directly rather than hard-coding per-floor mission strings in an
+    /// array, so any floor's mission can be authored right here in the
+    /// editor. Drafts are local State, seeded on open and written back
+    /// only on Save, so Cancel genuinely discards in-progress typing.
+    private var missionEditorSheet: some View {
+        NavigationView {
+            Form {
+                Section("Heading") {
+                    TextField("e.g. 1st Floor", text: $missionHeadingDraft)
+                }
+                Section("Mission") {
+                    TextEditor(text: $missionBodyDraft)
+                        .frame(minHeight: 120)
+                }
+                Section("Completion") {
+                    Picker("Requires delivering", selection: Binding(
+                        get: { mazeStore.missionObjectKind },
+                        set: { mazeStore.setMissionObjectKind($0) }
+                    )) {
+                        Text("Nothing").tag(ObjectKind?.none)
+                        Text("Trash").tag(ObjectKind?.some(.trashCan))
+                        Text("Mail").tag(ObjectKind?.some(.envelope))
+                        Text("Keys & cash").tag(ObjectKind?.some(.key))
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+            .navigationTitle("Floor Mission")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showMissionEditor = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        mazeStore.setMissionText(heading: missionHeadingDraft, body: missionBodyDraft)
+                        showMissionEditor = false
+                    }
+                }
+            }
         }
     }
 }
@@ -928,6 +1301,17 @@ struct FloorMapOverlayView: View {
                 }
             }
             .overlay {
+                if let direction = mazeStore.missionSignDirection(at: coord) {
+                    Image(systemName: "signpost.right.fill")
+                        .font(.system(size: cellSize * 0.32, weight: .heavy))
+                        .foregroundStyle(Color.purple)
+                        .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                        .padding(2)
+                        .background(Color.white.opacity(0.85), in: Circle())
+                        .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+                }
+            }
+            .overlay {
                 if mazeStore.hasSpotlight(coord) {
                     VStack {
                         HStack {
@@ -945,8 +1329,26 @@ struct FloorMapOverlayView: View {
                 }
             }
             .overlay {
-                if coord == mazeStore.startCoordinate {
+                // Eddie, Sept 8: this used to just mark
+                // mazeStore.startCoordinate, back when the start and
+                // the elevator were always literally the same cell --
+                // floor 1 split them apart (Sept 7), and this screen
+                // kept marking only the start (the dead end you walk
+                // in from), leaving the ACTUAL elevator -- always the
+                // fixed MazeStore.elevatorCoordinate, whether or not
+                // this floor's drawing even reaches it -- completely
+                // invisible here. That's almost certainly why floor
+                // 1's hallway ended up not actually connected to the
+                // elevator: there was no way to see where it even was
+                // while drawing. Both show now, distinctly, whenever
+                // they differ.
+                if coord == MazeStore.elevatorCoordinate {
                     Text("🛗")
+                        .font(.system(size: cellSize * 0.55))
+                        .shadow(color: .black.opacity(0.6), radius: 1.5)
+                }
+                if coord == mazeStore.startCoordinate, coord != MazeStore.elevatorCoordinate {
+                    Text("🚪")
                         .font(.system(size: cellSize * 0.55))
                         .shadow(color: .black.opacity(0.6), radius: 1.5)
                 }

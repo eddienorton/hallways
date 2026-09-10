@@ -1,0 +1,4 @@
+Banana peel: https://www.svgrepo.com/svg/481652/banana-peel
+Soda can: https://www.svgrepo.com/svg/323941/soda-can
+Both listed as CC0: https://creativecommons.org/publicdomain/zero/1.0/
+Original SVGs included. Paths are rendered as yellow and pale-blue silhouettes in the pickup animation.

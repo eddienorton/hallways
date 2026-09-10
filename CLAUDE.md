@@ -17,6 +17,26 @@ Eddie Brayman, 72, independent iOS developer, East Village NYC. 55+ years coding
 
 ---
 
+## Current implementation — Sept 9, 2026 (Codex)
+
+This section supersedes older status and environment notes below. Xcode 26.6 and iOS 26.5 simulators are available here; Codex can compile, run focused tests, launch the app, and inspect simulator screenshots.
+
+- Navigation is gesture-based: tap to walk, drag to turn, swipe down/two-finger tap to turn around. Pinch-out walks forward or opens the elevator when facing its doors; pinch-in backs up one cell without turning. Wall maps and pictures stop movement on every pass. Wall-map taps no longer open the full-screen map; the editor remains reachable from the HUD.
+- Mission posters are 25% taller with larger type and a centered heading. Wall maps/frames are 40% larger; legend plaque size is unchanged.
+- Floor 3 is a bundled mail-delivery loop with rooms 301–304 and four addressed envelopes. Floor 2 links to floor 3. Startup reads the bundled three-floor library. Editor saves also write a local mazes.json backup; that backup is not loaded by this recovered version.
+- `MailDelivery.swift` contains room/mail models and SceneKit artwork: floor-standing wooden doors with numbered plaques and mail slots, plus flat spinning envelopes with readable addresses on both faces.
+- Door numbers and per-envelope addresses persist through explicit `MazeRecord` coding, saves, floor switches, export and undo. Editor Door controls choose the wall; numbers are assigned automatically. Mail placement has an optional destination-room selector. Doors should be placed before letters; unaddressed letters are assigned when a door is added. Deleting a door leaves its mail address intact for explicit reassignment; invalid mail cannot be picked up.
+- Carried mail is separate from ordinary carried objects, shown with room numbers. Tap the matching door while standing in its cell and facing it to deliver only that room's mail. Trash chutes cannot discard mail. Mission completion requires actual delivery of every placed letter.
+- Focused simulator tests cover addressed delivery, wrong/remote door rejection, reset, repeated map stops, backward facing preservation, and elevator pinch mission gating. All passed on Sept 9. Visual feel still benefits from Eddie's playtesting.
+
+## Recovery — Sept 9, 2026 (evening)
+
+Recovered from `Hallways-3-floors-complete`. The two-floor `Hallways` snapshot is older; the Cursor snapshot differs only in map data, storage code, and this document. Its storage rewrite was not adopted.
+
+Both three-floor snapshots failed to build because `ObjectKind.key` lacked a `makeObjectNode` switch case. The missing key geometry is now implemented. The existing `Audio/trash-chute.mp3` is retained, with explicit playback-session activation and decoding/playback error reporting. Floor 3's rooms 301–304, addressed mail, editor controls, and mission checks are retained.
+
+Recovery tests cover mail routing/reset, repeated map stops/backward movement, elevator mission gating, all object renderers, all three bundled floors, and bundled chute-audio playback.
+
 ## Status / build log
 
 **Sept 2-3, 2026 — foundation.** Tap-to-advance navigation (replacing an earlier steer-by-drag prototype); shared brick/dark floor/ceiling look; amber intersection markers; 2D grid editor with position+facing marker; a swappable photo-theme system (6 bundled themes + a 7th pulling the camera roll). Portrait/landscape light falloff fixed (headlamp attenuation + fog scaled to live aspect ratio); dead ends got their own light-immune cap material; nav redesigned to an always-visible D-pad (forward walks, left/right/back pure rotation).

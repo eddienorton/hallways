@@ -196,7 +196,7 @@ enum HallwayScene {
     /// FloorRect, inset only on the sides that actually have a wall, so
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
-    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], theme: HallwayTheme = .brick) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, deadEndCapMaterials: [SCNMaterial], objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode]) {
+    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -241,7 +241,7 @@ enum HallwayScene {
         // same (nothing to reach). TapNavigationController needs the
         // mount direction too, to know which world axis the doors
         // slide along when it animates them open.
-        var elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction)? = nil
+        var elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)? = nil
 
         // Spawn AND the elevator, both the same building-fixed cell now
         // -- MazeStore.elevatorCoordinate, not anything derived from
@@ -252,8 +252,8 @@ enum HallwayScene {
         // saying whichever name reads clearer at each call site --
         // they're never expected to differ. Falls back to (0,0) only
         // for the literal empty-maze case, same as before.
-        let start = cells.isEmpty ? GridCoordinate(row: 0, col: 0) : MazeStore.elevatorCoordinate
-        let end = start
+        let start = playerStart ?? (cells.isEmpty ? GridCoordinate(row: 0, col: 0) : MazeStore.elevatorCoordinate)
+        let end = playerEnd ?? (cells.isEmpty ? GridCoordinate(row: 0, col: 0) : MazeStore.elevatorCoordinate)
 
         // Floor/ceiling stay one material shared by every cell (a
         // repeating tiled pattern reads fine repeated; no per-cell
@@ -268,11 +268,6 @@ enum HallwayScene {
         let floorMaterial = makeFloorMaterial(imageName: theme.floorImageName)
         let ceilingMaterial = makeCeilingMaterial(imageName: theme.ceilingImageName)
         var wallMaterials: [SCNMaterial] = []
-        // Same per-node idea for dead-end caps — one fresh material per
-        // true dead end, so a maze with several dead ends shows a
-        // different photo at each one under My Photos rather than the
-        // same picture everywhere.
-        var deadEndCapMaterials: [SCNMaterial] = []
 
         // Warm brass/amber, lit like metal trim rather than flat-red
         // tape — same color family as the end-of-maze glowing marker, so
@@ -285,41 +280,38 @@ enum HallwayScene {
         doorwayMaterial.roughness.contents = 0.35
         doorwayMaterial.metalness.contents = 0.65
 
-        // Thin, neutral "grout line" so the cell-by-cell structure still
-        // reads even though every room is now the same color — same idea
-        // as the black grid lines in the 2D editor.
-        let gridLineMaterial = SCNMaterial()
-        gridLineMaterial.diffuse.contents = UIColor(white: 0.05, alpha: 1)
-        gridLineMaterial.lightingModel = .constant
+        // Builds one intersection marker centered at (x, z): a flat
+        // amber "+" (or "T"/"Y" at a 3-way) lying on the floor, one arm
+        // per open side, each arm ending in a flat triangular
+        // arrowhead pointing out into that doorway -- Eddie's "2 cris
+        // cross lines that form arrows pointing in 4 directions,"
+        // replacing the old per-doorway header bars.
+        func addIntersectionMarker(atX x: CGFloat, z: CGFloat, openNorth: Bool, openSouth: Bool, openEast: Bool, openWest: Bool) {
+            let armLength = cellSize * 0.42
+            let armThickness: CGFloat = 0.08
+            let markerY: CGFloat = 0.015 // just proud of the floor, like the old threshold lines were
+            let arrowBaseWidth: CGFloat = 0.26
+            let arrowLength: CGFloat = 0.24
 
-        // Builds one boundary marker (red header bar + floor/ceiling
-        // threshold lines) centered at (x, z). wideAlongX true = a
-        // north/south-facing boundary (the bar runs along X); false = an
-        // east/west-facing boundary (the bar runs along Z).
-        func addDoorwayMarker(atX x: CGFloat, z: CGFloat, wideAlongX: Bool) {
-            let header = wideAlongX
-                ? SCNBox(width: cellSize * 0.9, height: 0.22, length: 0.14, chamferRadius: 0.03)
-                : SCNBox(width: 0.14, height: 0.22, length: cellSize * 0.9, chamferRadius: 0.03)
-            header.materials = [doorwayMaterial]
-            let headerNode = SCNNode(geometry: header)
-            headerNode.position = SCNVector3(Float(x), Float(wallHeight - 0.15), Float(z))
-            root.addChildNode(headerNode)
+            func addArm(_ direction: Direction, dx: CGFloat, dz: CGFloat) {
+                let shaft = dx == 0
+                    ? SCNBox(width: armThickness, height: 0.02, length: armLength, chamferRadius: 0)
+                    : SCNBox(width: armLength, height: 0.02, length: armThickness, chamferRadius: 0)
+                shaft.materials = [doorwayMaterial]
+                let shaftNode = SCNNode(geometry: shaft)
+                shaftNode.position = SCNVector3(Float(x + dx * armLength / 2), Float(markerY), Float(z + dz * armLength / 2))
+                root.addChildNode(shaftNode)
 
-            let floorLine = wideAlongX
-                ? SCNBox(width: cellSize, height: 0.02, length: 0.08, chamferRadius: 0)
-                : SCNBox(width: 0.08, height: 0.02, length: cellSize, chamferRadius: 0)
-            floorLine.materials = [gridLineMaterial]
-            let floorLineNode = SCNNode(geometry: floorLine)
-            floorLineNode.position = SCNVector3(Float(x), 0.011, Float(z))
-            root.addChildNode(floorLineNode)
+                let arrowGeometry = makeArrowheadGeometry(direction: direction, baseWidth: arrowBaseWidth, length: arrowLength, material: doorwayMaterial)
+                let arrowNode = SCNNode(geometry: arrowGeometry)
+                arrowNode.position = SCNVector3(Float(x + dx * armLength), Float(markerY), Float(z + dz * armLength))
+                root.addChildNode(arrowNode)
+            }
 
-            let ceilingLine = wideAlongX
-                ? SCNBox(width: cellSize, height: 0.02, length: 0.08, chamferRadius: 0)
-                : SCNBox(width: 0.08, height: 0.02, length: cellSize, chamferRadius: 0)
-            ceilingLine.materials = [gridLineMaterial]
-            let ceilingLineNode = SCNNode(geometry: ceilingLine)
-            ceilingLineNode.position = SCNVector3(Float(x), Float(wallHeight) - 0.011, Float(z))
-            root.addChildNode(ceilingLineNode)
+            if openNorth { addArm(.north, dx: 0, dz: -1) }
+            if openSouth { addArm(.south, dx: 0, dz: 1) }
+            if openEast { addArm(.east, dx: 1, dz: 0) }
+            if openWest { addArm(.west, dx: -1, dz: 0) }
         }
 
         // The deposit half of the pick-up/deliver mechanic (Eddie,
@@ -459,24 +451,49 @@ enum HallwayScene {
 
             func panel(width: CGFloat, height: CGFloat, length: CGFloat) -> SCNNode {
                 let geo = SCNBox(width: width, height: height, length: length, chamferRadius: 0)
-                geo.materials = [destinationCubbyInteriorMaterial]
+                // Each face tiles at the hallway's brick size, even on a
+                // six-unit shaft. One stretched texture cannot fit all faces.
+                func faceMaterial(horizontal: CGFloat, vertical: CGFloat) -> SCNMaterial {
+                    let material = destinationCubbyInteriorMaterial.copy() as! SCNMaterial
+                    material.diffuse.wrapS = .repeat
+                    material.diffuse.wrapT = .repeat
+                    material.diffuse.contentsTransform = SCNMatrix4MakeScale(
+                        Float(2 * horizontal / cellSize), Float(2 * vertical / wallHeight), 1)
+                    return material
+                }
+                // SCNBox: front, right, back, left, top, bottom.
+                geo.materials = [
+                    faceMaterial(horizontal: width, vertical: height),
+                    faceMaterial(horizontal: length, vertical: height),
+                    faceMaterial(horizontal: width, vertical: height),
+                    faceMaterial(horizontal: length, vertical: height),
+                    faceMaterial(horizontal: width, vertical: length),
+                    faceMaterial(horizontal: width, vertical: length)
+                ]
                 return SCNNode(geometry: geo)
             }
 
             let cubby = SCNNode()
             cubby.position = SCNVector3(Float(wallCenterX), Float(destinationCenterY), Float(wallCenterZ))
 
-            let back = panel(width: CGFloat(halfW * 2), height: CGFloat(halfH * 2), length: CGFloat(thick))
-            back.position = SCNVector3(0, 0, -depth)
+            cubby.name = "chuteInterior"
+            // The opening leads into a vertical shaft, with no horizontal floor.
+            let shaftHeight: CGFloat = 6
+            let shaftCenter = halfH - Float(shaftHeight / 2)
+            let back = panel(width: CGFloat(halfW * 2), height: shaftHeight, length: CGFloat(thick))
+            back.position = SCNVector3(0, shaftCenter, -depth)
             let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             top.position = SCNVector3(0, halfH, -depth / 2)
-            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
-            bottom.position = SCNVector3(0, -halfH, -depth / 2)
-            let left = panel(width: CGFloat(thick), height: CGFloat(halfH * 2), length: CGFloat(depth))
-            left.position = SCNVector3(-halfW, 0, -depth / 2)
-            let right = panel(width: CGFloat(thick), height: CGFloat(halfH * 2), length: CGFloat(depth))
-            right.position = SCNVector3(halfW, 0, -depth / 2)
-            [back, top, bottom, left, right].forEach { cubby.addChildNode($0) }
+            let left = panel(width: CGFloat(thick), height: shaftHeight, length: CGFloat(depth))
+            left.position = SCNVector3(-halfW, shaftCenter, -depth / 2)
+            let right = panel(width: CGFloat(thick), height: shaftHeight, length: CGFloat(depth))
+            right.position = SCNVector3(halfW, shaftCenter, -depth / 2)
+            // The front wall continues below the mouth, enclosing the downshaft.
+            let front = panel(width: CGFloat(halfW * 2), height: shaftHeight - CGFloat(halfH * 2), length: CGFloat(thick))
+            // Recess behind the ordinary wall below the opening, not over its face.
+            front.position = SCNVector3(0, -Float(shaftHeight / 2), -0.12)
+            [back, top, left, right, front].forEach { cubby.addChildNode($0) }
+
 
             // Rather than a point light (which bled its glow onto the
             // shutter itself, then -- once isolated with categoryBitMask
@@ -495,6 +512,9 @@ enum HallwayScene {
                     material.emission.contents = material.diffuse.contents
                 }
             }
+            icon.name = "deliveryTemplate"
+            icon.isHidden = true // Empty-handed openings must show an empty shaft.
+            icon.enumerateHierarchy { node, _ in node.removeAllActions() }
             cubby.addChildNode(icon)
 
             let doorGeo = SCNBox(width: destinationDoorWidth, height: destinationDoorHeight, length: destinationDoorThickness, chamferRadius: 0.01)
@@ -533,11 +553,13 @@ enum HallwayScene {
             // this codebase's established "faces the player" local
             // direction regardless of which of the 4 ways the door
             // itself got rotated to mount.
-            let label = makeDestinationLabelNode(doorHeight: destinationDoorHeight, doorThickness: destinationDoorThickness)
+            let label = makeDestinationLabelNode(kind: kind, doorHeight: destinationDoorHeight, doorThickness: destinationDoorThickness)
             door.addChildNode(label)
 
-            root.addChildNode(cubby)
-            root.addChildNode(door)
+            let assembly = SCNNode()
+            assembly.addChildNode(cubby)
+            assembly.addChildNode(door)
+            root.addChildNode(assembly)
             return door
         }
 
@@ -561,10 +583,32 @@ enum HallwayScene {
         let elevatorDoorMaterial = makeElevatorDoorMaterial()
         let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial()
         let elevatorDoorWidth: CGFloat = 1.6 // full opening, both panels combined -- door-scaled, not shutter-scaled
-        let elevatorDoorHeight: CGFloat = 2.2 // bottom-aligned to the floor, real-door height
+        // Eddie, Sept 8, once the brick frame around the doorway
+        // was filled in (see addDoorFrame call below): "the
+        // elevator is even lower... instead of black the back wall
+        // is brick." The void-vs-brick bug is fixed, but that also
+        // made the real proportions plain to see -- 2.2 out of a
+        // 3.0 wallHeight left a 0.8 header, ~27% of the wall,
+        // noticeably more overhead brick than a real elevator door
+        // (which runs nearly to the ceiling). 2.6 leaves a 0.4
+        // header instead, ~13%, reading as a proper door frame
+        // rather than a low, small door in a tall wall.
+        let elevatorDoorHeight: CGFloat = 2.6 // bottom-aligned to the floor, real-door height
         let elevatorDoorThickness: CGFloat = 0.05
         let elevatorCenterY: CGFloat = elevatorDoorHeight / 2
-        let elevatorShaftDepth: CGFloat = 0.4
+        // Eddie, Sept 8: "its still zooming in just as much to
+        // that back wall - and all walls as its turning to the
+        // doors." Shrinking the photo (below) didn't touch this --
+        // proof the "zoom" feel is the camera's actual resting
+        // distance from every wall, not the size of what's drawn on
+        // them. The shaft was only 0.4 deep, so even dead-center the
+        // camera sat a mere 0.2 from the back wall/photo AND 0.2 from
+        // the doors after the pivot -- point-blank either way. Now
+        // as deep as the doorway is wide (a roughly square car, same
+        // 1.6 as elevatorDoorWidth), so dead-center becomes 0.8 from
+        // every wall -- 4x the breathing room, no more nose-to-the-
+        // glass feeling on the photo or on the doors at pivot's end.
+        let elevatorShaftDepth: CGFloat = 1.6
         let elevatorPanelThickness: CGFloat = 0.03
         let elevatorShaftGap: CGFloat = 0.01
         let elevatorDoorGap: CGFloat = 0.06
@@ -578,7 +622,7 @@ enum HallwayScene {
         let elevatorPanelWidth = elevatorDoorWidth / 2
         let elevatorSplitOffset = elevatorPanelWidth / 2
 
-        func addElevatorDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat) -> (left: SCNNode, right: SCNNode, direction: Direction) {
+        func addElevatorDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, floorNumber: Int, totalFloors: Int) -> (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode) {
             let halfW = Float(elevatorDoorWidth / 2)
             let halfH = Float(elevatorDoorHeight / 2)
             let depth = Float(elevatorShaftDepth)
@@ -603,6 +647,129 @@ enum HallwayScene {
             let right = panel(width: CGFloat(thick), height: CGFloat(halfH * 2), length: CGFloat(depth))
             right.position = SCNVector3(halfW, 0, -depth / 2)
             [back, top, bottom, left, right].forEach { shaft.addChildNode($0) }
+
+            // Eddie, Sept 8: "the back of the elevator wall... it
+            // should be the same thing on that wall thats there every
+            // time we step into the elevator. its their homebase...
+            // use that same pic and frame it and put it on the wall."
+            // The exact building photo from the intro screen, loaded
+            // the same bundled-file way IntroScreenView loads it
+            // (Bundle.main.path(forResource:ofType:) ->
+            // UIImage(contentsOfFile:)), so swapping in Eddie's real
+            // building photo later is just replacing BuildingIntro.png
+            // -- nothing here changes. Same frame-plus-plane recipe as
+            // addFloorMapNode's wall pictures, sized down for the
+            // elevator's own back wall. A child of shaft, so the
+            // per-direction position/rotation applied to shaft below
+            // carries it along for free. Handrails skipped for now --
+            // "may be overkill... but for now you can just get the pic
+            // in there."
+            if let buildingPhotoPath = Bundle.main.path(forResource: "BuildingIntro", ofType: "png"),
+               let buildingPhoto = UIImage(contentsOfFile: buildingPhotoPath) {
+                let photoAspect = buildingPhoto.size.height / max(buildingPhoto.size.width, 1)
+                // Eddie, Sept 8: shrinking this from 0.75 to 0.5
+                // did NOT cut the zoom down -- "its still zooming in
+                // just as much." Confirms the zoom was never about
+                // this photo's own size, only about how close the
+                // camera's fixed resting spot was to the wall it's
+                // mounted on. elevatorShaftDepth (above) now backs
+                // that resting spot off to a real distance, so this
+                // goes back to its original, actually-readable size.
+                // Eddie, Sept 8, from a screenshot at the dolly's
+                // resting spot: "the side borders of the pic...
+                // they look weird being bigger than the width
+                // [of the screen]." The camera's own fieldOfView
+                // (75) is the VERTICAL angle, so on a phone's tall,
+                // narrow portrait screen the HORIZONTAL angle is a
+                // good deal tighter -- on a typical iPhone's ~0.46
+                // width/height ratio, about 39 degrees wide versus
+                // 75 tall. At the ride's fixed ~0.77 camera-to-
+                // frame distance, that narrower horizontal frustum
+                // only has about 0.54 of clearance.
+                //
+                // Eddie, Sept 8, next report: "the borders are
+                // just overlapping the edges of the screen." 0.48
+                // fit the PHOTO itself inside that 0.54, but missed
+                // that the visible edge is the FRAME around it
+                // (photoFrameGeo below is photoWidth + 0.08), which
+                // came out to 0.56 -- wider than the 0.54 available,
+                // so of course it still clipped. 0.4 makes the
+                // frame 0.48, comfortably inside 0.54 with real
+                // margin this time, not just barely under it.
+                let photoWidth: CGFloat = 0.4
+                let photoHeight = photoWidth * photoAspect
+
+                // Same point-blank headlamp blowout as the doors --
+                // see makeElevatorDoorMaterial's comment.
+                let photoFrameMaterial = SCNMaterial()
+                photoFrameMaterial.diffuse.contents = UIColor(red: 0.55, green: 0.42, blue: 0.22, alpha: 1) // same warm brass as the doors
+                photoFrameMaterial.lightingModel = .physicallyBased
+                photoFrameMaterial.metalness.contents = 0.4
+                photoFrameMaterial.roughness.contents = 0.55
+                let photoFrameGeo = SCNBox(width: photoWidth + 0.08, height: photoHeight + 0.08, length: 0.03, chamferRadius: 0.005)
+                photoFrameGeo.materials = [photoFrameMaterial]
+                let photoFrame = SCNNode(geometry: photoFrameGeo)
+                // Eddie, Sept 8, watching the dolly-in: "its as if our
+                // vantage point is above the image, so the image moves
+                // down. it should be at eye level." It was mounted low
+                // on the wall (0.05 above shaft-center, well under the
+                // 1.6 world-space eye height the camera actually rides
+                // at -- shaft-center itself is elevatorCenterY, 1.1),
+                // so the camera was always looking down at it, worst
+                // of all right up close during the zoom. 0.5 above
+                // shaft-center puts the frame's own center at 1.6,
+                // dead level with the camera regardless of how close
+                // the dolly gets.
+                // 0.3 instead of 0.5 -- elevatorCenterY moved from
+                // 1.1 to 1.3 along with the taller door above, so
+                // this offset shrinks to match, keeping the frame's
+                // center at the same 1.6 world-space eye height
+                // (1.3 + 0.3 = 1.6, same as before's 1.1 + 0.5).
+                photoFrame.position = SCNVector3(0, 0.3, -depth + thick / 2 + 0.02)
+
+                let photoPlaneMaterial = SCNMaterial()
+                photoPlaneMaterial.diffuse.contents = buildingPhoto
+                photoPlaneMaterial.diffuse.wrapT = .clamp
+                photoPlaneMaterial.lightingModel = .constant // reads as a lit picture, not shaded by scene lights/shadows
+                let photoPlaneGeo = SCNPlane(width: photoWidth, height: photoHeight)
+                photoPlaneGeo.materials = [photoPlaneMaterial]
+                let photoPlane = SCNNode(geometry: photoPlaneGeo)
+                photoPlane.position = SCNVector3(0, 0, 0.016)
+                photoFrame.addChildNode(photoPlane)
+
+                shaft.addChildNode(photoFrame)
+            }
+
+            // Eddie, Sept 8: "that hand rail i spoke about may be
+            // necessary to confirm its an elevator. maybe just a
+            // metalic long cylinder along the wall." One per side
+            // wall, chrome-toned, running the depth of the shaft at
+            // roughly waist height -- purely decorative, no
+            // interaction, just the visual cue a real elevator car
+            // has. Handrails only, per Eddie -- no back-wall rail.
+            // Same point-blank headlamp blowout as the doors below
+            // (see makeElevatorDoorMaterial's comment) -- a near-mirror
+            // handrail sitting inches from the camera the whole ride
+            // was the biggest single contributor. Satin/brushed instead
+            // of chrome: still reads as metal, doesn't spike to white.
+            let handrailMaterial = SCNMaterial()
+            handrailMaterial.diffuse.contents = UIColor(white: 0.7, alpha: 1)
+            handrailMaterial.lightingModel = .physicallyBased
+            handrailMaterial.metalness.contents = 0.4
+            handrailMaterial.roughness.contents = 0.6
+            let handrailRadius: CGFloat = 0.015
+            let handrailY = -halfH + 0.5
+            let handrailInset: Float = 0.03
+            func addHandrail(x: Float) {
+                let geo = SCNCylinder(radius: handrailRadius, height: CGFloat(depth))
+                geo.materials = [handrailMaterial]
+                let node = SCNNode(geometry: geo)
+                node.eulerAngles.x = .pi / 2
+                node.position = SCNVector3(x, handrailY, -depth / 2)
+                shaft.addChildNode(node)
+            }
+            addHandrail(x: -halfW + handrailInset)
+            addHandrail(x: halfW - handrailInset)
 
             // Which world axis the wall itself runs along -- north/
             // south walls run east-west (world X), east/west walls run
@@ -656,10 +823,103 @@ enum HallwayScene {
                 rightDoor.eulerAngles.y = .pi / 2
             }
 
+            // Eddie, Sept 8: "the elevator doors are dropped (see
+            // all the black at the top). its as if youre slightly
+            // above the elevator." Not the camera -- this whole
+            // wall face is skipped for the elevator's own cell (see
+            // the hasWallNorth/etc conditionals further down that
+            // omit it whenever elevatorMountDirection matches), and
+            // unlike addDestinationDoor, addElevatorDoor never
+            // called addDoorFrame to fill the leftover wall back
+            // in around its own doorway. So above the 2.2-tall
+            // doors, up to the 3.0 wallHeight, there was nothing
+            // but fog/void -- reading as a black gap over doors
+            // that look like they don't reach the ceiling. Same 4
+            // brick-textured strips the destination doors and
+            // floor maps already get, sized to this doorway.
+            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: elevatorDoorWidth, doorHeight: elevatorDoorHeight, doorCenterY: elevatorCenterY)
+
+            // Eddie, Sept 7, after watching the ride play out: the old
+            // console (a centered arrow + big digit + a full row of
+            // press-style buttons, all parked at chest height dead
+            // center in the doorway) was the first thing you saw the
+            // instant the doors opened -- blocking the plain back wall
+            // he actually wants there ("we need to decide what we want
+            // to put there"), and turning every step forward into "a
+            // zoom into those buttons." Replaced with what he asked
+            // for instead: "just a small row of numbers along the top
+            // ... we really want to see the elevator doors from the
+            // inside." One small digit per floor, mounted high near
+            // the door's own header instead of dead center, so the
+            // doorway itself stays the main thing in view. Whichever
+            // floor is current starts lit; TapNavigationController's
+            // lightElevatorPanel just shifts that lit digit from this
+            // floor to the next one as the ride plays out.
+            let indicatorY = Float(halfH) * 0.86
+            let indicatorZ = Float(-0.05)
+            let indicatorSpacing: Float = 0.14
+
+            func billboardedText(_ string: String, sizeFactor: CGFloat, color: UIColor) -> SCNNode {
+                let text = SCNText(string: string, extrusionDepth: 0.6)
+                text.font = UIFont.boldSystemFont(ofSize: 32)
+                text.flatness = 0.1
+                let material = SCNMaterial()
+                material.diffuse.contents = color
+                material.emission.contents = UIColor(white: 0.05, alpha: 1)
+                material.lightingModel = .physicallyBased
+                material.isDoubleSided = true
+                text.materials = [material]
+                let node = SCNNode(geometry: text)
+                let (minBound, maxBound) = text.boundingBox
+                let w = maxBound.x - minBound.x
+                let h = maxBound.y - minBound.y
+                node.pivot = SCNMatrix4MakeTranslation(minBound.x + w / 2, minBound.y + h / 2, 0)
+                let scale = h > 0 ? Float(elevatorDoorHeight * sizeFactor) / h : 1
+                node.scale = SCNVector3(scale, scale, scale)
+                let billboard = SCNBillboardConstraint()
+                billboard.freeAxes = .Y
+                node.constraints = [billboard]
+                return node
+            }
+
+            var buttonNodes: [Int: SCNNode] = [:]
+            let indicatorStartX = -indicatorSpacing * Float(totalFloors - 1) / 2
+            for f in 1...max(totalFloors, 1) {
+                let digitAnchor = SCNNode()
+                digitAnchor.position = SCNVector3(indicatorStartX + indicatorSpacing * Float(f - 1), indicatorY, indicatorZ)
+                let digitNode = billboardedText("\(f)", sizeFactor: 0.08, color: UIColor(white: 0.7, alpha: 1))
+                if f == floorNumber {
+                    digitNode.geometry?.firstMaterial?.emission.contents = UIColor(red: 1.0, green: 0.78, blue: 0.2, alpha: 1)
+                }
+                // Eddie, Sept 8: "the numbers still appear at the top
+                // of the back wall. get rid of them." Hidden at build
+                // time -- TapNavigationController.lightElevatorPanel
+                // is the one place that reveals them again, right as
+                // the ride turns to face the doors.
+                digitNode.opacity = 0
+                digitAnchor.addChildNode(digitNode)
+                shaft.addChildNode(digitAnchor)
+                buttonNodes[f] = digitNode
+            }
+
             root.addChildNode(shaft)
             root.addChildNode(leftDoor)
             root.addChildNode(rightDoor)
-            return (left: leftDoor, right: rightDoor, direction: direction)
+            // Eddie, Sept 9: "tapping the elevator doors that
+            // first time sometimes takes a while." The shaft's
+            // own interior (back wall, side panels, photo, hand-
+            // rails) sits behind the closed doors and is never
+            // actually rendered until the FIRST open -- that's
+            // exactly when SceneKit is forced to compile those
+            // materials' shaders and upload the photo's texture
+            // to the GPU for the first time, which is the hitch.
+            // Returning `shaft` here (previously just added to
+            // the scene and never handed back) lets ContentView
+            // warm all of that up in the background the moment
+            // the floor loads, well before the player ever
+            // reaches the doors -- see view.prepare(...) in
+            // HallwaySceneView.makeUIView.
+            return (left: leftDoor, right: rightDoor, direction: direction, buttonNodes: buttonNodes, shaft: shaft)
         }
 
         // Wall-mounted, not a deep cubby like the destination doors --
@@ -676,9 +936,9 @@ enum HallwayScene {
         // need this specific node, not its frame.
         func addFloorMapNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage) -> SCNNode {
             let aspect = texture.size.height / max(texture.size.width, 1)
-            var panelWidth: CGFloat = 0.5
+            var panelWidth: CGFloat = 0.7
             var panelHeight = panelWidth * aspect
-            let maxPanelHeight: CGFloat = 0.7
+            let maxPanelHeight: CGFloat = 0.98
             if panelHeight > maxPanelHeight {
                 panelHeight = maxPanelHeight
                 panelWidth = panelHeight / aspect
@@ -689,7 +949,7 @@ enum HallwayScene {
             frameMaterial.lightingModel = .physicallyBased
             frameMaterial.metalness.contents = 0.6
             frameMaterial.roughness.contents = 0.4
-            let frameGeo = SCNBox(width: panelWidth + 0.1, height: panelHeight + 0.1, length: 0.04, chamferRadius: 0.01)
+            let frameGeo = SCNBox(width: panelWidth + 0.14, height: panelHeight + 0.14, length: 0.04, chamferRadius: 0.01)
             frameGeo.materials = [frameMaterial]
             let frame = SCNNode(geometry: frameGeo)
 
@@ -709,12 +969,177 @@ enum HallwayScene {
             plane.position = SCNVector3(0, 0, 0.021)
             frame.addChildNode(plane)
 
+            // Legend plaque, mounted BELOW the frame now instead of a
+            // single "You Are Here" line above it -- Eddie, Sept 7:
+            // "get rid of the you are here plaque above, and make it
+            // the first item in the plaque we put at the bottom... a
+            // legend... a list." Row 1 (red) is that same "You Are
+            // Here," row 2 (black) is new -- the elevator dot already
+            // existed on the map itself but was never explained. Rows
+            // 3/4 (green) are conditional on this floor actually having
+            // a mission: what to find, and -- if this floor also has a
+            // delivery destination for it -- where to bring it. Eddie,
+            // Sept 7: "a mission may have more than one item in the
+            // map -- but 4 max," which is exactly what 2 fixed + 2
+            // conditional rows caps out at. A CHILD of frame, same as
+            // the plaque it replaces, so it inherits frame's own
+            // per-direction position/rotation for free.
+            let hasMissionItem = missionObjectKind != nil
+            let hasMissionDestination = missionObjectKind != nil && (destinations.values.contains(missionObjectKind!) || (missionObjectKind == .envelope && !roomDoors.isEmpty))
+            let legendTexture = makeMapLegendTexture(hasMissionItem: hasMissionItem, missionItemLabel: missionObjectKind?.missionLegendLabel ?? "", hasMissionDestination: hasMissionDestination)
+            let legendAspect = legendTexture.size.height / max(legendTexture.size.width, 1)
+            let legendWidth = (panelWidth / 1.4) * 0.85
+            let legendHeight = legendWidth * legendAspect
+            let legendGap: CGFloat = 0.09 // same gap the old plaque used
+            let legendMaterial = SCNMaterial()
+            legendMaterial.diffuse.contents = legendTexture
+            legendMaterial.lightingModel = .constant
+            let legendGeo = SCNPlane(width: legendWidth, height: legendHeight)
+            legendGeo.materials = [legendMaterial]
+            let legendNode = SCNNode(geometry: legendGeo)
+            legendNode.position = SCNVector3(0, Float(-(panelHeight / 2 + legendGap + legendHeight / 2)), 0.021)
+            frame.addChildNode(legendNode)
+
             // Same fix the destination chute just got (Eddie, Sept 5:
             // "the background texture is being used to render the
             // inside of the chute container") -- addWall was skipped
             // for this cell's ENTIRE wall face, not just the picture's
             // own small footprint, so without this the rest of that
             // wall would be empty space with fog showing through it.
+            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.14, doorHeight: panelHeight + 0.14, doorCenterY: wallHeight * 0.55 + 0.2)
+
+            frame.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55 + 0.2), Float(wallCenterZ))
+            switch direction {
+            case .north:
+                frame.position.z += Float(0.07)
+            case .south:
+                frame.position.z -= Float(0.07)
+                frame.eulerAngles.y = .pi
+            case .east:
+                frame.position.x -= Float(0.07)
+                frame.eulerAngles.y = -.pi / 2
+            case .west:
+                frame.position.x += Float(0.07)
+                frame.eulerAngles.y = .pi / 2
+            }
+
+            root.addChildNode(frame)
+            return plane
+        }
+
+        // A Floor Mission sign -- same wall-mounted-picture-frame shape
+        // as addFloorMapNode just above, sized bigger (a heading +
+        // paragraph needs more room than a small map thumbnail) and with
+        // no "You Are Here" plaque. Doesn't return anything -- unlike
+        // the floor map's plane, nothing ever needs to push a refreshed
+        // texture to this later (the mission text is baked once, at
+        // build time, and never changes live the way the map's tracking
+        // dot does), so there's no reason for build()'s own return tuple
+        // to track these nodes at all.
+        func addMissionSignNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage) {
+            let aspect = texture.size.height / max(texture.size.width, 1)
+            // 0.75, not 1.1 -- see the patch-script comment above this
+            // call site for the "why" (portrait FOV is narrow; this
+            // was overflowing the screen width edge to edge up close).
+            var panelWidth: CGFloat = 0.75
+            var panelHeight = panelWidth * aspect
+            let maxPanelHeight: CGFloat = 1.5
+            if panelHeight > maxPanelHeight {
+                panelHeight = maxPanelHeight
+                panelWidth = panelHeight / aspect
+            }
+
+            let frameMaterial = SCNMaterial()
+            frameMaterial.diffuse.contents = UIColor(red: 0.3, green: 0.22, blue: 0.1, alpha: 1)
+            frameMaterial.lightingModel = .physicallyBased
+            frameMaterial.metalness.contents = 0.6
+            frameMaterial.roughness.contents = 0.4
+            let frameGeo = SCNBox(width: panelWidth + 0.12, height: panelHeight + 0.12, length: 0.04, chamferRadius: 0.01)
+            frameGeo.materials = [frameMaterial]
+            let frame = SCNNode(geometry: frameGeo)
+
+            let planeMaterial = SCNMaterial()
+            planeMaterial.diffuse.contents = texture
+            planeMaterial.diffuse.wrapT = .clamp
+            planeMaterial.lightingModel = .constant // reads as a lit sign, not shaded by scene lights/shadows
+            let planeGeo = SCNPlane(width: panelWidth, height: panelHeight)
+            planeGeo.materials = [planeMaterial]
+            let plane = SCNNode(geometry: planeGeo)
+            plane.position = SCNVector3(0, 0, 0.021)
+            frame.addChildNode(plane)
+
+            // Same fix the destination chute/floor map already needed
+            // (Eddie, Sept 5: "the background texture is being used to
+            // render the inside of the chute container") -- addWall was
+            // skipped for this cell's ENTIRE wall face via
+            // missionDirection above, not just the sign's own small
+            // footprint.
+            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.12, doorHeight: panelHeight + 0.12, doorCenterY: wallHeight * 0.55)
+
+            frame.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55), Float(wallCenterZ))
+            switch direction {
+            case .north:
+                frame.position.z += Float(0.07)
+            case .south:
+                frame.position.z -= Float(0.07)
+                frame.eulerAngles.y = .pi
+            case .east:
+                frame.position.x -= Float(0.07)
+                frame.eulerAngles.y = -.pi / 2
+            case .west:
+                frame.position.x += Float(0.07)
+                frame.eulerAngles.y = .pi / 2
+            }
+
+            root.addChildNode(frame)
+        }
+
+        // A decorative Picture -- same wall-mounted-picture-frame shape
+        // as addFloorMapNode/addMissionSignNode above, sized like the
+        // floor map (a snapshot-sized photo, not a full sign). Eddie,
+        // Sept 9: "unlike trash chutes and sim mission objects, pictures
+        // are there for esthetic reasons only... not anything that has
+        // to be solved - just looked at." No legend, nothing to push a
+        // live refresh to later (same as the mission sign) -- the ONE
+        // difference from both of those is the texture argument here is
+        // a different random photo per call, not one shared baked/still
+        // texture, so two pictures placed on the same floor will most
+        // likely show two different photos, not the same one twice.
+        func addPictureNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage) -> SCNMaterial {
+            let aspect = texture.size.height / max(texture.size.width, 1)
+            var panelWidth: CGFloat = 0.6
+            var panelHeight = panelWidth * aspect
+            let maxPanelHeight: CGFloat = 0.85
+            if panelHeight > maxPanelHeight {
+                panelHeight = maxPanelHeight
+                panelWidth = panelHeight / aspect
+            }
+
+            let frameMaterial = SCNMaterial()
+            frameMaterial.diffuse.contents = UIColor(red: 0.3, green: 0.22, blue: 0.1, alpha: 1)
+            frameMaterial.lightingModel = .physicallyBased
+            frameMaterial.metalness.contents = 0.6
+            frameMaterial.roughness.contents = 0.4
+            let frameGeo = SCNBox(width: panelWidth + 0.1, height: panelHeight + 0.1, length: 0.04, chamferRadius: 0.01)
+            frameGeo.materials = [frameMaterial]
+            let frame = SCNNode(geometry: frameGeo)
+
+            let planeMaterial = SCNMaterial()
+            planeMaterial.diffuse.contents = texture
+            planeMaterial.diffuse.wrapT = .clamp
+            planeMaterial.lightingModel = .constant // reads as a lit photo, not shaded by scene lights/shadows
+            let planeGeo = SCNPlane(width: panelWidth, height: panelHeight)
+            planeGeo.materials = [planeMaterial]
+            let plane = SCNNode(geometry: planeGeo)
+            plane.position = SCNVector3(0, 0, 0.021)
+            frame.addChildNode(plane)
+
+            // Same fix every other wall-mounted picture frame needs
+            // (Eddie, Sept 5: "the background texture is being used to
+            // render the inside of the chute container") -- addWall was
+            // skipped for this cell's entire wall face via
+            // pictureDirection above, not just this frame's own small
+            // footprint.
             addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.1, doorHeight: panelHeight + 0.1, doorCenterY: wallHeight * 0.55)
 
             frame.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55), Float(wallCenterZ))
@@ -733,7 +1158,7 @@ enum HallwayScene {
             }
 
             root.addChildNode(frame)
-            return plane
+            return planeMaterial
         }
 
         for coord in cells {
@@ -831,8 +1256,16 @@ enum HallwayScene {
 
             // A true dead end has exactly one open side — the way you
             // came in, and the only way back out. The wall directly
-            // opposite that opening is the one you end up staring at,
-            // so that's the one that gets the full-picture treatment.
+            // opposite that opening is the one you end up staring at
+            // -- kept only as a placement PREFERENCE for a destination
+            // cubby or the elevator (below): Eddie, Sept 7, found this
+            // wall was ALSO getting special visual treatment (a
+            // clamped, untiled "full picture" texture instead of the
+            // normal tiled one everyone else gets), and with left/right
+            // walls present that read as bigger/brighter than its
+            // neighbors purely from the different tiling -- not
+            // wanted, so that visual distinction is gone; every wall
+            // (dead-end or not) now uses the exact same material.
             let openDirs: [Direction] = [
                 !hasWallNorth ? .north : nil,
                 !hasWallSouth ? .south : nil,
@@ -887,37 +1320,43 @@ enum HallwayScene {
             // as it already does for destinations/the elevator.
             let mapDirection = floorMaps[coord]
 
+            // Same idea once more, for the Floor Mission sign -- manually
+            // placed (Eddie, Sept 7: "just add it to the thingies on the
+            // map/edit view so i can put mission statement banners
+            // wherever i want"), same wall-skip check as the floor map.
+            let missionDirection = missionSigns[coord]
+
+            // Same idea once more, for a decorative Picture -- manually
+            // placed (Eddie, Sept 9: "make the picture appear as a
+            // picture on the wall"), same wall-skip check as the floor
+            // map/mission sign.
+            let pictureDirection = pictures[coord]
+
             // One fresh material per wall segment (see the comment
             // above wallMaterials) — either a dead-end cap or a regular
             // wall material, added to its matching array so the live
             // theme swap in ContentView's Coordinator can reach it.
-            func addWall(width: CGFloat, length: CGFloat, x: CGFloat, z: CGFloat, isCap: Bool) {
+            func addWall(width: CGFloat, length: CGFloat, x: CGFloat, z: CGFloat) {
                 let geo = SCNBox(width: width, height: wallHeight, length: length, chamferRadius: 0)
-                if isCap {
-                    let material = makeDeadEndCapMaterial(imageName: theme.wallImageName)
-                    geo.materials = [material]
-                    deadEndCapMaterials.append(material)
-                } else {
-                    let material = makeWallMaterial(imageName: theme.wallImageName)
-                    geo.materials = [material]
-                    wallMaterials.append(material)
-                }
+                let material = makeWallMaterial(imageName: theme.wallImageName)
+                geo.materials = [material]
+                wallMaterials.append(material)
                 let node = SCNNode(geometry: geo)
                 node.position = SCNVector3(Float(x), Float(wallHeight / 2), Float(z))
                 root.addChildNode(node)
             }
 
-            if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north {
-                addWall(width: cellSize, length: 0.1, x: x, z: z - half, isCap: capSide == .north)
+            if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && pictureDirection != .north {
+                addWall(width: cellSize, length: 0.1, x: x, z: z - half)
             }
-            if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south {
-                addWall(width: cellSize, length: 0.1, x: x, z: z + half, isCap: capSide == .south)
+            if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south && missionDirection != .south && pictureDirection != .south {
+                addWall(width: cellSize, length: 0.1, x: x, z: z + half)
             }
-            if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east {
-                addWall(width: 0.1, length: cellSize, x: x + half, z: z, isCap: capSide == .east)
+            if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east && missionDirection != .east && pictureDirection != .east {
+                addWall(width: 0.1, length: cellSize, x: x + half, z: z)
             }
-            if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west {
-                addWall(width: 0.1, length: cellSize, x: x - half, z: z, isCap: capSide == .west)
+            if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && pictureDirection != .west {
+                addWall(width: 0.1, length: cellSize, x: x - half, z: z)
             }
 
             // Doorway markers — only at TRUE intersections (3 or 4 open
@@ -930,10 +1369,7 @@ enum HallwayScene {
             // so arriving there it's obvious you've hit a choice.
             let openSides = [!hasWallNorth, !hasWallSouth, !hasWallEast, !hasWallWest].filter { $0 }.count
             if openSides >= 3 {
-                if !hasWallNorth { addDoorwayMarker(atX: x, z: z - half, wideAlongX: true) }
-                if !hasWallSouth { addDoorwayMarker(atX: x, z: z + half, wideAlongX: true) }
-                if !hasWallEast { addDoorwayMarker(atX: x + half, z: z, wideAlongX: false) }
-                if !hasWallWest { addDoorwayMarker(atX: x - half, z: z, wideAlongX: false) }
+                addIntersectionMarker(atX: x, z: z, openNorth: !hasWallNorth, openSouth: !hasWallSouth, openEast: !hasWallEast, openWest: !hasWallWest)
             }
 
             // First slice of the pick-up/deliver mechanic — this pass
@@ -942,8 +1378,8 @@ enum HallwayScene {
             // judged before any carrying/delivering logic gets built on
             // top.
             if let kind = objects[coord] {
-                let node = makeObjectNode(kind, size: cellSize * 0.22)
-                node.position = SCNVector3(Float(x), Float(wallHeight * 0.25), Float(z))
+                let node = kind == .envelope ? makeEnvelopeNode(roomNumber: itemRooms[coord]) : makeObjectNode(kind, size: cellSize * 0.22)
+                node.position = SCNVector3(Float(x), Float(wallHeight * (kind == .envelope ? 0.4 : 0.25)), Float(z))
                 root.addChildNode(node)
                 objectNodes[coord] = node
             }
@@ -981,7 +1417,7 @@ enum HallwayScene {
                 case .east: (wx, wz) = (x + half, z)
                 case .west: (wx, wz) = (x - half, z)
                 }
-                elevatorDoors = addElevatorDoor(direction: mountDirection, wallCenterX: wx, wallCenterZ: wz)
+                elevatorDoors = addElevatorDoor(direction: mountDirection, wallCenterX: wx, wallCenterZ: wz, floorNumber: floorNumber, totalFloors: totalFloors)
             }
 
             let xLower = x - half + (hasWallWest ? margin : 0)
@@ -1001,6 +1437,12 @@ enum HallwayScene {
         // already scrubs exitSigns for that cell, but a stale save file
         // could in principle predate that) is skipped rather than
         // built floating in a wall.
+        for door in roomDoors.values {
+            let neighbor = GridCoordinate(row: door.coord.row + door.direction.delta.row, col: door.coord.col + door.direction.delta.col)
+            guard cells.contains(door.coord), !cells.contains(neighbor) else { continue }
+            root.addChildNode(makeRoomDoorNode(door, cellSize: cellSize))
+        }
+
         for (coord, direction) in exitSigns {
             guard cells.contains(coord) else { continue }
             let x = worldX(coord.col)
@@ -1075,7 +1517,7 @@ enum HallwayScene {
             // (below) whenever currentCell changes afterward, so the red
             // dot tracks you live from here on -- see its
             // refreshFloorMapTexture().
-            let mapTexture = makeFloorMapTexture(cells: cells, end: end, maxRow: maxRow, maxCol: maxCol, playerAt: start)
+            let mapTexture = makeFloorMapTexture(cells: cells, end: end, maxRow: maxRow, maxCol: maxCol, playerAt: start, missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), roomDoors: roomDoors, itemRooms: itemRooms)
             for (coord, direction) in floorMaps {
                 guard cells.contains(coord) else { continue }
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
@@ -1091,6 +1533,76 @@ enum HallwayScene {
                 }
                 let plane = addFloorMapNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: mapTexture)
                 floorMapPlaneNodes.append(plane)
+            }
+        }
+
+        // The Floor Mission sign -- manually placed the same way floor
+        // maps are (Eddie, Sept 7: "just add it to the thingies on the
+        // map/edit view so i can put mission statement banners wherever
+        // i want... much simpler (just like the wall maps)"). One
+        // shared heading+body texture baked once per floor (static
+        // text, no live per-frame refresh needed unlike the map's
+        // tracking dot), same solid-wall-required check as floor maps.
+        if !missionSigns.isEmpty {
+            let missionTexture = makeMissionSignTexture(heading: missionHeading, body: missionBody)
+            for (coord, direction) in missionSigns {
+                guard cells.contains(coord) else { continue }
+                guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
+                let signX = worldX(coord.col)
+                let signZ = worldZ(coord.row)
+                let wx: CGFloat
+                let wz: CGFloat
+                switch direction {
+                case .north: (wx, wz) = (signX, signZ - half)
+                case .south: (wx, wz) = (signX, signZ + half)
+                case .east: (wx, wz) = (signX + half, signZ)
+                case .west: (wx, wz) = (signX - half, signZ)
+                }
+                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture)
+            }
+        }
+
+        // Decorative Pictures -- manually placed the same way floor
+        // maps/mission signs are (Eddie, Sept 9: "make the picture
+        // appear as a picture on the wall (like we do to the mission
+        // and maps)... when a picture is on a wall, grab a random
+        // picture from that folder"). Unlike those two, no ONE shared
+        // texture is baked up front -- randomPictureImage() is called
+        // fresh inside the loop, once per placement, so a floor with
+        // several pictures mounted around it most likely shows several
+        // different photos, not the same one repeated.
+        var cameraRollMaterials: [SCNMaterial] = []
+        if !pictures.isEmpty {
+            for (coord, direction) in pictures {
+                guard cells.contains(coord) else { continue }
+                guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
+                guard let pictureTexture = randomPictureImage() else { continue }
+                let picX = worldX(coord.col)
+                let picZ = worldZ(coord.row)
+                let wx: CGFloat
+                let wz: CGFloat
+                switch direction {
+                case .north: (wx, wz) = (picX, picZ - half)
+                case .south: (wx, wz) = (picX, picZ + half)
+                case .east: (wx, wz) = (picX + half, picZ)
+                case .west: (wx, wz) = (picX - half, picZ)
+                }
+                let texture = Self.framedPhoto(pictureTexture)
+                let material = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture)
+                if picturesUseCameraRoll { cameraRollMaterials.append(material) }
+            }
+        }
+
+        if !cameraRollMaterials.isEmpty {
+            // Weak references let a discarded floor go away during an iCloud download.
+            let applyImages: [(UIImage?) -> Void] = cameraRollMaterials.map { material in
+                { [weak material] image in
+                    guard let material, let image else { return }
+                    material.diffuse.contents = Self.framedPhoto(image)
+                }
+            }
+            PhotoRollProvider.shared.randomImages(count: applyImages.count) { index, image in
+                applyImages[index](image)
             }
         }
 
@@ -1190,7 +1702,7 @@ enum HallwayScene {
         // marks the spot, and reads a lot more like "the mechanism
         // that takes you to the next floor" than a stray ball did.
 
-        return (scene, cameraNode, walkableRects, wallMaterials, floorMaterial, ceilingMaterial, deadEndCapMaterials, objectNodes, destinationNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes)
+        return (scene, cameraNode, walkableRects, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes)
     }
 
     // MARK: - Materials (unchanged from Prototype 1)
@@ -1231,13 +1743,46 @@ enum HallwayScene {
     /// bundled photo, looked up the same way every existing theme's jpg
     /// already was (this is exactly the lookup that used to be written
     /// out, separately, at every call site below AND in ContentView's
-    /// Coordinator.applySurface/applyDeadEndCap; centralizing it here
+    /// Coordinator.applySurface; centralizing it here
     /// means the office theme (or any future procedural one) only has
     /// to be taught to ONE place instead of several that have to be kept
     /// in sync by hand), or, for the two sentinel names above, a
     /// generated gradient. nil (missing bundle file, or no imageName at
     /// all) is still nil -- every caller already has its own flat
     /// fallback color for that case.
+    /// Every bundled decorative-picture filename (no extension --
+    /// loaded as "<name>.jpg", same Bundle.main.path(forResource:ofType:)
+    /// lookup every other bundled photo here already uses). Eddie, Sept
+    /// 9's first batch of 9.
+    private static let pictureAssetNames: [String] = [
+        "IMG_7416", "IMG_7439", "IMG_7487", "IMG_7598", "IMG_7604",
+        "IMG_7605", "IMG_7606", "IMG_7607", "IMG_7608",
+    ]
+
+    /// CSS-cover equivalent for the 0.6 × 0.85 portrait picture opening.
+    /// Scale uniformly to fill it, center the image, and clip the overflow.
+    /// Both bundled and camera-roll photos use the same frame and crop.
+    private static func framedPhoto(_ image: UIImage) -> UIImage {
+        let size = CGSize(width: 512, height: 512 * 0.85 / 0.6)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor(white: 0.08, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            let scale = max(size.width / max(image.size.width, 1), size.height / max(image.size.height, 1))
+            let width = image.size.width * scale
+            let height = image.size.height * scale
+            image.draw(in: CGRect(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height))
+        }
+    }
+
+    private static func randomPictureImage() -> UIImage? {
+        guard let name = pictureAssetNames.randomElement(),
+              let path = Bundle.main.path(forResource: name, ofType: "jpg") else { return nil }
+        return UIImage(contentsOfFile: path)
+    }
+
     static func resolveThemeImage(_ imageName: String?) -> UIImage? {
         guard let imageName else { return nil }
         switch imageName {
@@ -1355,6 +1900,15 @@ enum HallwayScene {
             return makeTrashCanNode(size: size)
         case .cash100:
             return makeCash100Node(size: size)
+        case .envelope:
+            return makeEnvelopeNode(size: size)
+        case .key:
+            // Keep the existing key object renderable while its mission evolves.
+            return makeIconNode(
+                pathData: "M256 24 A112 112 0 1 1 208 237 L208 488 L304 488 L304 440 L264 440 L264 400 L304 400 L304 237 A112 112 0 0 1 256 24 Z M256 80 A56 56 0 1 0 256 192 A56 56 0 1 0 256 80 Z",
+                nativeWidth: 512, nativeHeight: 512, size: size,
+                diffuseColor: UIColor(red: 0.95, green: 0.72, blue: 0.2, alpha: 1),
+                emissionColor: UIColor(red: 0.3, green: 0.18, blue: 0.02, alpha: 1))
         }
     }
 
@@ -1407,11 +1961,37 @@ enum HallwayScene {
     /// fixtures read as different things at a glance. Eddie, Sept 5:
     /// "make it look different (maybe diff color metal)."
     private static func makeElevatorDoorMaterial() -> SCNMaterial {
+        // Eddie, Sept 8, from a run of slow-mo screenshots: stepping
+        // into the shaft and turning to face these doors again "seems
+        // to zoom in real tight and all i see is complete white."
+        // Nothing was actually zooming -- see the headlamp's own
+        // comment a few hundred lines down, on the exact same
+        // point-blank-and-square-on blowout, from the SAME .omni light
+        // riding on the camera. That fix shrank the LIGHT's spiking
+        // component; this is the other half of the same fix, on the
+        // MATERIAL side -- full metalness (1.0) turns this into a
+        // near-mirror, and the 0.4-deep elevator shaft puts every
+        // surface in it well inside the headlamp's unattenuated
+        // "start distance," something no ordinary hallway wall (many
+        // cells away) ever triggers. Dialed back so the doors still
+        // read as metal without spiking to a blown-out highlight at
+        // arm's length.
+        // Eddie, Sept 8: "the pivot ends looking at the bigtime zoomed
+        // in elev doors (where the white from the light takes up a
+        // large part of the doors)." The camera's fixed dead-center
+        // position (see playElevatorRide) puts it exactly 0.2 from
+        // these doors for the whole dwell + pivot, same distance as
+        // the back-wall photo -- close enough that even dimmed light
+        // can still catch a metalness-0.55 surface's own specular
+        // reflection dead-on. Metalness down to 0.2, roughness up to
+        // 0.65 -- reads as painted metal with a little sheen instead
+        // of a near-mirror, which is what actually stops it from
+        // flaring regardless of exactly how bright the lights are.
         let m = SCNMaterial()
         m.diffuse.contents = UIColor(red: 0.55, green: 0.42, blue: 0.22, alpha: 1)
         m.lightingModel = .physicallyBased
-        m.metalness.contents = 1.0
-        m.roughness.contents = 0.3
+        m.metalness.contents = 0.2
+        m.roughness.contents = 0.65
         return m
     }
 
@@ -1421,8 +2001,20 @@ enum HallwayScene {
     /// glimpse through open elevator doors never gets mistaken for a
     /// destination cubby.
     private static func makeElevatorShaftMaterial() -> SCNMaterial {
+        // Eddie, Sept 8: "back wall... turns black for some reason."
+        // This panel was always counting on getting hit near
+        // point-blank by the FULL headlamp to read as dark charcoal
+        // rather than black -- fine as long as the ride's dimming (see
+        // playElevatorRide) only ever applied later, at a safe
+        // distance. Now that the whole ride dims from the start, this
+        // material needs enough of its own reflectance to still read
+        // as a visible (if moody) dark surface under that dimmer
+        // light, rather than depending on exactly when the scene
+        // happens to dim relative to how close the camera is. 0.03 ->
+        // 0.10 -- still reads as dark, matte, unremarkable metal
+        // panel, not a lit one.
         let m = SCNMaterial()
-        m.diffuse.contents = UIColor(white: 0.03, alpha: 1)
+        m.diffuse.contents = UIColor(white: 0.10, alpha: 1)
         m.lightingModel = .physicallyBased
         m.metalness.contents = 0.0
         m.roughness.contents = 0.9
@@ -1447,8 +2039,8 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, maxRow: Int, maxCol: Int, playerAt: GridCoordinate) -> UIImage {
-        let cellPx: CGFloat = 22
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, maxRow: Int, maxCol: Int, playerAt: GridCoordinate, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:]) -> UIImage {
+        let cellPx: CGFloat = 48
         let margin: CGFloat = 16
         let width = CGFloat(maxCol + 1) * cellPx + margin * 2
         let height = CGFloat(maxRow + 1) * cellPx + margin * 2
@@ -1499,6 +2091,25 @@ enum HallwayScene {
             elevatorColor.setFill()
             cg.fillEllipse(in: elevatorRect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
 
+            // Green dots for this floor's mission -- whatever's still
+            // out there to find (missionItemCells, shrinks live as you
+            // pick things up -- see TapNavigationController.
+            // refreshFloorMapTexture()) and wherever it gets delivered
+            // (missionDestinationCells, fixed). Same legend row these
+            // match -- see makeMapLegendTexture below.
+            let missionColor = UIColor(red: 0.15, green: 0.65, blue: 0.25, alpha: 1)
+            missionColor.setFill()
+            for coord in missionItemCells {
+                let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
+                cg.fillEllipse(in: rect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+            }
+
+            UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1).setFill()
+            for coord in missionDestinationCells {
+                let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
+                cg.fillEllipse(in: rect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+            }
+
             // A LIVE dot for wherever you actually are right now, as
             // opposed to the fixed elevator location above -- Eddie,
             // Sept 6: "the you-are-here wall maps show where the
@@ -1514,7 +2125,22 @@ enum HallwayScene {
             // TapNavigationController.refreshFloorMapTexture(), the
             // "real additional plumbing" this comment used to say was
             // saved for later.
-            let playerColor = UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1)
+            let centerStyle = NSMutableParagraphStyle()
+            centerStyle.alignment = .center
+            for door in roomDoors.values {
+                let rect = CGRect(x: margin + CGFloat(door.coord.col) * cellPx + 2, y: margin + CGFloat(door.coord.row) * cellPx + 2, width: cellPx - 4, height: cellPx - 4)
+                UIColor(red: 0.4, green: 0.22, blue: 0.1, alpha: 1).setFill()
+                cg.fill(rect)
+                ("\(door.roomNumber)" as NSString).draw(in: rect.offsetBy(dx: 0, dy: 9), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.white, .paragraphStyle: centerStyle])
+            }
+            for coord in missionItemCells {
+                guard let room = itemRooms[coord] else { continue }
+                let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx + 2, y: margin + CGFloat(coord.row) * cellPx + 10, width: cellPx - 4, height: 28)
+                UIColor.white.setFill(); cg.fill(rect)
+                ("\(room)" as NSString).draw(in: rect, withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.black, .paragraphStyle: centerStyle])
+            }
+
+            let playerColor = UIColor(red: 0.1, green: 0.35, blue: 0.95, alpha: 1)
             let playerRect = CGRect(x: margin + CGFloat(playerAt.col) * cellPx, y: margin + CGFloat(playerAt.row) * cellPx, width: cellPx, height: cellPx)
             playerColor.setFill()
             cg.fillEllipse(in: playerRect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
@@ -1534,29 +2160,101 @@ enum HallwayScene {
         }
     }
 
-    private static func makeDeadEndCapMaterial(imageName: String?) -> SCNMaterial {
-        let m = SCNMaterial()
-        if let image = resolveThemeImage(imageName) {
-            m.diffuse.contents = image
-            m.diffuse.wrapS = .clamp
-            m.diffuse.wrapT = .clamp
-            m.diffuse.contentsTransform = SCNMatrix4Identity
-        } else {
-            m.diffuse.contents = wallFallbackColor
+    /// A small brass "● You Are Here" legend mounted just under each
+    /// wall map's own frame -- Eddie, Sept 6: "under the map frame, put
+    /// a plaque or something with the text 'You Are Here' followed by
+    /// the red ball." The live red dot is already baked into the map
+    /// picture itself (see makeFloorMapTexture above), but nothing on
+    /// the wall previously explained what that dot meant at a glance --
+    /// this is the same idea a real building directory uses, pairing
+    /// its floor plan with a small fixed legend below it.
+    private static func makeMapLegendTexture(hasMissionItem: Bool, missionItemLabel: String, hasMissionDestination: Bool) -> UIImage {
+        struct LegendRow {
+            let color: UIColor
+            let text: String
         }
-        // Eddie, Sept 5: this dead-end cap wall rendered noticeably
-        // BRIGHTER than the ordinary walls flanking it -- "it should be
-        // darker." Root cause: .constant renders a material's raw
-        // diffuse color completely unshaded, so it never dims the way
-        // every ordinary .physicallyBased wall does under this scene's
-        // real lighting/falloff -- exactly the mismatch on-device. The
-        // original reasoning (this used to dodge washout at close
-        // range) turned out to run the other way in practice. Now
-        // matches makeSurfaceMaterial's own wall treatment exactly.
-        m.lightingModel = .physicallyBased
-        m.roughness.contents = 0.9
-        m.metalness.contents = 0.0
-        return m
+        let missionColor = UIColor(red: 0.15, green: 0.65, blue: 0.25, alpha: 1)
+        var rows: [LegendRow] = [
+            LegendRow(color: UIColor(red: 0.1, green: 0.35, blue: 0.95, alpha: 1), text: "You Are Here"),
+            LegendRow(color: UIColor(white: 0.05, alpha: 1), text: "Elevator"),
+        ]
+        if hasMissionItem {
+            rows.append(LegendRow(color: missionColor, text: missionItemLabel))
+        }
+        if hasMissionDestination {
+            rows.append(LegendRow(color: missionItemLabel == "Mail" ? UIColor(red: 0.4, green: 0.22, blue: 0.1, alpha: 1) : UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1), text: missionItemLabel == "Mail" ? "Rooms" : "Chute"))
+        }
+
+        let rowHeight: CGFloat = 90
+        let size = CGSize(width: 400, height: rowHeight * CGFloat(rows.count))
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            UIColor(red: 0.75, green: 0.62, blue: 0.32, alpha: 1).setFill() // brass plate
+            cg.fill(CGRect(origin: .zero, size: size))
+
+            let dotRadius: CGFloat = 22
+            let font = UIFont.boldSystemFont(ofSize: 40)
+            let textAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor(white: 0.12, alpha: 1)]
+            for (index, row) in rows.enumerated() {
+                let rowY = CGFloat(index) * rowHeight
+                let dotRect = CGRect(x: 26, y: rowY + rowHeight / 2 - dotRadius, width: dotRadius * 2, height: dotRadius * 2)
+                row.color.setFill()
+                cg.fillEllipse(in: dotRect)
+
+                let text = row.text as NSString
+                let textSize = text.size(withAttributes: textAttrs)
+                let textY = rowY + (rowHeight - textSize.height) / 2
+                text.draw(at: CGPoint(x: dotRect.maxX + 16, y: textY), withAttributes: textAttrs)
+            }
+        }
+    }
+
+    /// The Floor Mission sign's own picture -- a big heading ("1st
+    /// Floor") over a wrapped mission paragraph ("collect all the
+    /// trash and put it in the trash chute"), typed in via
+    /// GridEditorView's mission-editor sheet (Eddie, Sept 7: "you
+    /// could put a button to pop open a text input field so you could
+    /// type the paragraph in it"). One shared texture per floor,
+    /// reused by every placed sign, same idea as makeFloorMapTexture
+    /// -- but this one's static (baked once at build time, no
+    /// per-frame refresh) since there's no live "you are here" dot to
+    /// track here.
+    static func makeMissionSignTexture(heading: String, body: String) -> UIImage {
+        let width: CGFloat = 700
+        let height: CGFloat = 625
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
+        let backgroundColor = UIColor(white: 0.93, alpha: 1)
+        let borderColor = UIColor(red: 0.3, green: 0.22, blue: 0.1, alpha: 1)
+        let headingColor = UIColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1)
+        let bodyColor = UIColor(red: 0.25, green: 0.25, blue: 0.28, alpha: 1)
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            backgroundColor.setFill()
+            cg.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+            borderColor.setStroke()
+            cg.setLineWidth(10)
+            cg.stroke(CGRect(x: 5, y: 5, width: width - 10, height: height - 10))
+
+            let margin: CGFloat = 40
+
+            let headingFont = UIFont.boldSystemFont(ofSize: 80)
+            let headingStyle = NSMutableParagraphStyle()
+            headingStyle.alignment = .center
+            headingStyle.lineBreakMode = .byWordWrapping
+            let headingAttrs: [NSAttributedString.Key: Any] = [.font: headingFont, .foregroundColor: headingColor, .paragraphStyle: headingStyle]
+            let headingRect = CGRect(x: margin, y: margin, width: width - margin * 2, height: 110)
+            (heading as NSString).draw(in: headingRect, withAttributes: headingAttrs)
+
+            let bodyFont = UIFont.systemFont(ofSize: 45, weight: .medium)
+            let bodyStyle = NSMutableParagraphStyle()
+            bodyStyle.lineBreakMode = .byWordWrapping
+            let bodyAttrs: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: bodyColor, .paragraphStyle: bodyStyle]
+            let bodyTop = margin + 135
+            let bodyRect = CGRect(x: margin, y: bodyTop, width: width - margin * 2, height: height - bodyTop - margin)
+            (body as NSString).draw(in: bodyRect, withAttributes: bodyAttrs)
+        }
     }
 
     // MARK: - Objects (pick-up/deliver mechanic, first slice)
@@ -1797,6 +2495,7 @@ enum HallwayScene {
     }
 
     private static let trashCanPathData = "M135.2 17.7C140.6 6.8 151.7 0 163.8 0L284.2 0c12.1 0 23.2 6.8 28.6 17.7L320 32l96 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l96 0 7.2-14.3zM32 128l384 0 0 320c0 35.3-28.7 64-64 64L96 512c-35.3 0-64-28.7-64-64l0-320zm96 64c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16zm96 0c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16zm96 0c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16z"
+    private static let envelopePathData = "M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48L48 64zM0 176L0 384c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-208L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z"
 
     private static func makeTrashCanNode(size: CGFloat) -> SCNNode {
         makeIconNode(pathData: trashCanPathData, nativeWidth: 448, nativeHeight: 512, size: size,
@@ -1804,9 +2503,16 @@ enum HallwayScene {
                       emissionColor: UIColor(red: 0.4, green: 0.4, blue: 0.42, alpha: 1))
     }
 
+    private static func makeEnvelopeNode(size: CGFloat) -> SCNNode {
+        makeIconNode(pathData: envelopePathData, nativeWidth: 512, nativeHeight: 512, size: size,
+                      diffuseColor: UIColor(red: 0.94, green: 0.9, blue: 0.78, alpha: 1),
+                      emissionColor: UIColor(red: 0.42, green: 0.38, blue: 0.26, alpha: 1))
+    }
+
     private static func makeCash100Node(size: CGFloat) -> SCNNode {
         makeCashNode(value: 100, size: size)
     }
+
 
     /// Shared builder for every cash denomination — real extruded 3D
     /// text ("$100" etc.) via SceneKit's own SCNText, rather than the
@@ -1913,6 +2619,36 @@ enum HallwayScene {
     /// no single fixed glyph that's correct for every possible
     /// arrival, so build() has no business picking one). See
     /// TapNavigationController.relativeExitLabel(pointing:facing:).
+    /// A single flat triangle lying in the floor plane, tip pointing
+    /// out along `direction` -- used to cap each arm of
+    /// addIntersectionMarker with a proper arrowhead instead of
+    /// approximating one out of rotated boxes. Custom SCNGeometry
+    /// (rather than a primitive like SCNPyramid, whose base is a
+    /// rectangle, not a triangle) is what actually gets a flat,
+    /// 3-vertex wedge that reads as an arrowhead from directly above,
+    /// matching Eddie's reference sketch.
+    private static func makeArrowheadGeometry(direction: Direction, baseWidth: CGFloat, length: CGFloat, material: SCNMaterial) -> SCNGeometry {
+        let hw = Float(baseWidth / 2)
+        let len = Float(length)
+        let vertices: [SCNVector3]
+        switch direction {
+        case .north: vertices = [SCNVector3(-hw, 0, 0), SCNVector3(hw, 0, 0), SCNVector3(0, 0, -len)]
+        case .south: vertices = [SCNVector3(-hw, 0, 0), SCNVector3(hw, 0, 0), SCNVector3(0, 0, len)]
+        case .east: vertices = [SCNVector3(0, 0, -hw), SCNVector3(0, 0, hw), SCNVector3(len, 0, 0)]
+        case .west: vertices = [SCNVector3(0, 0, -hw), SCNVector3(0, 0, hw), SCNVector3(-len, 0, 0)]
+        }
+        let source = SCNGeometrySource(vertices: vertices)
+        // Both winding orders, so the triangle renders whichever side
+        // of it the camera happens to be on -- it's a paper-thin floor
+        // decal, not a solid, so there's no "back face" that should
+        // stay hidden.
+        let indices: [Int32] = [0, 1, 2, 0, 2, 1]
+        let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
+        let geometry = SCNGeometry(sources: [source], elements: [element])
+        geometry.materials = [material]
+        return geometry
+    }
+
     private static func makeExitSignNode(pointing direction: Direction, cellSize: CGFloat) -> SCNNode {
         let anchor = SCNNode()
 
@@ -1949,22 +2685,22 @@ enum HallwayScene {
         return anchor
     }
 
-    /// Small etched-looking label -- "TRASH" -- on the chute's steel
-    /// shutter, so it reads as what it is at a glance the same way
-    /// "$100" and a neon EXIT sign already do without any legend.
-    /// Eddie, Sept 5: "the trash is a bit tricky. we need to put a
-    /// sign on the chutes that says trash in small letters... maybe
-    /// metal etch into metal door." Every destination cubby is a trash
-    /// chute right now (GridEditorView's Chute row only ever places
-    /// one kind), so this is hardcoded text rather than a per-kind
-    /// lookup -- revisit if a second destination kind ever ships.
+    /// Small etched-looking label -- "TRASH" or "MAIL" -- on the
+    /// chute's steel shutter, so it reads as what it is at a glance
+    /// the same way "$100" and a neon EXIT sign already do without any
+    /// legend. Eddie, Sept 5: "the trash is a bit tricky. we need to
+    /// put a sign on the chutes that says trash in small letters...
+    /// maybe metal etch into metal door." Sept 7 added a second
+    /// destination kind (the Mail Mission's chute), so this now reads
+    /// straight off ObjectKind.missionLegendLabel per chute instead of
+    /// a hardcoded string.
     ///
     /// Billboarded (same trick makeExitSignNode uses just above) so it
     /// always faces the player dead-on -- sidesteps working out which
     /// of the 4 door rotations would read mirrored/backward if this
     /// were instead baked flat into the door's own rotated local frame.
-    private static func makeDestinationLabelNode(doorHeight: CGFloat, doorThickness: CGFloat) -> SCNNode {
-        let text = SCNText(string: "TRASH", extrusionDepth: 1)
+    private static func makeDestinationLabelNode(kind: ObjectKind, doorHeight: CGFloat, doorThickness: CGFloat) -> SCNNode {
+        let text = SCNText(string: kind.missionLegendLabel.uppercased(), extrusionDepth: 1)
         text.font = UIFont.boldSystemFont(ofSize: 32)
         text.flatness = 0.1
 

@@ -82,6 +82,14 @@ enum ObjectKind: String, Codable, CaseIterable {
     // mechanic out before adding more ($500, $1000, ...), same
     // add-a-case pattern as every other kind.
     case cash100
+    // Fourth Hallway Activity, Sept 7: the Mail Mission -- "grabbing a
+    // floating envelope somewhere and putting it in the mail chute on
+    // a wall somewhere... mail is just like trash." Deliver-anywhere,
+    // carry-and-drop, exactly like trashCan (see depositIfPresent's
+    // own "no matching required" doc comment) -- just a different
+    // kind and a different chute label (see missionLegendLabel below).
+    case envelope
+    case key
 }
 
 /// Non-nil only for cash kinds -- the dollar amount that gets added to
@@ -117,6 +125,25 @@ extension ObjectKind {
         case .cakeCandles: return "🎂"
         case .trashCan: return "🗑️"
         case .cash100: return "💵"
+        case .envelope: return "✉️"
+        case .key: return "🔑"
+        }
+    }
+}
+
+/// The word the wall map's legend uses for this floor's mission item
+/// (e.g. the green "Trash" row) -- Eddie, Sept 7: "for floor one it
+/// will be 'trash' cause thats what u need to do for that level."
+/// Driven off missionObjectKind itself rather than typed per floor, so
+/// every floor using a given kind gets a consistent legend word for
+/// free.
+extension ObjectKind {
+    var missionLegendLabel: String {
+        switch self {
+        case .trashCan: return "Trash"
+        case .envelope: return "Mail"
+        case .key: return "Keys"
+        default: return rawValue.capitalized
         }
     }
 }
@@ -156,6 +183,38 @@ private struct FloorMapPlacement: Codable {
     var direction: Direction
 }
 
+/// One placed Floor Mission sign, as persisted: which cell it's
+/// mounted at and which wall it hangs on -- exactly the same shape as
+/// FloorMapPlacement above. Manually placed in GridEditorView (Eddie,
+/// Sept 7: "just add it to the thingies on the map/edit view so i can
+/// put mission statement banners wherever i want... much simpler
+/// (just like the wall maps)"), same "editor decides where, build()
+/// just draws it" split every other manually-placed fixture uses. The
+/// mission's actual TEXT (heading/body) and which ObjectKind it
+/// requires live on MazeRecord itself, not here -- this struct is
+/// only ever "which cell, which wall," same division floor maps use
+/// between placement (many, per-cell) and content (one baked texture,
+/// shared by every placed sign on the floor).
+private struct MissionSignPlacement: Codable {
+    var coord: GridCoordinate
+    var direction: Direction
+}
+
+/// One placed decorative Picture, as persisted: which cell it's mounted
+/// at and which wall it hangs on -- exactly the same shape as
+/// FloorMapPlacement/MissionSignPlacement. Manually placed in
+/// GridEditorView (Eddie, Sept 9: "make the picture appear as a
+/// picture on the wall (like we do to the mission and maps)"), same
+/// "editor decides where, build() just draws it" split every other
+/// manually-placed fixture uses. Deliberately does NOT store which
+/// image -- pictures are aesthetic only, so HallwayScene.build(fromMaze:)
+/// grabs a random one from the bundled Pictures folder every time this
+/// floor is built, rather than baking one fixed choice in here.
+private struct PicturePlacement: Codable {
+    var coord: GridCoordinate
+    var direction: Direction
+}
+
 // spotlights themselves need no struct -- a plain [GridCoordinate], same
 // as `cells` -- since a ceiling light has no direction/kind of its own
 // (Eddie, Sept 6: "how difficult to have a spotlight that we could
@@ -188,11 +247,43 @@ private struct MazeRecord {
     /// spotlight. Same decodeIfPresent-or-empty treatment, no legacy
     /// shape to migrate.
     var spotlights: [GridCoordinate]
+    /// Which of this floor's cells hold a manually-placed Floor
+    /// Mission sign, and which wall each one hangs on. Same
+    /// decodeIfPresent-or-empty treatment, no legacy shape to
+    /// migrate.
+    var missionSigns: [MissionSignPlacement]
+    /// Which of this floor's cells hold a manually-placed decorative
+    /// Picture, and which wall each one hangs on. Same
+    /// decodeIfPresent-or-empty treatment, no legacy shape to migrate.
+    var pictures: [PicturePlacement]
+    var roomDoors: [RoomDoorPlacement] = []
+    var itemRooms: [RoomAssignment] = []
+    var picturesUseCameraRoll: Bool = false
+    /// This floor's mission -- a big heading ("1st Floor") and a
+    /// mission paragraph ("collect all the trash and put it in the
+    /// trash chute"), typed in via GridEditorView's mission-editor
+    /// sheet rather than hard-coded per floor (Eddie, Sept 7: "you
+    /// could put a button to pop open a text input field so you could
+    /// type the paragraph in it"). Empty string, not optional -- an
+    /// unauthored floor just shows a blank sign if one's placed, same
+    /// as an unauthored destination kind would.
+    var missionHeading: String
+    /// See missionHeading above.
+    var missionBody: String
+    /// Which ObjectKind completes this floor's mission -- nil means no
+    /// mission gate at all (the elevator behaves exactly as before).
+    /// Floor 1 reuses the existing trash/chute mechanic wholesale
+    /// (Eddie, Sept 7: "since we already have the trash pretty much
+    /// in there, lets make it the first floors mission"): set this to
+    /// .trashCan and TapNavigationController.isMissionComplete
+    /// requires every placed trash can to be both picked up AND
+    /// delivered before openElevator() will run.
+    var missionObjectKind: ObjectKind?
 }
 
 extension MazeRecord: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights
+        case id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, roomDoors, itemRooms, mailAddresses
     }
 
     // Hand-written so older mazes.json shapes still load cleanly
@@ -224,6 +315,15 @@ extension MazeRecord: Codable {
         exitSigns = try container.decodeIfPresent([ExitSignPlacement].self, forKey: .exitSigns) ?? []
         floorMaps = try container.decodeIfPresent([FloorMapPlacement].self, forKey: .floorMaps) ?? []
         spotlights = try container.decodeIfPresent([GridCoordinate].self, forKey: .spotlights) ?? []
+        missionSigns = try container.decodeIfPresent([MissionSignPlacement].self, forKey: .missionSigns) ?? []
+        pictures = try container.decodeIfPresent([PicturePlacement].self, forKey: .pictures) ?? []
+        roomDoors = try container.decodeIfPresent([RoomDoorPlacement].self, forKey: .roomDoors) ?? []
+        itemRooms = try container.decodeIfPresent([RoomAssignment].self, forKey: .itemRooms)
+            ?? container.decodeIfPresent([RoomAssignment].self, forKey: .mailAddresses) ?? []
+        picturesUseCameraRoll = try container.decodeIfPresent(Bool.self, forKey: .picturesUseCameraRoll) ?? false
+        missionHeading = try container.decodeIfPresent(String.self, forKey: .missionHeading) ?? ""
+        missionBody = try container.decodeIfPresent(String.self, forKey: .missionBody) ?? ""
+        missionObjectKind = try container.decodeIfPresent(ObjectKind.self, forKey: .missionObjectKind)
     }
 
     // Writing this by hand too: CodingKeys carries an extra
@@ -245,6 +345,14 @@ extension MazeRecord: Codable {
         try container.encode(exitSigns, forKey: .exitSigns)
         try container.encode(floorMaps, forKey: .floorMaps)
         try container.encode(spotlights, forKey: .spotlights)
+        try container.encode(missionSigns, forKey: .missionSigns)
+        try container.encode(pictures, forKey: .pictures)
+        try container.encode(roomDoors, forKey: .roomDoors)
+        try container.encode(itemRooms, forKey: .itemRooms)
+        try container.encode(picturesUseCameraRoll, forKey: .picturesUseCameraRoll)
+        try container.encode(missionHeading, forKey: .missionHeading)
+        try container.encode(missionBody, forKey: .missionBody)
+        try container.encodeIfPresent(missionObjectKind, forKey: .missionObjectKind)
     }
 }
 
@@ -253,23 +361,42 @@ extension MazeRecord: Codable {
 /// (file I/O, JSON shape) doesn't tangle with "what's currently loaded
 /// and being edited/played" (MazeStore's actual job).
 private enum MazeLibrary {
+    // Every build starts with the same floor library shipped in the app.
+    // Editor saves are a backup/export aid only; they never override the bundle.
     private static var fileURL: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("mazes.json")
     }
 
-    static func loadAll() -> [Int: MazeRecord] {
-        guard let data = try? Data(contentsOf: fileURL),
-              let records = try? JSONDecoder().decode([MazeRecord].self, from: data) else {
-            return [:]
+    private static func readMaps(at url: URL) -> [Int: MazeRecord]? {
+        do {
+            let records = try JSONDecoder().decode([MazeRecord].self, from: Data(contentsOf: url))
+            guard !records.isEmpty, Set(records.map { $0.id }).count == records.count else {
+                print("[Maps] Ignoring empty library or duplicate floor IDs in \(url.lastPathComponent)")
+                return nil
+            }
+            return Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+        } catch {
+            print("[Maps] Could not load \(url.lastPathComponent): \(error)")
+            return nil
         }
-        return Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+    }
+
+    static func loadAll() -> [Int: MazeRecord] {
+        guard let url = Bundle.main.url(forResource: "DefaultMazes", withExtension: "json"),
+              let bundled = readMaps(at: url) else { return [:] }
+        print("[Maps] Loaded \(bundled.count) bundled floors")
+        return bundled
     }
 
     static func saveAll(_ library: [Int: MazeRecord]) {
         let records = library.values.sorted { $0.id < $1.id }
-        guard let data = try? JSONEncoder().encode(records) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        do {
+            let data = try JSONEncoder().encode(records)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            print("[Maps] Could not save edited floors: \(error)")
+        }
     }
 }
 
@@ -296,30 +423,13 @@ final class MazeStore: ObservableObject {
     /// that rather than an error message.
     static let elevatorCoordinate = GridCoordinate(row: 10, col: 7)
 
-    // Hardcoded starter maze — only ever used to seed floor 1 the very
-    // first time the app runs with no mazes.json on disk yet, so
-    // launching still drops you straight into a real maze instead of
-    // an empty grid. Once anything's been saved, this is never
-    // consulted again. Shape: a cross with a long vertical hallway (the
-    // main run, top to bottom) crossed by a shorter horizontal one
-    // (left to right) — a real 4-way intersection where they meet (3
-    // choices once you arrive), two dead-end arms off the horizontal,
-    // and a start/end pair at the top and bottom of the long vertical
-    // hallway.
-    private static let starterMaze: Set<GridCoordinate> = {
-        var cells: Set<GridCoordinate> = []
-        let centerRow = 15
-        let centerCol = 5
-        let verticalArmLength = 15   // rows extending up/down from center — the long run
-        let horizontalArmLength = 5  // cols extending left/right from center — the cross street
-        for row in (centerRow - verticalArmLength)...(centerRow + verticalArmLength) {
-            cells.insert(GridCoordinate(row: row, col: centerCol))
-        }
-        for col in (centerCol - horizontalArmLength)...(centerCol + horizontalArmLength) {
-            cells.insert(GridCoordinate(row: centerRow, col: col))
-        }
-        return cells
-    }()
+    /// The one other cell every floor always has, no matter what --
+    /// one step south of the elevator. startingFacing(at:cells:) checks
+    /// south first, so walking off the elevator always faces this cell,
+    /// and its far (south) wall is where the mission sign always hangs
+    /// -- "the mission thing is on the wall in front of you," every
+    /// floor, automatically. Eddie, Sept 7.
+    static let missionCoordinate = GridCoordinate(row: elevatorCoordinate.row + 1, col: elevatorCoordinate.col)
 
     @Published private(set) var cells: Set<GridCoordinate>
 
@@ -366,6 +476,34 @@ final class MazeStore: ObservableObject {
     /// place on the ceiling of a box?"
     @Published private(set) var spotlights: Set<GridCoordinate>
 
+    /// Cells on the current floor holding a manually-placed Floor
+    /// Mission sign, and which wall each one hangs on -- placed the
+    /// same way Exit Signs/floor maps are (GridEditorView toggles +
+    /// paint). Eddie, Sept 7: "just add it to the thingies on the
+    /// map/edit view so i can put mission statement banners wherever
+    /// i want."
+    @Published private(set) var missionSigns: [GridCoordinate: Direction]
+
+    /// Cells on the current floor holding a manually-placed decorative
+    /// Picture, and which wall each one hangs on -- placed the same way
+    /// Exit Signs/floor maps are (GridEditorView toggle + paint). Eddie,
+    /// Sept 9: purely aesthetic ("nothing that has to be solved - just
+    /// looked at"), unlike every other wall fixture here -- see
+    /// PicturePlacement's own doc comment for why no image is stored.
+    @Published private(set) var pictures: [GridCoordinate: Direction]
+    @Published private(set) var roomDoors: [GridCoordinate: RoomDoorPlacement] = [:]
+    @Published private(set) var itemRooms: [GridCoordinate: Int] = [:]
+    @Published private(set) var picturesUseCameraRoll = false
+
+    /// This floor's mission heading/paragraph and which ObjectKind
+    /// completes it -- see MazeRecord's own doc comments for the full
+    /// story. Scalars, not cell-keyed, same shape as nextMazeID:
+    /// there's exactly one mission per floor, however many sign
+    /// placements happen to display it.
+    @Published private(set) var missionHeading: String
+    @Published private(set) var missionBody: String
+    @Published private(set) var missionObjectKind: ObjectKind?
+
     /// Bumped on every edit AND on every floor switch. ContentView only
     /// re-reads this against sceneVersion when the grid editor is
     /// dismissed (not live on every paint stroke) so drawing stays
@@ -388,6 +526,17 @@ final class MazeStore: ObservableObject {
     /// per-maze data, not a computed "+1" — see the file header.
     @Published private(set) var nextMazeID: Int?
 
+    /// How many floors exist right now -- mazeIDs double as floor
+    /// numbers (see GridEditorView's stepNextMazeID), so this is just
+    /// the highest one in the library, never below whatever's
+    /// currently loaded. Eddie, Sept 7: "lets say we go with 5 floors
+    /// for now" for the elevator ride's button panel -- this is what
+    /// makes that panel always match however many floors actually
+    /// exist instead of a number hardcoded here.
+    var floorCount: Int {
+        max(library.keys.max() ?? 1, currentMazeID)
+    }
+
     /// Running total of all cash absorbed this run, across every floor
     /// -- deliberately NOT part of any per-floor state (cells/objects/
     /// destinations/undo all get swapped out by switchTo(); this
@@ -396,11 +545,44 @@ final class MazeStore: ObservableObject {
     /// "save game" system yet either; revisit once one exists.
     @Published private(set) var moneyTotal = 0
 
+    /// One "a cash pickup just happened" event -- purely for
+    /// ContentView's screen-space celebration (gold flash, a flying
+    /// "+$100", a HUD pulse), kept entirely separate from moneyTotal
+    /// itself so the running total stays the single source of truth
+    /// for the actual score. Carries its own id so two consecutive
+    /// pickups of the identical amount still count as two distinct
+    /// events -- without it, SwiftUI's onChange would see two equal
+    /// values back to back and silently fire only once.
+    struct CashPickupEvent: Equatable {
+        let amount: Int
+        let id = UUID()
+    }
+    @Published private(set) var lastCashPickup: CashPickupEvent?
+
     /// Called by TapNavigationController the instant a cash object is
     /// walked into (see collectObjectIfPresent) -- the only way
     /// moneyTotal ever changes.
     func addMoney(_ amount: Int) {
         moneyTotal += amount
+        lastCashPickup = CashPickupEvent(amount: amount)
+    }
+
+    /// One "a trash can was just picked up" event -- purely for
+    /// ContentView's temporary screen-space visual (Eddie, Sept 9:
+    /// "the sound occurs but the trash just disappears. we need some
+    /// kind of visual feedback. do something temporary and ill try to
+    /// figure out something... maybe little spinning trash cans").
+    /// Same id-per-event trick as CashPickupEvent so back-to-back
+    /// pickups each still fire their own onChange.
+    struct TrashPickupEvent: Equatable {
+        let id = UUID()
+    }
+    @Published private(set) var lastTrashPickup: TrashPickupEvent?
+
+    /// Called by TapNavigationController the instant a trash can is
+    /// walked into (see collectObjectIfPresent's onCollectTrash call).
+    func markTrashPickup() {
+        lastTrashPickup = TrashPickupEvent()
     }
 
     /// World-space size of one cell — matches the corridor width feel
@@ -423,20 +605,37 @@ final class MazeStore: ObservableObject {
             exitSigns = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.exitSigns ?? []).map { ($0.coord, $0.direction) })
             floorMaps = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.floorMaps ?? []).map { ($0.coord, $0.direction) })
             spotlights = Set(loaded[firstID]?.spotlights ?? [])
+            missionSigns = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.missionSigns ?? []).map { ($0.coord, $0.direction) })
+            pictures = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.pictures ?? []).map { ($0.coord, $0.direction) })
+            roomDoors = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.roomDoors ?? []).map { ($0.coord, $0) })
+            itemRooms = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.itemRooms ?? []).map { ($0.coord, $0.roomNumber) })
+            picturesUseCameraRoll = loaded[firstID]?.picturesUseCameraRoll ?? false
+            missionHeading = loaded[firstID]?.missionHeading ?? ""
+            missionBody = loaded[firstID]?.missionBody ?? ""
+            missionObjectKind = loaded[firstID]?.missionObjectKind
         } else {
             // Nothing on disk yet — first-ever launch. Seed floor 1
-            // with the starter maze and write it out immediately so
-            // this branch is never hit again on this device.
-            let starter = MazeRecord(id: 1, cells: Array(Self.starterMaze), nextMazeID: nil, objects: [], destinations: [], exitSigns: [], floorMaps: [], spotlights: [])
+            // with just the forced elevator+mission cells (same as
+            // clear() below) and write it out immediately so this
+            // branch is never hit again on this device.
+            let starter = MazeRecord(id: 1, cells: [Self.elevatorCoordinate, Self.missionCoordinate], nextMazeID: nil, objects: [], destinations: [], exitSigns: [], floorMaps: [], spotlights: [], missionSigns: [MissionSignPlacement(coord: Self.missionCoordinate, direction: .south)], pictures: [], missionHeading: "", missionBody: "", missionObjectKind: nil)
             library = [1: starter]
             currentMazeID = 1
-            cells = Self.starterMaze
+            cells = [Self.elevatorCoordinate, Self.missionCoordinate]
             nextMazeID = nil
             objects = [:]
             destinations = [:]
             exitSigns = [:]
             floorMaps = [:]
             spotlights = []
+            missionSigns = [Self.missionCoordinate: .south]
+            pictures = [:]
+            roomDoors = [:]
+            itemRooms = [:]
+            picturesUseCameraRoll = false
+            missionHeading = ""
+            missionBody = ""
+            missionObjectKind = nil
             MazeLibrary.saveAll(library)
         }
     }
@@ -450,20 +649,51 @@ final class MazeStore: ObservableObject {
     /// all yet) -- an actual maze on a real floor always resolves
     /// here, whether or not that floor's hallway happens to reach it.
     var startCoordinate: GridCoordinate? {
-        cells.isEmpty ? nil : Self.elevatorCoordinate
+        guard !cells.isEmpty else { return nil }
+        return currentMazeID == 1 ? floorOneEntryCoordinate : Self.elevatorCoordinate
     }
 
     /// You get off the elevator, and you're standing right where you
     /// need to get back to for the next one -- Eddie, Sept 5: "when
     /// you arrive at a level, you get off the elevator, and youre
     /// right at the point you need to get to to get to the next
-    /// level." Literally the same cell as startCoordinate now, not a
-    /// second derived point -- kept as its own property (rather than
-    /// deleting it and using startCoordinate everywhere) purely so
-    /// call sites can keep saying "start" or "end," whichever reads
-    /// clearer in context, without it meaning anything different.
+    /// level." Always the building's fixed elevatorCoordinate, full
+    /// stop -- unlike startCoordinate, this one does NOT change for
+    /// floor 1 (Eddie, Sept 7): you still walk TO the elevator and
+    /// ride it up from there, it's only where you START floor 1
+    /// that's different.
     var endCoordinate: GridCoordinate? {
-        startCoordinate
+        cells.isEmpty ? nil : Self.elevatorCoordinate
+    }
+
+    /// Floor 1 only: the far end of its straight entry hallway --
+    /// found by walking away from the elevator cell through whichever
+    /// neighbor is open and isn't where you just came from, repeated
+    /// until there's nowhere further to go. Eddie's floor 1 is "one
+    /// hallway... 3 cubes long" with no branches, so there's always
+    /// exactly one way to keep walking at each step -- this derives
+    /// the spawn point from whatever shape actually gets drawn in the
+    /// editor rather than needing its own stored/placed coordinate,
+    /// so the hallway can be lengthened or shortened later with no
+    /// code changes. Falls back to elevatorCoordinate itself if
+    /// there's nowhere to walk at all yet (a floor 1 that's just the
+    /// bare elevator cell, nothing else drawn).
+    private var floorOneEntryCoordinate: GridCoordinate {
+        var current = Self.elevatorCoordinate
+        var previous: GridCoordinate? = nil
+        while true {
+            let neighbors = [
+                GridCoordinate(row: current.row - 1, col: current.col),
+                GridCoordinate(row: current.row + 1, col: current.col),
+                GridCoordinate(row: current.row, col: current.col - 1),
+                GridCoordinate(row: current.row, col: current.col + 1),
+            ]
+            guard let next = neighbors.first(where: { cells.contains($0) && $0 != previous }) else {
+                return current
+            }
+            previous = current
+            current = next
+        }
     }
 
     func isOpen(_ coord: GridCoordinate) -> Bool {
@@ -502,6 +732,22 @@ final class MazeStore: ObservableObject {
         floorMaps[coord]
     }
 
+    func hasMissionSign(_ coord: GridCoordinate) -> Bool {
+        missionSigns[coord] != nil
+    }
+
+    func missionSignDirection(at coord: GridCoordinate) -> Direction? {
+        missionSigns[coord]
+    }
+
+    func hasPicture(_ coord: GridCoordinate) -> Bool {
+        pictures[coord] != nil
+    }
+
+    func pictureDirection(at coord: GridCoordinate) -> Direction? {
+        pictures[coord]
+    }
+
     func hasSpotlight(_ coord: GridCoordinate) -> Bool {
         spotlights.contains(coord)
     }
@@ -515,12 +761,18 @@ final class MazeStore: ObservableObject {
     func placeObject(_ kind: ObjectKind, at coord: GridCoordinate) {
         guard cells.contains(coord) else { return }
         objects[coord] = kind
+        if kind == .envelope || kind == .key {
+            assignUnassignedRoomItems()
+        } else {
+            itemRooms[coord] = nil
+        }
         version += 1
     }
 
     func removeObject(at coord: GridCoordinate) {
         guard objects[coord] != nil else { return }
         objects[coord] = nil
+        itemRooms[coord] = nil
         version += 1
     }
 
@@ -528,7 +780,7 @@ final class MazeStore: ObservableObject {
     /// rule as placeObject) -- which wall it actually ends up mounted
     /// on is HallwayScene.build(fromMaze:)'s call, not this one's.
     func placeDestination(_ kind: ObjectKind, at coord: GridCoordinate) {
-        guard cells.contains(coord) else { return }
+        guard roomDoors[coord] == nil, cells.contains(coord) else { return }
         destinations[coord] = kind
         version += 1
     }
@@ -567,7 +819,7 @@ final class MazeStore: ObservableObject {
     /// down just quietly doesn't render instead of drawing floating in
     /// midair.
     func placeFloorMap(_ direction: Direction, at coord: GridCoordinate) {
-        guard cells.contains(coord) else { return }
+        guard roomDoors[coord] == nil, cells.contains(coord) else { return }
         floorMaps[coord] = direction
         version += 1
     }
@@ -575,6 +827,75 @@ final class MazeStore: ObservableObject {
     func removeFloorMap(at coord: GridCoordinate) {
         guard floorMaps[coord] != nil else { return }
         floorMaps[coord] = nil
+        version += 1
+    }
+
+    /// Places (or repoints) a decorative Picture at `coord`, hung on
+    /// `direction`'s wall -- same rules as placeFloorMap above (open
+    /// cell, direction not checked to actually be a wall here, that's
+    /// GridEditorView's job).
+    func setPicturesUseCameraRoll(_ enabled: Bool) {
+        guard picturesUseCameraRoll != enabled else { return }
+        snapshotForUndo()
+        picturesUseCameraRoll = enabled
+        version += 1
+        save()
+    }
+
+    var roomNumbers: [Int] { roomDoors.values.map(\.roomNumber).sorted() }
+
+    func placeRoomDoor(_ direction: Direction, at coord: GridCoordinate) {
+        let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+        guard cells.contains(coord), !cells.contains(neighbor),
+              coord != Self.elevatorCoordinate, coord != Self.missionCoordinate,
+              floorMaps[coord] == nil, pictures[coord] == nil, destinations[coord] == nil else { return }
+        let number = roomDoors[coord]?.roomNumber ?? (max(roomNumbers.max() ?? (currentMazeID * 100), itemRooms.values.max() ?? (currentMazeID * 100)) + 1)
+        roomDoors[coord] = RoomDoorPlacement(coord: coord, direction: direction, roomNumber: number, cashReward: roomDoors[coord]?.cashReward ?? (missionObjectKind == .key ? 100 : nil))
+        assignUnassignedRoomItems()
+        version += 1
+    }
+
+    func removeRoomDoor(at coord: GridCoordinate) {
+        guard roomDoors.removeValue(forKey: coord) != nil else { return }
+        version += 1
+    }
+
+    func setItemRoom(_ room: Int, at coord: GridCoordinate) {
+        guard (objects[coord] == .envelope || objects[coord] == .key), roomNumbers.contains(room) else { return }
+        itemRooms[coord] = room
+        version += 1
+    }
+
+    func setRoomReward(_ amount: Int, at coord: GridCoordinate) {
+        guard roomDoors[coord] != nil else { return }
+        roomDoors[coord]?.cashReward = max(0, amount)
+        version += 1
+    }
+
+    private func assignUnassignedRoomItems() {
+        let rooms = roomNumbers
+        guard !rooms.isEmpty else { return }
+        let unaddressed = objects.keys.filter { (objects[$0] == .envelope || objects[$0] == .key) && itemRooms[$0] == nil }
+            .sorted { ($0.row, $0.col) < ($1.row, $1.col) }
+        for coord in unaddressed {
+            let room = rooms.min { a, b in
+                let aCount = itemRooms.values.filter { $0 == a }.count
+                let bCount = itemRooms.values.filter { $0 == b }.count
+                return aCount == bCount ? a < b : aCount < bCount
+            }!
+            itemRooms[coord] = room
+        }
+    }
+
+    func placePicture(_ direction: Direction, at coord: GridCoordinate) {
+        guard roomDoors[coord] == nil, cells.contains(coord) else { return }
+        pictures[coord] = direction
+        version += 1
+    }
+
+    func removePicture(at coord: GridCoordinate) {
+        guard pictures[coord] != nil else { return }
+        pictures[coord] = nil
         version += 1
     }
 
@@ -607,6 +928,10 @@ final class MazeStore: ObservableObject {
         exitSigns.removeValue(forKey: coord)
         floorMaps.removeValue(forKey: coord)
         spotlights.remove(coord)
+        missionSigns.removeValue(forKey: coord)
+        pictures.removeValue(forKey: coord)
+        roomDoors.removeValue(forKey: coord)
+        itemRooms.removeValue(forKey: coord)
         version += 1
     }
 
@@ -622,6 +947,31 @@ final class MazeStore: ObservableObject {
         save()
     }
 
+    /// Sets this floor's mission heading + paragraph, typed in via
+    /// GridEditorView's mission-editor sheet. Unlike setNextMazeID
+    /// this DOES bump version (not just save()) -- the mission text
+    /// gets baked into the actual wall-sign texture in 3D
+    /// (HallwayScene.makeMissionSignTexture), so a rebuild needs to
+    /// know something changed, same as any other edit made while the
+    /// grid editor is open. Persisting to disk still waits for the
+    /// editor to close (ContentView's dismiss-triggered save()), same
+    /// as every other cell-level edit.
+    func setMissionText(heading: String, body: String) {
+        guard heading != missionHeading || body != missionBody else { return }
+        missionHeading = heading
+        missionBody = body
+        version += 1
+    }
+
+    /// Sets which ObjectKind completes this floor's mission (nil means
+    /// no gate at all). Floor 1 reuses the trash/chute mechanic --
+    /// see MazeRecord.missionObjectKind's own doc comment.
+    func setMissionObjectKind(_ kind: ObjectKind?) {
+        guard kind != missionObjectKind else { return }
+        missionObjectKind = kind
+        version += 1
+    }
+
     /// Writes whatever's currently loaded (cells + nextMazeID + objects)
     /// back into the in-memory library and out to disk. Called whenever
     /// the grid editor closes, and internally by switchTo() before it
@@ -632,8 +982,34 @@ final class MazeStore: ObservableObject {
         let destinationPlacements = destinations.map { ObjectPlacement(coord: $0.key, kind: $0.value) }
         let exitSignPlacements = exitSigns.map { ExitSignPlacement(coord: $0.key, direction: $0.value) }
         let floorMapPlacements = floorMaps.map { FloorMapPlacement(coord: $0.key, direction: $0.value) }
-        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights))
+        let missionSignPlacements = missionSigns.map { MissionSignPlacement(coord: $0.key, direction: $0.value) }
+        let picturePlacements = pictures.map { PicturePlacement(coord: $0.key, direction: $0.value) }
+        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights), missionSigns: missionSignPlacements, pictures: picturePlacements, roomDoors: Array(roomDoors.values), itemRooms: itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
         MazeLibrary.saveAll(library)
+    }
+
+    /// Eddie, Sept 8: "the output from that map save button should be
+    /// either in swift sytax... ready to just be copy/pasted into the
+    /// code, or if you prefer, some other format that allows the
+    /// transition from it to being saved in the code." Going with
+    /// JSON, not hand-written Swift literals -- MazeRecord is already
+    /// Codable, this is the exact format the app itself already uses
+    /// for local persistence (see MazeLibrary below), and it avoids
+    /// the transcription risk of a large hand-typed Swift struct
+    /// literal (a floor's cells array alone can run into the hundreds
+    /// of entries). Flushes the in-progress floor first, same as
+    /// save(), so the export always matches whatever's currently
+    /// drawn. This JSON is meant to be pasted straight into a chat
+    /// with Claude, who turns it into a bundled seed/default maze set
+    /// shipped with the app -- decoded through the identical
+    /// JSONDecoder path MazeLibrary.loadAll() already uses.
+    func exportLibraryJSON() -> String? {
+        save()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let records = library.values.sorted { $0.id < $1.id }
+        guard let data = try? encoder.encode(records) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     /// Swaps which floor is currently loaded — persists whatever floor
@@ -655,14 +1031,32 @@ final class MazeStore: ObservableObject {
             exitSigns = Dictionary(uniqueKeysWithValues: record.exitSigns.map { ($0.coord, $0.direction) })
             floorMaps = Dictionary(uniqueKeysWithValues: record.floorMaps.map { ($0.coord, $0.direction) })
             spotlights = Set(record.spotlights)
+            missionSigns = Dictionary(uniqueKeysWithValues: record.missionSigns.map { ($0.coord, $0.direction) })
+            pictures = Dictionary(uniqueKeysWithValues: record.pictures.map { ($0.coord, $0.direction) })
+            roomDoors = Dictionary(uniqueKeysWithValues: record.roomDoors.map { ($0.coord, $0) })
+            itemRooms = Dictionary(uniqueKeysWithValues: record.itemRooms.map { ($0.coord, $0.roomNumber) })
+            picturesUseCameraRoll = record.picturesUseCameraRoll
+            missionHeading = record.missionHeading
+            missionBody = record.missionBody
+            missionObjectKind = record.missionObjectKind
         } else {
-            cells = []
+            // Same "keep the elevator+mission cells" fix clear() just got
+            // -- this is the other place a floor starts out "empty."
+            cells = [Self.elevatorCoordinate, Self.missionCoordinate]
             nextMazeID = nil
             objects = [:]
             destinations = [:]
             exitSigns = [:]
             floorMaps = [:]
             spotlights = []
+            missionSigns = [Self.missionCoordinate: .south]
+            pictures = [:]
+            roomDoors = [:]
+            itemRooms = [:]
+            picturesUseCameraRoll = false
+            missionHeading = ""
+            missionBody = ""
+            missionObjectKind = nil
         }
         undoStack = [] // undo history is per-floor, doesn't carry across a switch
         version += 1
@@ -680,7 +1074,7 @@ final class MazeStore: ObservableObject {
 
     // MARK: - Undo / Clear
 
-    private var undoStack: [(cells: Set<GridCoordinate>, objects: [GridCoordinate: ObjectKind], destinations: [GridCoordinate: ObjectKind], exitSigns: [GridCoordinate: Direction], floorMaps: [GridCoordinate: Direction], spotlights: Set<GridCoordinate>)] = []
+    private var undoStack: [(cells: Set<GridCoordinate>, objects: [GridCoordinate: ObjectKind], destinations: [GridCoordinate: ObjectKind], exitSigns: [GridCoordinate: Direction], floorMaps: [GridCoordinate: Direction], spotlights: Set<GridCoordinate>, missionSigns: [GridCoordinate: Direction], pictures: [GridCoordinate: Direction], picturesUseCameraRoll: Bool, roomDoors: [GridCoordinate: RoomDoorPlacement], itemRooms: [GridCoordinate: Int])] = []
     private let maxUndoDepth = 30
 
     /// Snapshots the current maze so a later undo() can restore it.
@@ -690,7 +1084,7 @@ final class MazeStore: ObservableObject {
     /// together so undo works correctly no matter which mode (wall
     /// painting or object placing) the stroke was in.
     func snapshotForUndo() {
-        undoStack.append((cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights))
+        undoStack.append((cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms))
         if undoStack.count > maxUndoDepth {
             undoStack.removeFirst()
         }
@@ -706,6 +1100,11 @@ final class MazeStore: ObservableObject {
         exitSigns = previous.exitSigns
         floorMaps = previous.floorMaps
         spotlights = previous.spotlights
+        missionSigns = previous.missionSigns
+        pictures = previous.pictures
+        roomDoors = previous.roomDoors
+        itemRooms = previous.itemRooms
+        picturesUseCameraRoll = previous.picturesUseCameraRoll
         version += 1
     }
 
@@ -715,12 +1114,24 @@ final class MazeStore: ObservableObject {
     func clear() {
         guard !cells.isEmpty else { return }
         snapshotForUndo()
-        cells = []
+        // Just the elevator + mission cells, not truly empty -- the
+        // elevator has nowhere to be drawn once cells is empty (see
+        // startCoordinate's doc comment), so a real "wipe everything"
+        // clear would delete the elevator right along with the maze.
+        // Eddie, Sept 7: "after clear it should be there" -- and per
+        // his follow-up the same day, Clear (like a fresh floor) always
+        // re-seeds the mission cell right along with the elevator, so
+        // every floor keeps the same forced elevator/mission layout.
+        cells = [Self.elevatorCoordinate, Self.missionCoordinate]
         objects = [:]
         destinations = [:]
         exitSigns = [:]
         floorMaps = [:]
         spotlights = []
+        missionSigns = [Self.missionCoordinate: .south]
+        pictures = [:]
+        roomDoors = [:]
+        itemRooms = [:]
         version += 1
     }
 }

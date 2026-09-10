@@ -89,6 +89,7 @@ enum NavigationOutcome {
     case intersection(choices: [Direction])
     case deadEnd
     case reachedEnd
+    case steppedBackward
     /// Not a topology outcome at all -- walkToNextDecision never
     /// produces this one (it doesn't know objects exist). Reserved for
     /// TapNavigationController to use when it deliberately stops a walk
@@ -108,6 +109,19 @@ enum NavigationOutcome {
     /// floor map you haven't stood in front of yet. Eddie, Sept 5: "we
     /// need to stop when we hit a box with a map."
     case viewedMap
+    /// Same idea, for the Floor Mission sign -- Eddie, Sept 7: "we need
+    /// to stop at every wall object... it makes no sense" if you can
+    /// see something on a wall but glide right past it. The sign's
+    /// cell/wall are always fixed now (MazeStore.missionCoordinate), so
+    /// unlike floor maps there's only ever one of these per floor.
+    case viewedMissionSign
+    /// Same "hand control back" category again, for a wall-mounted
+    /// picture you haven't stood in front of yet -- Eddie, Sept 9:
+    /// pictures are purely aesthetic ("nothing to do... just looked
+    /// at"), but still need a forced pause so there's actually a
+    /// moment to look, same as a floor map or the mission sign.
+    case viewedRoomDoor
+    case viewedPicture
 }
 
 /// Same rule HallwayScene.build(fromMaze:) uses to orient the camera at

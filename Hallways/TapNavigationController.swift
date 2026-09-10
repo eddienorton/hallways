@@ -50,10 +50,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private let eyeHeight: Float
     /// Units/sec while animating between cell centers.
     private let travelSpeed: Double = 6.0
-
     // Aspect-compensated lighting (see header note above).
     private weak var scene: SCNScene?
     private weak var headlampLight: SCNLight?
+    private weak var ambientLight: SCNLight?
     private var baseFogStart: Double = 0
     private var baseFogEnd: Double = 0
     private var baseAttenStart: Double = 0
@@ -80,6 +80,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// rather than a direct MazeStore reference so this class stays
     /// decoupled from persistence, same reasoning as onReachedEnd.
     var onCollectCash: ((Int) -> Void)?
+    /// Fired alongside SoundEffects.playTrashPickup() below -- purely
+    /// for ContentView's temporary visual feedback (Eddie, Sept 9).
+    /// Not used for scoring or state; MazeStore.markTrashPickup() just
+    /// records the event for the onChange to pick up.
+    var onCollectTrash: (() -> Void)?
     /// True while a finger is actively dragging a left/right turn —
     /// distinct from isAnimating, which is the TIMED pivot/translate
     /// animation state. A live drag drives the camera's yaw directly,
@@ -139,6 +144,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// WHAT to add to the carried list and WHICH node to hide.
     private let objectKinds: [GridCoordinate: ObjectKind]
     private let objectNodes: [GridCoordinate: SCNNode]
+    /// Which ObjectKind completes THIS floor's mission, or nil for a
+    /// floor with no mission gate at all -- see isMissionComplete's own
+    /// doc comment for the full completion rule. Floor 1 sets this to
+    /// .trashCan (Eddie, Sept 7: "since we already have the trash
+    /// pretty much in there, lets make it the first floors mission").
+    private let missionObjectKind: ObjectKind?
     /// Which of objectKinds' coordinates have been picked up this run --
     /// doubles as the "already collected?" check so walking back over an
     /// empty cell doesn't re-collect it. Cleared by reset(), which also
@@ -149,6 +160,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Every object picked up this run, oldest first -- what the HUD
     /// strip in ContentView actually displays.
     @Published private(set) var collectedObjects: [ObjectKind] = []
+    @Published private(set) var carriedMail: [CarriedRoomItem] = []
+    private let roomDoors: [GridCoordinate: RoomDoorPlacement]
+    private let itemRooms: [GridCoordinate: Int]
+    private var deliveredMail: Set<GridCoordinate> = []
 
     /// The deposit half of the mechanic -- same shape as objectKinds/
     /// objectNodes above, but destinationNodes points at the metal
@@ -161,10 +176,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// init so reset() can snap it straight back there regardless of
     /// how far an in-progress slide animation had gotten.
     private let destinationClosedPositions: [GridCoordinate: SCNVector3]
-    /// Which destinations have actually been opened this run -- the
-    /// "already delivered, don't re-trigger" check, mirroring
-    /// collectedCoords.
-    private var deliveredCoords: Set<GridCoordinate> = []
+    /// Lock navigation during an open/drop/close cycle; reset invalidates
+    /// callbacks from the old cycle. Chutes remain reusable afterward.
+    @Published private(set) var chuteInUse = false
+    private var chuteRunID = UUID()
+    private var elevatorWarningNode: SCNNode?
 
     /// The elevator's 2 door panels and which wall they're mounted on
     /// -- all nil for the empty-maze fallback prototype and for a
@@ -174,6 +190,21 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private let elevatorLeftDoor: SCNNode?
     private let elevatorRightDoor: SCNNode?
     private let elevatorMountDirection: Direction?
+    /// The ride's floor-indicator row, Sept 7 -- Eddie: "we have the
+    /// buttons on the wall, and the button thats lit up is the next
+    /// floor above us." Redesigned the same day, after actually
+    /// watching it play out, into "just a small row of numbers along
+    /// the top" -- one digit per floor, lit for whichever floor is
+    /// current or the ride's destination. Comes straight from
+    /// HallwayScene's addElevatorDoor, empty for the same floors
+    /// elevatorLeftDoor etc are nil for.
+    private let elevatorButtonNodes: [Int: SCNNode]
+    /// This floor's own number and which floor riding the elevator
+    /// leads to -- mazeIDs double as floor numbers (see MazeStore's
+    /// floorCount), so these are just mazeStore.currentMazeID/
+    /// nextMazeID at the moment this controller got built.
+    private let floorNumber: Int
+    private let nextFloorNumber: Int?
     /// Each door panel's shut position, captured once at init -- same
     /// idea as destinationClosedPositions above, so reset() can snap
     /// both panels straight back regardless of how far an in-progress
@@ -228,8 +259,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // elevator all day... feel free"). !elevatorInUse is the real
     // remaining concern -- don't let the player walk off mid-slide
     // while the doors are actually open/animating.
-    var canGoForward: Bool { !isAnimating && !isDragRotating && !elevatorInUse && openDirections.contains(facing) }
-    var canRotate: Bool { !isAnimating && !isDragRotating && !elevatorInUse }
+    var canGoForward: Bool { !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && openDirections.contains(facing) }
+    var canRotate: Bool { !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse }
 
     private enum SegmentPhase {
         case pivot      // rotating in place, position unchanged
@@ -290,6 +321,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// same as the other two.
     private var viewedFloorMapCoords: Set<GridCoordinate> = []
 
+    /// Every cell the (one, fixed) Floor Mission sign is mounted at --
+    /// same role as floorMapCoords just above, except there's only
+    /// ever one entry now that MazeStore forces the sign onto its own
+    /// fixed missionCoordinate cell. Eddie, Sept 7: "we need to stop at
+    /// every wall object... i noticed this with the mission banner."
+    private let missionSignCoords: Set<GridCoordinate>
+    /// Same "already stood here once, don't force another stop" role
+    /// as viewedFloorMapCoords, for the mission sign.
+    private var viewedMissionSignCoords: Set<GridCoordinate> = []
+
+    /// Every cell a decorative Picture is mounted at -- same role as
+    /// floorMapCoords/missionSignCoords above. Eddie, Sept 9: pictures
+    /// are aesthetic only ("nothing that has to be solved - just
+    /// looked at"), but still need a forced pause -- "you will have to
+    /// force a pause by a picture so we can stop and see it."
+    private let pictureCoords: Set<GridCoordinate>
+
     /// Every "You Are Here" map's picture plane for this floor, straight
     /// from HallwayScene.build(fromMaze:)'s own floorMapPlaneNodes --
     /// used two ways: isFloorMapNode(_:) below matches a tapped node
@@ -318,7 +366,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// no extra bookkeeping a dedicated close method would need to do.
     @Published var floorMapOverlayVisible = false
 
-    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = []) {
+    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionObjectKind: ObjectKind? = nil) {
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -329,8 +377,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.facing = startFacing
         self.endCell = endCell
         self.eyeHeight = cameraNode.position.y
+        self.roomDoors = roomDoors
+        self.itemRooms = itemRooms
         self.objectKinds = objects
         self.objectNodes = objectNodes
+        self.missionObjectKind = missionObjectKind
         self.destinationKinds = destinations
         self.destinationNodes = destinationNodes
         self.destinationClosedPositions = destinationNodes.mapValues { $0.position }
@@ -339,9 +390,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.elevatorMountDirection = elevatorMountDirection
         self.elevatorLeftClosedPosition = elevatorLeftDoor?.position
         self.elevatorRightClosedPosition = elevatorRightDoor?.position
+        self.elevatorButtonNodes = elevatorButtonNodes
+        self.floorNumber = floorNumber
+        self.nextFloorNumber = nextFloorNumber
         self.exitSignNodes = exitSignNodes
         self.exitSignDirections = exitSigns
         self.floorMapCoords = Set(floorMaps.keys)
+        self.missionSignCoords = Set(missionSigns.keys)
+        self.pictureCoords = Set(pictures.keys)
         self.floorMapPlaneNodes = floorMapPlaneNodes
         self.mapMaxRow = cells.map { $0.row }.max() ?? 0
         self.mapMaxCol = cells.map { $0.col }.max() ?? 0
@@ -349,6 +405,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
         let foundLight = cameraNode.childNodes.compactMap { $0.light }.first { $0.type == .omni }
         self.headlampLight = foundLight
+        // The ambient light lives on the scene root (HallwayScene.build),
+        // not the camera -- flat and angle-independent by design, which
+        // is exactly why playElevatorRide leans on it below.
+        self.ambientLight = scene.rootNode.childNodes.compactMap { $0.light }.first { $0.type == .ambient }
         // SceneKit declares these distance properties inconsistently
         // (CGFloat in some spots, Double in others, depending on SDK
         // vintage) — Self.doubleValue/.convert below read and write
@@ -546,25 +606,44 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         var runOutcome = outcome
         if let stopIndex = steps.firstIndex(where: { step in
             let coord = step.cell
-            if let kind = objectKinds[coord], kind.cashValue == nil, !collectedCoords.contains(coord) {
-                return true // would pick up something you have to carry -- worth stopping for
+            // Cash used to be excluded here on purpose (instant-absorb,
+            // keep walking) -- Eddie, Sept 6: grabbing money should
+            // pause you in the celebration, same as every other pickup
+            // and the wall map/chute, not sweep the payoff past you
+            // mid-glide. So this is now genuinely "anything not yet
+            // collected," carried or not.
+            if let kind = objectKinds[coord], !collectedCoords.contains(coord) {
+                return true // would pick up (or absorb, for cash) something new -- worth stopping for
             }
-            if destinationKinds[coord] != nil, !deliveredCoords.contains(coord) {
+            if destinationKinds[coord] != nil {
                 return true // an unopened chute -- worth stopping for whether or not you're carrying anything, so there's always a chance to tap the door
             }
-            if floorMapCoords.contains(coord), !viewedFloorMapCoords.contains(coord) {
-                return true // a "You Are Here" map you haven't stood in front of yet
+            if floorMapCoords.contains(coord) {
+                return true // Stop at wall maps on every pass.
+            }
+            if missionSignCoords.contains(coord), !viewedMissionSignCoords.contains(coord) {
+                return true // the Floor Mission sign, first pass this run
+            }
+            if roomDoors[coord] != nil { return true }
+            if pictureCoords.contains(coord) {
+                return true // Stop at pictures on every pass, including return trips.
             }
             return false
         }), stopIndex < steps.count - 1 {
             runSteps = Array(steps[0...stopIndex])
             let stopCoord = runSteps.last!.cell
-            if let kind = objectKinds[stopCoord], kind.cashValue == nil, !collectedCoords.contains(stopCoord) {
+            if let kind = objectKinds[stopCoord], !collectedCoords.contains(stopCoord) {
                 runOutcome = .pickedUpObject
-            } else if destinationKinds[stopCoord] != nil, !deliveredCoords.contains(stopCoord) {
+            } else if destinationKinds[stopCoord] != nil {
                 runOutcome = .delivered
-            } else {
+            } else if floorMapCoords.contains(stopCoord) {
                 runOutcome = .viewedMap
+            } else if missionSignCoords.contains(stopCoord), !viewedMissionSignCoords.contains(stopCoord) {
+                runOutcome = .viewedMissionSign
+            } else if roomDoors[stopCoord] != nil {
+                runOutcome = .viewedRoomDoor
+            } else {
+                runOutcome = .viewedPicture
             }
         }
 
@@ -590,6 +669,29 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         segmentProgress = 0
         phase = .translate
         isAnimating = true
+        // Eddie, Sept 9: "use 'walking.mp3' for normal walking down
+        // hallway. so its only when there is forward movement."
+        // .translate is entered ONLY from here (reset() also sets it,
+        // but straight back to a standstill, no glide) -- every pivot
+        // (rotate()/endDragRotate()) always sets standaloneRotation
+        // and never falls through to .translate, so this is genuinely
+        // forward movement only, never a turn in place.
+        SoundEffects.startWalking()
+    }
+
+    /// Back up one open cell without turning the camera around.
+    func stepBackward() {
+        guard canRotate, openDirections.contains(facing.opposite) else { return }
+        let delta = facing.opposite.delta
+        let target = GridCoordinate(row: currentCell.row + delta.row, col: currentCell.col + delta.col)
+        animationSteps = [NavigationStep(cell: target, heading: facing)]
+        animationIndex = 0
+        pendingOutcome = target == endCell ? .reachedEnd : .steppedBackward
+        segmentStart = cameraNode.position
+        segmentTarget = worldPosition(for: target)
+        segmentProgress = 0
+        phase = .translate
+        isAnimating = true
     }
 
     /// Snap straight back to the start, fully stopped. Wired to the same
@@ -604,6 +706,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func reset() {
         isAnimating = false
         isDragRotating = false
+        SoundEffects.stopWalking()
         transientMessage = nil
         currentCell = startCell
         facing = startFacing
@@ -624,21 +727,33 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             collectedObjects.removeAll()
         }
 
-        if !deliveredCoords.isEmpty {
-            navLog("reset() re-closing \(deliveredCoords.count) delivered destination(s)")
-            for coord in deliveredCoords {
-                destinationNodes[coord]?.removeAllActions()
-                if let closed = destinationClosedPositions[coord] {
-                    destinationNodes[coord]?.position = closed
+        carriedMail.removeAll()
+        deliveredMail.removeAll()
+        chuteRunID = UUID()
+        chuteInUse = false
+        elevatorWarningNode?.removeFromParentNode()
+        elevatorWarningNode = nil
+        for (coord, door) in destinationNodes {
+            door.removeAllActions()
+            if let closed = destinationClosedPositions[coord] { door.position = closed }
+            if let interior = door.parent?.childNode(withName: "chuteInterior", recursively: false) {
+                interior.childNodes.filter { $0.name == "fallingDelivery" }.forEach {
+                    $0.removeAllActions()
+                    $0.removeFromParentNode()
                 }
             }
-            deliveredCoords.removeAll()
         }
 
         if !viewedFloorMapCoords.isEmpty {
             navLog("reset() forgetting \(viewedFloorMapCoords.count) viewed floor map(s)")
             viewedFloorMapCoords.removeAll()
         }
+
+        if !viewedMissionSignCoords.isEmpty {
+            navLog("reset() forgetting \(viewedMissionSignCoords.count) viewed mission sign(s)")
+            viewedMissionSignCoords.removeAll()
+        }
+
 
         if elevatorInUse {
             navLog("reset() snapping elevator doors shut mid-animation")
@@ -649,6 +764,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
             if let closed = elevatorRightClosedPosition {
                 elevatorRightDoor?.position = closed
+            }
+            cameraNode.removeAllActions()
+            // Snap the floor-indicator row back to resting: this
+            // floor's own digit lit, every other floor (including
+            // whatever got lit mid-ride as the next stop) dimmed.
+            let litColor = UIColor(red: 1.0, green: 0.78, blue: 0.2, alpha: 1)
+            elevatorButtonNodes.forEach { floor, node in
+                node.geometry?.firstMaterial?.emission.contents = floor == floorNumber ? litColor : UIColor(white: 0.05, alpha: 1)
             }
             elevatorInUse = false
         }
@@ -664,7 +787,15 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// comment rather than a stub, since there's nothing meaningful to
     /// call yet.
     private func collectObjectIfPresent(at coord: GridCoordinate) {
+        defer { refreshFloorMapTexture() }
         guard let kind = objectKinds[coord], !collectedCoords.contains(coord) else { return }
+        if kind == .envelope {
+            guard let room = itemRooms[coord], roomDoors.values.contains(where: { $0.roomNumber == room }) else {
+                showMessage("This letter needs a valid room address in the editor.")
+                return
+            }
+            carriedMail.append(CarriedRoomItem(id: coord, roomNumber: room))
+        }
         collectedCoords.insert(coord)
         objectNodes[coord]?.removeFromParentNode()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -673,14 +804,24 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // never added to the carried list -- no HUD strip icon, no
             // elevator gate, nothing left to deliver.
             navLog("collected cash $\(value) at \(coord)")
+            SoundEffects.playCashPickup()
             onCollectCash?(value)
-        } else {
+        } else if kind != .envelope {
             collectedObjects.append(kind)
             navLog("collected \(kind) at \(coord) -- total carried: \(collectedObjects.count)")
+            // Eddie, Sept 9: enclosed 2 pickup sounds specifically for
+            // trash ("a few sounds associated with picking up and
+            // throwing out the trash") -- SoundEffects picks randomly
+            // between them each call, so a run of several pickups in a
+            // row doesn't play the identical sound every time. Other
+            // carried kinds (envelope, heart, star, ...) stay silent
+            // here for now, same as before -- these 2 assets are
+            // trash-specific, not a generic pickup sound.
+            if kind == .trashCan {
+                SoundEffects.playTrashPickup()
+                onCollectTrash?()
+            }
         }
-        // TODO(sound): play a pickup sound effect here once Eddie has
-        // sound assets in the project (a distinct "cha-ching" for
-        // cash vs. whatever trash gets).
     }
 
     /// Called alongside collectObjectIfPresent at every cell a walk
@@ -693,22 +834,31 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     ///
     /// Eddie, Sept 6: "it just blows by maps on the wall. can you make
     /// it stop" -- advance()'s truncation scan (see its own comment)
-    /// already DOES stop the walk dead at an unviewed map's cell, same
+    /// DOES stop the walk dead at an unviewed map's cell, same
     /// mechanism that stops it at an uncollected object or an unopened
-    /// chute. The difference is those two have something visible happen
-    /// right after the stop (the object disappears into the HUD, the
-    /// chute's door slides up, or -- empty-handed -- a message says so)
-    /// -- a floor map had nothing: the walk genuinely halted, but
-    /// nothing on screen said so, so a real stop read exactly like no
-    /// stop at all. Same fix as the chute's empty-handed case: a
-    /// transientMessage the instant this cell is newly marked viewed
-    /// (guarded so a LATER pass through an already-seen map — which
-    /// advance() no longer even stops for — doesn't re-show it).
+    /// chute. Originally paired with a transientMessage ("You check
+    /// the wall map") the instant a cell was newly marked viewed, same
+    /// pattern as the chute's empty-handed case -- since removed
+    /// (Eddie, Sept 6: "get rid of the 'You check the wall map'") now
+    /// that tapping the map itself blows it up full-screen, which is
+    /// its own unmistakable feedback that something happened; the text
+    /// line was redundant with that, or beat it there and then felt
+    /// like a non sequitur once the map didn't actually open. Still
+    /// tracks viewedFloorMapCoords -- that set is what advance()'s scan
+    /// above checks to decide whether THIS map still needs to force a
+    /// stop, independent of whatever feedback (if any) accompanies it.
     private func markFloorMapViewedIfPresent(at coord: GridCoordinate) {
         guard floorMapCoords.contains(coord) else { return }
         guard !viewedFloorMapCoords.contains(coord) else { return }
         viewedFloorMapCoords.insert(coord)
-        showMessage("You check the wall map")
+    }
+
+    /// Same shape as markFloorMapViewedIfPresent, for the Floor Mission
+    /// sign.
+    private func markMissionSignViewedIfPresent(at coord: GridCoordinate) {
+        guard missionSignCoords.contains(coord) else { return }
+        guard !viewedMissionSignCoords.contains(coord) else { return }
+        viewedMissionSignCoords.insert(coord)
     }
 
     /// Maps a hit-tested SceneKit node back to the destination cell it
@@ -731,7 +881,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// longer opens itself, and now tells you plainly if there was
     /// never anything to deposit (see depositIfPresent's own comment).
     func openDestinationDoor(at coord: GridCoordinate) {
-        guard coord == currentCell else { return }
+        guard coord == currentCell, !isAnimating, !isDragRotating, !chuteInUse, !elevatorInUse else { return }
         depositIfPresent(at: coord)
     }
 
@@ -750,6 +900,51 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// isElevatorDoor above, just against every plane rather than a
     /// fixed pair, since a floor can have more than one map placed on
     /// it. Eddie, Sept 6: "when you tap the wall map, let it blow up."
+    func pinchForward() {
+        guard canRotate else { return }
+        if currentCell == endCell, facing == elevatorMountDirection {
+            openElevator()
+        } else {
+            advance()
+        }
+    }
+
+    func roomDoorCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var candidate: SCNNode? = node
+        while let current = candidate {
+            if let name = current.name, name.hasPrefix("roomDoor_"),
+               let number = Int(name.dropFirst("roomDoor_".count)) {
+                return roomDoors.first { $0.value.roomNumber == number }?.key
+            }
+            candidate = current.parent
+        }
+        return nil
+    }
+
+    func deliverMail(at coord: GridCoordinate) {
+        guard canRotate, coord == currentCell, let door = roomDoors[coord], facing == door.direction else { return }
+        let matching = carriedMail.filter { $0.roomNumber == door.roomNumber }
+        guard !matching.isEmpty else {
+            showMessage("No mail for Room \(door.roomNumber).")
+            return
+        }
+        let ids = Set(matching.map(\.id))
+        carriedMail.removeAll { ids.contains($0.id) }
+        deliveredMail.formUnion(ids)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage(isMissionComplete ? "All mail delivered! Return to the elevator." : "Delivered to Room \(door.roomNumber).")
+        if let roomNode = scene?.rootNode.childNode(withName: "roomDoor_\(door.roomNumber)", recursively: true) {
+            let letter = HallwayScene.makeEnvelopeNode(roomNumber: door.roomNumber, width: 0.28, spinning: false)
+            letter.position = SCNVector3(0, 1.05, 0.65)
+            roomNode.addChildNode(letter)
+            letter.runAction(.sequence([
+                .group([.move(to: SCNVector3(0, 1.05, 0.1), duration: 0.65), .customAction(duration: 0.65) { node, elapsed in node.scale.y = 1 - Float(elapsed / 0.65) * 0.9 }]),
+                .fadeOut(duration: 0.1), .removeFromParentNode()
+            ]))
+        }
+        refreshFloorMapTexture()
+    }
+
     func isFloorMapNode(_ node: SCNNode) -> Bool {
         floorMapPlaneNodes.contains(where: { $0 === node })
     }
@@ -767,7 +962,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// skips generating in that case.
     private func refreshFloorMapTexture() {
         guard !floorMapPlaneNodes.isEmpty else { return }
-        let image = HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell)
+        let missionItemCells = objectKinds.filter { $0.value == missionObjectKind && !collectedCoords.contains($0.key) }.map { $0.key }
+        let missionDestinationCells = destinationKinds.filter { $0.value == missionObjectKind }.map { $0.key }
+        let image = HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, roomDoors: roomDoors, itemRooms: itemRooms)
         for plane in floorMapPlaneNodes {
             plane.geometry?.materials.first?.diffuse.contents = image
         }
@@ -792,10 +989,70 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// you're standing in front of them, spawn included, any time,
     /// exactly the "just another activity" the elevator's supposed to
     /// be now.
+    /// True when this floor either has no mission set at all
+    /// (missionObjectKind is nil -- every floor until missions are
+    /// actually authored) or every object of that kind has been both
+    /// picked up AND delivered. "Delivered" specifically means gone
+    /// from collectedObjects (the live FIFO carry queue), not merely
+    /// picked up -- since nothing enforces a carry limit
+    /// (collectObjectIfPresent's collectedObjects.append(kind) is
+    /// unconditional), a kind sitting in collectedCoords but STILL
+    /// present in collectedObjects means it's been picked up but not
+    /// yet dropped in a chute, so the mission isn't done. Eddie, Sept
+    /// 7: "you have to do that in order for the elevator to let you
+    /// get in and go to the next floor."
+    var isMissionComplete: Bool {
+        guard let kind = missionObjectKind else { return true }
+        let requiredCoords = objectKinds.filter { $0.value == kind }.keys
+        if kind == .envelope { return requiredCoords.allSatisfy { deliveredMail.contains($0) } }
+        guard requiredCoords.allSatisfy({ collectedCoords.contains($0) }) else { return false }
+        return !collectedObjects.contains(kind)
+    }
+
+    /// Fired the instant openElevator() rejects a tap because
+    /// isMissionComplete is false -- ContentView's ElevatorAlarmOverlay
+    /// watches this (not transientMessage, which only a nested
+    /// @ObservedObject view ever sees anyway) to strobe the whole
+    /// screen red. Carries its own id so two rejections in a row (Eddie
+    /// tapping the doors twice while still short) still count as two
+    /// distinct events, same reason MazeStore.CashPickupEvent does.
+    struct ElevatorRejectionEvent: Equatable {
+        let id = UUID()
+    }
+    @Published private(set) var elevatorRejected: ElevatorRejectionEvent?
+
+    /// One "the ride is done, swap the floor now" event -- watched by
+    /// ContentView's ElevatorCurtainOverlay, which shows itself already
+    /// fully closed (a seamless continuation of the just-closed 3D
+    /// doors) the instant this fires, then slides open a beat later
+    /// once the actual floor swap (called right alongside this, see
+    /// playElevatorRide) has settled in behind it. Same "own id so two
+    /// in a row still count as two events" shape as every other event
+    /// on this controller.
+    struct FloorTransitionEvent: Equatable {
+        let id = UUID()
+    }
+    @Published private(set) var floorTransitionRequested: FloorTransitionEvent?
+
     func openElevator() {
-        guard currentCell == endCell, !elevatorInUse,
+        guard currentCell == endCell, !elevatorInUse, !chuteInUse,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
               let direction = elevatorMountDirection else { return }
+        guard isMissionComplete else {
+            // .error instead of the old .warning -- Eddie, Sept 7:
+            // "make them feel shitty." Paired with a siren
+            // (SoundEffects.playAlarm) and a full-screen red strobe
+            // (elevatorRejected, watched by ElevatorAlarmOverlay) --
+            // the gray transientMessage capsule stays too, so there's
+            // still a plain-English reason on screen once the alarm
+            // itself settles down.
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            showElevatorMissionWarning()
+            elevatorRejected = ElevatorRejectionEvent()
+            return
+        }
+        elevatorWarningNode?.removeFromParentNode()
+        elevatorWarningNode = nil
         elevatorInUse = true
 
         // Which world axis the 2 panels actually slide along -- must
@@ -809,6 +1066,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         case .north, .south: (alongWallX, alongWallZ) = (1, 0)
         case .east, .west: (alongWallX, alongWallZ) = (0, 1)
         }
+        // Which way "forward, into the shaft" is -- same (row, col)
+        // delta driving every normal walking step (see worldPosition),
+        // just used here for a scripted dolly instead of a tapped one.
+        let forwardX = CGFloat(direction.delta.col)
+        let forwardZ = CGFloat(direction.delta.row)
         let slide: CGFloat = 0.8
 
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -818,66 +1080,374 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // (open and close both) and the open-dwell 0.9->1.6 to stay
         // proportional, so the whole sequence reads more like a real
         // elevator taking its time rather than a quick blip.
-        let elevatorSlideDuration: TimeInterval = 1.3
-        let elevatorDwell: TimeInterval = 1.6
+        let elevatorSlideDuration: TimeInterval = 1.6
+        let elevatorDwell: TimeInterval = 2.0
         let openLeft = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
         let openRight = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
         openLeft.timingMode = .easeInEaseOut
         openRight.timingMode = .easeInEaseOut
-        leftDoor.runAction(openLeft)
-        rightDoor.runAction(openRight) {
-            // A brief dwell with the doors open (like actually
-            // stepping in) before they close again and the floor
-            // underneath finally switches. SCNAction completion
-            // handlers can fire off the main thread, so everything
-            // here goes through a main-thread dispatch.
-            DispatchQueue.main.asyncAfter(deadline: .now() + elevatorDwell) {
-                navLog("elevator: closing")
-                let closeLeft = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
-                let closeRight = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
-                closeLeft.timingMode = .easeInEaseOut
-                closeRight.timingMode = .easeInEaseOut
-                leftDoor.runAction(closeLeft)
-                rightDoor.runAction(closeRight) { [weak self] in
-                    DispatchQueue.main.async {
-                        navLog("elevator: closed -- advancing floor")
-                        self?.onReachedEnd?()
+        SoundEffects.playElevatorArrival()
+        let arrivalDelay = SoundEffects.elevatorDoorOpeningDelay
+        leftDoor.runAction(.sequence([.wait(duration: arrivalDelay), openLeft]))
+        rightDoor.runAction(.sequence([.wait(duration: arrivalDelay), openRight])) { [weak self] in
+            // Eddie, Sept 7: "you step into the elevator, then the box
+            // youre in automatically spins 180 degrees in your view...
+            // then the animation showing the floor change, then the
+            // doors open" -- no player input at all, purely scripted
+            // ("why burden them with another cmd for a benefit thats
+            // so tiny"). Only plays when there's actually a next floor
+            // AND its panel got built; an unlinked last floor falls
+            // back to the original plain open/dwell/close below, same
+            // as before this ride existed, since there's nowhere to go.
+            guard let self else { return }
+            if let next = self.nextFloorNumber,
+               let targetButton = self.elevatorButtonNodes[next] {
+                DispatchQueue.main.async {
+                    self.playElevatorRide(leftDoor: leftDoor, rightDoor: rightDoor, alongWallX: alongWallX, alongWallZ: alongWallZ, forwardX: forwardX, forwardZ: forwardZ, slide: slide, elevatorSlideDuration: elevatorSlideDuration, targetButton: targetButton, next: next)
+                }
+            } else {
+                // A brief dwell with the doors open (like actually
+                // stepping in) before they close again and the floor
+                // underneath finally switches. SCNAction completion
+                // handlers can fire off the main thread, so everything
+                // here goes through a main-thread dispatch.
+                DispatchQueue.main.asyncAfter(deadline: .now() + elevatorDwell) {
+                    navLog("elevator: closing")
+                    let closeLeft = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
+                    let closeRight = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
+                    closeLeft.timingMode = .easeInEaseOut
+                    closeRight.timingMode = .easeInEaseOut
+                    leftDoor.runAction(closeLeft)
+                    rightDoor.runAction(closeRight) { [weak self] in
+                        DispatchQueue.main.async {
+                            navLog("elevator: closed -- advancing floor")
+                            self?.onReachedEnd?()
+                        }
                     }
                 }
             }
         }
     }
 
-    /// The actual deposit logic, called only from openDestinationDoor
-    /// above (a real tap on the door). If this cell holds a destination
-    /// that hasn't been opened yet AND you're carrying anything at all,
-    /// this is the deposit moment: the shutter slides up (visual
-    /// confirmation), the oldest thing you're carrying comes off the
-    /// list, and an immediate haptic marks it -- no matching required,
-    /// any chute takes any trash. Eddie, Sept 5, on why matching went
-    /// away: "let them dump their garbage anywhere. that whole having
-    /// to match puts undo stress on the game." Tapping an unopened
-    /// chute with NOTHING carried used to just silently do nothing --
-    /// same Sept 5 round: "if you have no trash and you try to open it,
-    /// you need a message" -- so that case now puts up a transientMessage
-    /// instead of quietly staying shut.
+    /// The ride itself, Sept 7 -- a step forward into the shaft, an
+    /// automatic 180 spin (no player input at all), the same doors
+    /// closing now that they're dead ahead again, the panel lighting
+    /// up to show which floor's next, and finally a hand-off to
+    /// ContentView's screen-space curtain (floorTransitionRequested)
+    /// for the "doors reopening" beat -- the 3D doors/camera/scene
+    /// this whole ride just used all get thrown away and rebuilt fresh
+    /// the moment the floor actually swaps, so there's no way to keep
+    /// animating THIS SAME set of doors reopening across that boundary.
+    private func playElevatorRide(leftDoor: SCNNode, rightDoor: SCNNode, alongWallX: CGFloat, alongWallZ: CGFloat, forwardX: CGFloat, forwardZ: CGFloat, slide: CGFloat, elevatorSlideDuration: TimeInterval, targetButton: SCNNode, next: Int) {
+        // Eddie, Sept 9: "use elevator-music" -- for the ride itself,
+        // not the initial door-open (that's its own one-shot, right
+        // above in openElevator()). Stopped explicitly below rather
+        // than left to loop/finish on its own, so it never plays on
+        // into the next floor once the ride hands off to the curtain.
+        SoundEffects.playElevatorMusic()
+        // Eddie, Sept 8, after several rounds of tuning individual
+        // beats (dolly distance, a separate post-dolly "clear the
+        // doorway" nudge, when to close the doors) kept surfacing new
+        // side effects of each other: "so that 2nd zoom isnt
+        // necessary, and the pivot shows walls it shouldnt... the
+        // closed doors should already be there instead of appearing
+        // after you finish the 180 pivot." Collapsed back down to the
+        // simplest version that can possibly work: ONE dolly, straight
+        // to a spot solidly inside the shaft, THEN a pure in-place
+        // rotation with no camera movement at all -- nothing left to
+        // choreograph around. The doors close during the back-wall
+        // dwell, off-screen (you're facing the photo, not them), so
+        // by the time the rotation finishes they're already shut and
+        // waiting, not popping in afterward.
+        //
+        // The 1.8 dolly distance is the shaft's own dead center (doors
+        // at 1.6, back wall at 2.0) -- the maximum possible clearance
+        // from the doorway's open edge in either direction, so the
+        // full 180 has that same margin on every side rather than
+        // relying on a second, separately-timed step to reach it.
+        // Ending this close to the photo also means the doors/frame/
+        // handrail (the reflective, physically-based materials) are
+        // back inside the headlamp's point-blank blowout radius for
+        // the whole dwell, not just the tail end.
+        //
+        // Eddie, Sept 8, next report: "you can see the pic on the
+        // back wall... but a 1/2 sec after the elev doors open, the
+        // wall behind the pic turns black for some reason. THEN it
+        // zooms." Dimming applied here, at the very top of the
+        // function, fires during the 0.5-second pause below, before
+        // the dolly has even started moving -- so the very first
+        // thing that happens is a static frame going dim for no
+        // visible reason, and only after that does the zoom begin.
+        // Moved down into the same instant the dolly itself starts
+        // (right before runAction(dolly) below) instead, so any
+        // change in the shaft's lighting happens as part of the zoom
+        // already being in motion, not as its own unexplained beat
+        // beforehand.
+        let originalHeadlampIntensity = headlampLight?.intensity
+        let originalAmbientIntensity = ambientLight?.intensity
+        func restoreShaftLighting() {
+            if let originalHeadlampIntensity { headlampLight?.intensity = originalHeadlampIntensity }
+            if let originalAmbientIntensity { ambientLight?.intensity = originalAmbientIntensity }
+        }
+
+        // Eddie, Sept 8: "its still zooming in just as much to
+        // that back wall - and all walls as its turning to the
+        // doors." 1.8 was dead-center of the OLD 0.4-deep shaft --
+        // 1.6 (door plane) + 0.2. HallwayScene's elevatorShaftDepth
+        // is now 1.6 (a roughly square car), so dead-center moves
+        // out to 1.6 + 0.8 = 2.4 -- same 0.2-margin-on-both-sides
+        // rule that avoids the brick-during-pivot bug, just against
+        // the new, deeper shaft. This is what actually backs the
+        // camera off the photo AND the doors (dead-center means the
+        // distance to both is identical) -- resizing the photo
+        // itself didn't touch the zoom because the zoom was always
+        // about how close the camera's fixed resting spot was.
+        let dollyDistance: CGFloat = 2.4
+        // 1.73s instead of the old 1.3s -- same travel speed as before
+        // (distance grew from 1.8 to 2.4 along with the deeper shaft;
+        // duration grows with it so the dolly still feels like the
+        // same motion, not a rushed longer trip).
+        let dolly = SCNAction.move(by: SCNVector3(Float(forwardX * dollyDistance), 0, Float(forwardZ * dollyDistance)), duration: 1.73)
+        dolly.timingMode = .easeInEaseOut
+        let rotate = SCNAction.rotateBy(x: 0, y: .pi, z: 0, duration: 1.3)
+        rotate.timingMode = .easeInEaseOut
+
+        func closeDoorsNow() {
+            navLog("elevator: closing (ride)")
+            // Eddie, Sept 8, looking at the doors-closed frame:
+            // "you can totally get rid of the 2 1 (floor numbers)
+            // at the top of the elevator... its perfect just with
+            // the doors taking the whole screen then opening. get
+            // rid of the numbers completely." This was the one
+            // call that ever revealed them (HallwayScene still
+            // builds the digit nodes, just permanently at opacity
+            // 0 now that nothing turns them back on).
+            let closeLeft = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
+            let closeRight = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
+            closeLeft.timingMode = .easeInEaseOut
+            closeRight.timingMode = .easeInEaseOut
+            leftDoor.runAction(closeLeft)
+            rightDoor.runAction(closeRight)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            // Eddie, Sept 8: "just before the backwall zooms in,
+            // that back wall turns a really dark gray. whats
+            // happening? are you changing the color or is that just
+            // a lighting issue?" Lighting, not color -- the panel's
+            // own material (makeElevatorShaftMaterial) never changes,
+            // only how much light is landing on it. What made it
+            // visible as its own beat was the instant, un-animated
+            // jump from 30 to 3: a hard cut a viewer's eye catches
+            // even at the same moment the dolly starts. Wrapping it
+            // in an SCNTransaction ramps it over the same half-
+            // second the dolly takes to ease into motion, so it
+            // reads as the shaft's lighting settling as the ride
+            // begins, not a switch flipping.
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.5
+            // Eddie, Sept 8: "a moment before the doors slide
+            // open, the elevator doors turn this color - no
+            // lighting - and no line between the 2 doors." That's
+            // the final closed-doors dwell, right before the
+            // curtain (styled to look like the same doors) takes
+            // over. The old 3/170 split cut the headlamp to 1/10th
+            // of normal while pushing ambient ABOVE the hallway's
+            // own normal level (110) -- ambient has no direction,
+            // so with the headlamp cut that hard, ambient was
+            // providing nearly all the light, and flat/undirected
+            // light can't reveal a surface's own shading or the
+            // thin shadowed gap between the 2 door panels -- reads
+            // as one flat, unlit-looking color. 10/130 keeps the
+            // headlamp a real, visible contributor (still well
+            // under its normal 30, avoiding the original blowout)
+            // while pulling ambient back down closer to normal, so
+            // the doors keep some real shading and their seam line
+            // even during the dimmed ride. Safe to loosen now that
+            // the deeper shaft (elevatorShaftDepth 1.6) also backs
+            // the camera 4x further from these doors than when 3/
+            // 170 was first tuned.
+            self.headlampLight?.intensity = 10
+            self.ambientLight?.intensity = 130
+            SCNTransaction.commit()
+            self.cameraNode.runAction(dolly) { [weak self] in
+                guard let self else { return }
+                // Doors start closing here, the instant you're facing
+                // the back wall -- elevatorSlideDuration (1.6s) fits
+                // comfortably inside the 2-second dwell below, so
+                // they're done well before the pivot even starts, let
+                // alone finishes.
+                closeDoorsNow()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    guard let self else { return }
+                    self.cameraNode.runAction(rotate) { [weak self] in
+                        guard let self else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                            guard let self else { return }
+                            navLog("elevator: ride done -- requesting floor transition")
+                            // Eddie, Sept 8: "i guess you need to
+                            // keep tweaking until you nail the same
+                            // exact lighting conditions?" Not
+                            // tweaking -- a real bug. onReachedEnd
+                            // (ContentView's HallwaySceneView) is
+                            // what takes the snapshot the curtain
+                            // shows, but restoreShaftLighting() was
+                            // running BEFORE it, resetting the
+                            // headlamp/ambient back to full
+                            // brightness first -- so the snapshot
+                            // was capturing the doors freshly
+                            // RE-LIT, not the dimmed look the
+                            // player had just been staring at. That
+                            // was the whole difference between the
+                            // 2 screenshots: a real, wrong pixel
+                            // capture, not a lighting mismatch to
+                            // chase down by hand. Snapshot first
+                            // (via onReachedEnd), THEN restore --
+                            // the scene's about to be torn down for
+                            // the next floor regardless, so nothing
+                            // else depends on the old order.
+                            self.floorTransitionRequested = FloorTransitionEvent()
+                            self.onReachedEnd?()
+                            SoundEffects.stopElevatorMusic()
+                            restoreShaftLighting()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shifts the lit floor-indicator digit from this floor to the
+    /// next one -- purely cosmetic, mirrors a real elevator panel
+    /// lighting up your destination as you ride. targetButton came
+    /// straight from HallwayScene's addElevatorDoor; the current
+    /// floor's own digit (already lit at build time) is looked up via
+    /// floorNumber and dimmed back down the same way.
+    private func lightElevatorPanel(targetButton: SCNNode, next: Int) {
+        // Eddie, Sept 8: "the numbers still appear at the top of the
+        // back wall. get rid of them." HallwayScene now builds every
+        // digit node hidden (opacity 0) so none of them are visible
+        // during the step-in/back-wall beat -- this is the one place
+        // they need to become visible again, right as the ride turns
+        // to face the doors and the current floor's digit is about to
+        // hand off to the next one.
+        elevatorButtonNodes.values.forEach { $0.opacity = 1 }
+        let litColor = UIColor(red: 1.0, green: 0.78, blue: 0.2, alpha: 1)
+        elevatorButtonNodes[floorNumber]?.geometry?.firstMaterial?.emission.contents = UIColor(white: 0.05, alpha: 1)
+        targetButton.geometry?.firstMaterial?.emission.contents = litColor
+    }
+
+    /// Open even when empty, empty the carried load into the shaft, and
+    /// close after a 2.5-second dwell. Preserve the existing any-chute rule.
     private func depositIfPresent(at coord: GridCoordinate) {
-        guard destinationKinds[coord] != nil, !deliveredCoords.contains(coord) else { return }
-        guard !collectedObjects.isEmpty else {
-            showMessage("You have no trash to throw out")
-            return
+        guard !chuteInUse, let kind = destinationKinds[coord],
+              let door = destinationNodes[coord],
+              let closed = destinationClosedPositions[coord],
+              let interior = door.parent?.childNode(withName: "chuteInterior", recursively: false),
+              let template = interior.childNode(withName: "deliveryTemplate", recursively: false) else { return }
+        chuteInUse = true
+        chuteRunID = UUID()
+        let runID = chuteRunID
+        let slideDuration = 0.65
+        let openPause = 2.5
+        if kind == .trashCan { SoundEffects.playTrashChute() }
+        let open = SCNAction.move(to: SCNVector3(closed.x, closed.y + 0.66, closed.z), duration: slideDuration)
+        let close = SCNAction.move(to: closed, duration: slideDuration)
+        open.timingMode = .easeInEaseOut
+        close.timingMode = .easeInEaseOut
+        door.runAction(.sequence([
+            open,
+            .run { [weak self, weak interior, weak template] _ in
+                DispatchQueue.main.async {
+                    guard let self, self.chuteRunID == runID, let interior, let template else { return }
+                    let count = self.collectedObjects.count
+                    self.collectedObjects.removeAll()
+                    // One opening empties the carried load. Bound visual particles
+                    // while still accounting for every delivered item.
+                    let visibleCount = min(count, 12)
+                    for index in 0..<visibleCount {
+                        let item = template.clone()
+                        item.name = "fallingDelivery"
+                        item.isHidden = false
+                        item.opacity = 1
+                        item.position.x += Float.random(in: -0.12...0.12)
+                        interior.addChildNode(item)
+                        let stagger = visibleCount > 1 ? Double(index) * 0.65 / Double(visibleCount - 1) : 0
+                        let fall = SCNAction.moveBy(x: 0, y: -4.5, z: -0.12, duration: 1.15)
+                        fall.timingMode = .easeIn
+                        item.runAction(.sequence([
+                            .wait(duration: 0.2 + stagger),
+                            .group([fall, .rotateBy(x: 0.4, y: 1.5, z: 0.3, duration: 1.15),
+                                    .sequence([.wait(duration: 0.75), .fadeOut(duration: 0.4)])]),
+                            .removeFromParentNode()
+                        ]))
+                    }
+                    if count > 0 { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+                    navLog("chute opened at \(coord): dropped \(count) \(kind), carried=\(self.collectedObjects.count), missionComplete=\(self.isMissionComplete)")
+                    // Basement impact audio can be added when its recording is supplied.
+                }
+            },
+            .wait(duration: openPause),
+            .run { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self, self.chuteRunID == runID else { return }
+                    if kind == .trashCan { SoundEffects.playTrashChute() }
+                }
+            },
+            close,
+            .run { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self, self.chuteRunID == runID else { return }
+                    self.chuteInUse = false
+                    navLog("chute closed at \(coord); ready to reuse")
+                }
+            }
+        ]), forKey: "chuteCycle")
+    }
+
+    /// A lit notice attached to the elevator's world position, not the HUD.
+    private func showElevatorMissionWarning() {
+        guard let scene, let left = elevatorLeftDoor, let right = elevatorRightDoor,
+              let direction = elevatorMountDirection, let kind = missionObjectKind else { return }
+        let remaining = objectKinds.filter { $0.value == kind && !collectedCoords.contains($0.key) }.count
+        let carried = kind == .envelope ? carriedMail.count : collectedObjects.filter { $0 == kind }.count
+        let message = "ELEVATOR LOCKED\n\(kind.missionLegendLabel): \(remaining) left to collect\n\(carried) still to drop off"
+        let size = CGSize(width: 900, height: 360)
+        let texture = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemRed.setStroke()
+            let border = UIBezierPath(rect: CGRect(x: 8, y: 8, width: 884, height: 344))
+            border.lineWidth = 12
+            border.stroke()
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineSpacing = 14
+            (message as NSString).draw(in: CGRect(x: 28, y: 42, width: 844, height: 290), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 56),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph
+            ])
         }
-        let kind = collectedObjects.removeFirst()
-        deliveredCoords.insert(coord)
-        if let door = destinationNodes[coord] {
-            let slideUp = SCNAction.moveBy(x: 0, y: 0.66, z: 0, duration: 0.65) // was 0.7 -- Eddie, Sept 5: slides up too far, wants it ~36px shorter so it slightly overlaps the container instead of clearing it with a gap above
-            slideUp.timingMode = .easeInEaseOut
-            door.runAction(slideUp)
-        }
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        navLog("delivered \(kind) at \(coord) -- still carrying: \(collectedObjects.count)")
-        // TODO(sound): play a "delivered" sound effect here once Eddie
-        // has sound assets in the project.
+        let material = SCNMaterial()
+        material.diffuse.contents = texture
+        material.lightingModel = .constant
+        let plane = SCNPlane(width: 1.35, height: 0.54)
+        plane.materials = [material]
+        let notice = SCNNode(geometry: plane)
+        notice.position = SCNVector3((left.position.x + right.position.x) / 2 - Float(direction.delta.col) * 0.1,
+                                     left.position.y + 0.15,
+                                     (left.position.z + right.position.z) / 2 - Float(direction.delta.row) * 0.1)
+        notice.eulerAngles = left.eulerAngles
+        elevatorWarningNode?.removeFromParentNode()
+        elevatorWarningNode = notice
+        scene.rootNode.addChildNode(notice)
+        notice.runAction(.sequence([
+            .repeat(.sequence([.fadeOpacity(to: 0.65, duration: 0.22), .fadeIn(duration: 0.22)]), count: 3),
+            .wait(duration: 4), .fadeOut(duration: 0.5), .removeFromParentNode()
+        ]))
+        navLog("elevator locked: uncollected=\(remaining), carried=\(carried), kind=\(kind)")
     }
 
     /// Puts a short status line up on screen -- see transientMessage's
@@ -1017,6 +1587,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                         self.currentCell = newCell
                         self.collectObjectIfPresent(at: newCell)
                         self.markFloorMapViewedIfPresent(at: newCell)
+                        self.markMissionSignViewedIfPresent(at: newCell)
                         navLog("arrived at \(newCell) facing \(newFacing) -- mid-run")
                     }
                 } else {
@@ -1024,13 +1595,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         self.isAnimating = false
+                        SoundEffects.stopWalking()
                         // facing before currentCell -- see round-9 note
                         // above setExitSignNeon's relative-label logic.
                         self.facing = newFacing
                         self.currentCell = newCell
                         self.collectObjectIfPresent(at: newCell)
                         self.markFloorMapViewedIfPresent(at: newCell)
+                        self.markMissionSignViewedIfPresent(at: newCell)
                         navLog("walk finished at \(newCell) facing \(newFacing), outcome=\(outcome)")
+                        // Eddie, Sept 6: wanted a cue the moment the
+                        // walk locks into an intersection (a real fork
+                        // or a forced turn -- .intersection covers
+                        // both, see walkToNextDecision). Sound tried
+                        // first, then pulled the same day -- it hits
+                        // often enough (every fork, every bend) that it
+                        // got annoying fast; a haptic alone reads as
+                        // "locked in" without wearing out its welcome.
+                        // Deliberately NOT fired for .pickedUpObject/
+                        // .delivered/.viewedMap even though those also
+                        // stop the walk -- those already get their own
+                        // haptic elsewhere (collectObjectIfPresent,
+                        // depositIfPresent), this is specifically the
+                        // "you now have a direction to choose" cue.
+                        if case .intersection = outcome {
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        }
                         // .reachedEnd used to also flip a published
                         // `reachedEnd` flag here -- gone along with the
                         // flag itself (see canGoForward/canRotate and

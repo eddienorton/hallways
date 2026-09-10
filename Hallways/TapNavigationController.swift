@@ -331,7 +331,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// as viewedFloorMapCoords, for the mission sign.
     private var viewedMissionSignCoords: Set<GridCoordinate> = []
 
-    /// Every cell a decorative Picture is mounted at -- same role as
+    /// Every cell a decorative picture or mirror is mounted at -- same role as
     /// floorMapCoords/missionSignCoords above. Eddie, Sept 9: pictures
     /// are aesthetic only ("nothing that has to be solved - just
     /// looked at"), but still need a forced pause -- "you will have to
@@ -366,7 +366,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// no extra bookkeeping a dedicated close method would need to do.
     @Published var floorMapOverlayVisible = false
 
-    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionObjectKind: ObjectKind? = nil) {
+    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionObjectKind: ObjectKind? = nil) {
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -397,7 +397,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.exitSignDirections = exitSigns
         self.floorMapCoords = Set(floorMaps.keys)
         self.missionSignCoords = Set(missionSigns.keys)
-        self.pictureCoords = Set(pictures.keys)
+        self.pictureCoords = Set(pictures.keys).union(mirrors.keys)
         self.floorMapPlaneNodes = floorMapPlaneNodes
         self.mapMaxRow = cells.map { $0.row }.max() ?? 0
         self.mapMaxCol = cells.map { $0.col }.max() ?? 0
@@ -626,7 +626,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
             if roomDoors[coord] != nil { return true }
             if pictureCoords.contains(coord) {
-                return true // Stop at pictures on every pass, including return trips.
+                return true // Stop at pictures and mirrors on every pass, including return trips.
             }
             return false
         }), stopIndex < steps.count - 1 {

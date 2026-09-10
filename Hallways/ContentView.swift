@@ -90,6 +90,7 @@ private struct FallingTrashPiece: Identifiable {
 }
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var tuning = TuningParams()
     @StateObject private var runtime = HallwayRuntime()
     @StateObject private var mazeStore = MazeStore()
@@ -294,7 +295,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            HallwaySceneView(tuning: tuning, runtime: runtime, mazeStore: mazeStore, navBridge: navBridge, themeStore: themeStore)
+            HallwaySceneView(tuning: tuning, runtime: runtime, mazeStore: mazeStore, navBridge: navBridge, themeStore: themeStore, cameraEnabled: scenePhase == .active && !showGridEditor && !showIntroScreen)
                 .id(sceneVersion)
                 .ignoresSafeArea()
 
@@ -858,6 +859,8 @@ struct HallwaySceneView: UIViewRepresentable {
     @ObservedObject var navBridge: NavigationBridge
     @ObservedObject var themeStore: WallThemeStore
 
+    var cameraEnabled: Bool = true
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -888,7 +891,7 @@ struct HallwaySceneView: UIViewRepresentable {
             let start = mazeStore.startCoordinate ?? GridCoordinate(row: 0, col: 0)
             let end = mazeStore.endCoordinate ?? start
             let facing = startingFacing(at: start, cells: mazeStore.cells)
-            let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes) = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current)
+            let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes) = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current)
             view.scene = scene
             view.pointOfView = cameraNode
             context.coordinator.wallMaterials = wallMaterials
@@ -932,7 +935,7 @@ struct HallwaySceneView: UIViewRepresentable {
                     _ = view.prepare(shaftNodes)
                 }
             }
-            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, exitSignNodes: exitSignNodes, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionObjectKind: mazeStore.missionObjectKind)
+            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, exitSignNodes: exitSignNodes, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionObjectKind: mazeStore.missionObjectKind)
             navController.onCollectCash = { [mazeStore] amount in
                 mazeStore.addMoney(amount)
             }
@@ -1061,12 +1064,23 @@ struct HallwaySceneView: UIViewRepresentable {
         view.isPlaying = true
         view.rendersContinuously = true
 
+        if let scene = view.scene {
+            var surfaces: [SCNMaterial] = []
+            scene.rootNode.enumerateChildNodes { node, _ in
+                if node.name == "mirrorSurface", let material = node.geometry?.firstMaterial { surfaces.append(material) }
+            }
+            if !surfaces.isEmpty {
+                context.coordinator.mirrorCamera = MirrorCamera(materials: surfaces)
+                context.coordinator.mirrorCamera?.setActive(cameraEnabled)
+            }
+        }
         context.coordinator.lastResetToken = runtime.resetToken
         context.coordinator.lastTheme = themeStore.current
         return view
     }
 
     func updateUIView(_ uiView: TouchTrackingSCNView, context: Context) {
+        context.coordinator.mirrorCamera?.setActive(cameraEnabled)
         if context.coordinator.lastResetToken != runtime.resetToken {
             context.coordinator.lastResetToken = runtime.resetToken
             // Eddie, Sept 8: reset() mutates a good double-digit count
@@ -1093,7 +1107,14 @@ struct HallwaySceneView: UIViewRepresentable {
         }
     }
 
+    static func dismantleUIView(_ uiView: TouchTrackingSCNView, coordinator: Coordinator) {
+        coordinator.mirrorCamera?.setActive(false)
+        uiView.delegate = nil
+        uiView.isPlaying = false
+    }
+
     final class Coordinator: NSObject {
+        var mirrorCamera: MirrorCamera?
         var movementController: MovementController?
         var navigationController: TapNavigationController?
         var lastResetToken = 0

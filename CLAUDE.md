@@ -17,17 +17,20 @@ Eddie Brayman, 72, independent iOS developer, East Village NYC. 55+ years coding
 
 ---
 
-## Current implementation — Sept 9, 2026 (Codex)
+## Current implementation — Sept 10, 2026 (Codex)
 
 This section supersedes older status and environment notes below. Xcode 26.6 and iOS 26.5 simulators are available here; Codex can compile, run focused tests, launch the app, and inspect simulator screenshots.
 
+- Mirrors are separate wall fixtures (`mirrors`, coordinate + direction) with four editor orientation buttons, cyan placement hints, erase/undo, floor switching, and explicit JSON coding/export. Like pictures, they stop navigation on every pass. Floor 4 has a south-facing mirror at row 11, column 7.
+- `Mirror.swift` provides a framed, mirrored front-camera preview with an aspect-preserving center crop. Camera permission is requested on a mirror floor; capture stops in the editor, during the intro, on inactive/background scenes, and on scene teardown. It saves no images/video and uses no microphone. Simulator/no-camera and denied permission show a placeholder; real camera orientation/appearance still needs device verification. No expression detection or fourth-floor mission is implemented.
+- Room doors have rounded chrome knobs, stems, and circular roses with specular highlights and a reflection texture. Mail slots and delivery behavior are unchanged.
 - Navigation is gesture-based: tap to walk, drag to turn, swipe down/two-finger tap to turn around. Pinch-out walks forward or opens the elevator when facing its doors; pinch-in backs up one cell without turning. Wall maps and pictures stop movement on every pass. Wall-map taps no longer open the full-screen map; the editor remains reachable from the HUD.
 - Mission posters are 25% taller with larger type and a centered heading. Wall maps/frames are 40% larger; legend plaque size is unchanged.
-- Floor 3 is a bundled mail-delivery loop with rooms 301–304 and four addressed envelopes. Floor 2 links to floor 3. Startup reads the bundled three-floor library. Editor saves also write a local mazes.json backup; that backup is not loaded by this recovered version.
+- Floor 3 is a bundled mail-delivery loop with rooms 301–304 and four addressed envelopes. Floor 2 links to floor 3. Floor 3 links to floor 4, a two-cell mirror preview directly opposite the elevator (no mission yet). Startup reads the bundled four-floor library. Editor saves also write a local mazes.json backup; that backup is not loaded by this recovered version.
 - `MailDelivery.swift` contains room/mail models and SceneKit artwork: floor-standing wooden doors with numbered plaques and mail slots, plus flat spinning envelopes with readable addresses on both faces.
 - Door numbers and per-envelope addresses persist through explicit `MazeRecord` coding, saves, floor switches, export and undo. Editor Door controls choose the wall; numbers are assigned automatically. Mail placement has an optional destination-room selector. Doors should be placed before letters; unaddressed letters are assigned when a door is added. Deleting a door leaves its mail address intact for explicit reassignment; invalid mail cannot be picked up.
 - Carried mail is separate from ordinary carried objects, shown with room numbers. Tap the matching door while standing in its cell and facing it to deliver only that room's mail. Trash chutes cannot discard mail. Mission completion requires actual delivery of every placed letter.
-- Focused simulator tests cover addressed delivery, wrong/remote door rejection, reset, repeated map stops, backward facing preservation, and elevator pinch mission gating. All passed on Sept 9. Visual feel still benefits from Eddie's playtesting.
+- Focused simulator tests cover addressed delivery, wrong/remote door rejection, reset, repeated map stops, backward facing preservation, and elevator pinch mission gating. All nine tests passed on Sept 10, including mirror JSON export/undo/floor switching, wall orientations, and return-trip stops. Simulator render previews also checked the editor, mirror, and chrome knobs. Visual feel still benefits from Eddie's playtesting.
 
 ## Recovery — Sept 9, 2026 (evening)
 

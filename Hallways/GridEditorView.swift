@@ -176,6 +176,7 @@ struct GridEditorView: View {
     /// grabs a random one from the bundled Pictures folder at build
     /// time, so this screen only ever decides where, never which photo.
     @State private var pictureDirectionToPlace: Direction? = nil
+    @State private var mirrorDirectionToPlace: Direction? = nil
     @State private var doorDirectionToPlace: Direction? = nil
     @State private var mailRoomToPlace: Int? = nil
     /// Same idea once more, for placing a ceiling spotlight -- mutually
@@ -312,6 +313,13 @@ struct GridEditorView: View {
                 }
             }
             .overlay {
+                if let direction = mirrorDirectionToPlace, mazeStore.canPlaceMirror(direction, at: coord) {
+                    Rectangle()
+                        .fill(Color.cyan.opacity(0.35))
+                        .overlay(Rectangle().stroke(Color.cyan, lineWidth: 2))
+                }
+            }
+            .overlay {
                 // Same eligibility preview as the Map row above, for
                 // Picture placement -- pink to match that toolbar row.
                 if let direction = pictureDirectionToPlace, mazeStore.isOpen(coord) {
@@ -410,6 +418,26 @@ struct GridEditorView: View {
                                 .background(Color.white.opacity(0.85), in: Circle())
                                 .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
                         }
+                    }
+                    .padding(3)
+                }
+            }
+            .overlay {
+                // Mirror uses the picture marker position; the fixtures are mutually exclusive.
+                if let direction = mazeStore.mirrorDirection(at: coord) {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "person.crop.rectangle")
+                                .font(.system(size: cellSize * 0.3, weight: .heavy))
+                                .foregroundStyle(Color.cyan)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .padding(2)
+                                .background(Color.white.opacity(0.85), in: Circle())
+                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+                            Spacer()
+                        }
+                        Spacer()
                     }
                     .padding(3)
                 }
@@ -537,7 +565,7 @@ struct GridEditorView: View {
         } else if let direction = doorDirectionToPlace, mazeStore.isOpen(coord) {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             if !mazeStore.isOpen(neighbor), coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate,
-               mazeStore.floorMaps[coord] == nil, mazeStore.pictures[coord] == nil, mazeStore.destinations[coord] == nil {
+               mazeStore.floorMaps[coord] == nil, mazeStore.pictures[coord] == nil, mazeStore.mirrors[coord] == nil, mazeStore.destinations[coord] == nil {
                 Rectangle().stroke(Color.brown, lineWidth: 3)
             }
         }
@@ -636,7 +664,7 @@ struct GridEditorView: View {
                 // active.
                 Button {
                     objectKindToPlace = (objectKindToPlace == .trashCan) ? nil : .trashCan
-                    if objectKindToPlace != nil { doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     // Was green -- Eddie, Sept 5, twice now: "extremely
                     // difficult to see" against this same
@@ -659,7 +687,7 @@ struct GridEditorView: View {
                 // model needed.
                 Button {
                     objectKindToPlace = (objectKindToPlace == .cash100) ? nil : .cash100
-                    if objectKindToPlace != nil { doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: objectKindToPlace == .cash100 ? "dollarsign.circle.fill" : "dollarsign.circle")
                         .font(.system(size: 18, weight: .semibold))
@@ -675,7 +703,7 @@ struct GridEditorView: View {
                 // add there at all).
                 Button {
                     objectKindToPlace = (objectKindToPlace == .envelope) ? nil : .envelope
-                    if objectKindToPlace != nil { doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: objectKindToPlace == .envelope ? "envelope.fill" : "envelope")
                         .font(.system(size: 18, weight: .semibold))
@@ -695,7 +723,7 @@ struct GridEditorView: View {
                 Button {
                     objectKindToPlace = objectKindToPlace == .key ? nil : .key
                     if objectKindToPlace != nil {
-                        doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil
+                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil
                         floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
                     }
                 } label: {
@@ -711,7 +739,7 @@ struct GridEditorView: View {
                     .foregroundStyle(.black.opacity(0.6))
                 Button {
                     destinationKindToPlace = (destinationKindToPlace == .trashCan) ? nil : .trashCan
-                    if destinationKindToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: destinationKindToPlace == .trashCan ? "arrow.down.square.fill" : "arrow.down.square")
                         .font(.system(size: 18, weight: .semibold))
@@ -721,7 +749,7 @@ struct GridEditorView: View {
                 }
                 Button {
                     destinationKindToPlace = (destinationKindToPlace == .envelope) ? nil : .envelope
-                    if destinationKindToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: destinationKindToPlace == .envelope ? "envelope.fill" : "envelope")
                         .font(.system(size: 18, weight: .semibold))
@@ -744,7 +772,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         exitDirectionToPlace = (exitDirectionToPlace == direction) ? nil : direction
-                        if exitDirectionToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                        if exitDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "location.north.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -770,7 +798,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         floorMapDirectionToPlace = (floorMapDirectionToPlace == direction) ? nil : direction
-                        if floorMapDirectionToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                        if floorMapDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "map.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -799,7 +827,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         pictureDirectionToPlace = (pictureDirectionToPlace == direction) ? nil : direction
-                        if pictureDirectionToPlace != nil { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                        if pictureDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "photo.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -826,6 +854,8 @@ struct GridEditorView: View {
 
             }
 
+            mirrorControls
+
             HStack(spacing: 8) {
                 Text("Door:")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -834,6 +864,7 @@ struct GridEditorView: View {
                     Button {
                         doorDirectionToPlace = doorDirectionToPlace == direction ? nil : direction
                         if doorDirectionToPlace != nil {
+                            mirrorDirectionToPlace = nil
                             objectKindToPlace = nil; destinationKindToPlace = nil
                             exitDirectionToPlace = nil; floorMapDirectionToPlace = nil
                             pictureDirectionToPlace = nil; placingSpotlight = false
@@ -868,7 +899,7 @@ struct GridEditorView: View {
                     .foregroundStyle(.black.opacity(0.6))
                 Button {
                     placingSpotlight.toggle()
-                    if placingSpotlight { doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil }
+                    if placingSpotlight { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil }
                 } label: {
                     Image(systemName: placingSpotlight ? "lightbulb.fill" : "lightbulb")
                         .font(.system(size: 18, weight: .semibold))
@@ -907,6 +938,31 @@ struct GridEditorView: View {
         .padding(.top, 10)
         .padding(.bottom, 8)
         .background(Color(white: 0.93))
+    }
+
+    private var mirrorControls: some View {
+        HStack(spacing: 8) {
+            Text("Mirror:")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.6))
+            ForEach(Direction.allCases, id: \.self) { direction in
+                Button {
+                    mirrorDirectionToPlace = mirrorDirectionToPlace == direction ? nil : direction
+                    if mirrorDirectionToPlace != nil {
+                        doorDirectionToPlace = nil; pictureDirectionToPlace = nil
+                        objectKindToPlace = nil; destinationKindToPlace = nil
+                        exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false
+                    }
+                } label: {
+                    Image(systemName: "person.crop.rectangle")
+                        .foregroundStyle(mirrorDirectionToPlace == direction ? Color.cyan : .black)
+                        .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                        .frame(width: 28, height: 28)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .accessibilityLabel("Place mirror facing \(direction.rawValue)")
+            }
+        }
     }
 
     /// Shared between the per-cell marker and the bottom-bar toggle
@@ -1067,6 +1123,26 @@ struct GridEditorView: View {
             } else {
                 if mazeStore.floorMapDirection(at: coord) != nil {
                     mazeStore.removeFloorMap(at: coord)
+                }
+            }
+            return
+        }
+
+        if let direction = mirrorDirectionToPlace {
+            // Paint and erase mirrors on solid walls, just like pictures.
+            guard mazeStore.isOpen(coord) else { return }
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard !mazeStore.isOpen(neighbor) else { return }
+            if isStart {
+                paintMode = mazeStore.mirrorDirection(at: coord) != direction
+            }
+            if paintMode {
+                if mazeStore.mirrorDirection(at: coord) != direction {
+                    mazeStore.placeMirror(direction, at: coord)
+                }
+            } else {
+                if mazeStore.mirrorDirection(at: coord) != nil {
+                    mazeStore.removeMirror(at: coord)
                 }
             }
             return

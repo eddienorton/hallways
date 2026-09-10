@@ -104,7 +104,7 @@ struct HallwaysTests {
     }
     @Test func recoveredFloorsKeepMailAddressesAndPlayableChuteAudio() throws {
         let store = MazeStore()
-        #expect(store.floorCount == 3)
+        #expect(store.floorCount == 4)
         store.switchTo(id: 2)
         #expect(store.nextMazeID == 3)
         store.switchTo(id: 3)
@@ -140,6 +140,72 @@ struct HallwaysTests {
         }
         #expect(SoundEffects.playMailPickup())
         #expect(SoundEffects.playMailDelivery())
+    }
+
+    @Test func mirrorEditsSurviveFloorSwitchExportAndUndo() throws {
+        let store = MazeStore()
+        store.switchTo(id: 3)
+        #expect(store.nextMazeID == 4)
+        store.switchTo(id: 4)
+        let coord = MazeStore.missionCoordinate
+        #expect(store.mirrors == [coord: .south])
+        #expect(store.missionObjectKind == nil)
+        store.snapshotForUndo()
+        store.removeMirror(at: coord)
+        #expect(store.mirrors.isEmpty)
+        store.undo()
+        #expect(store.mirrors[coord] == .south)
+        store.placeMirror(.north, at: coord) // The elevator is an open neighbor, not a wall.
+        #expect(store.mirrors[coord] == .south)
+        store.placeMirror(.east, at: coord)
+        store.switchTo(id: 2)
+        #expect(store.mirrors.isEmpty)
+        store.switchTo(id: 4)
+        #expect(store.mirrors[coord] == .east)
+        let json = try #require(store.exportLibraryJSON()?.data(using: .utf8))
+        let floors = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
+        let fourth = try #require(floors.first { $0["id"] as? Int == 4 })
+        let mirrors = try #require(fourth["mirrors"] as? [[String: Any]])
+        #expect(mirrors.count == 1)
+        #expect(mirrors[0]["direction"] as? String == "east")
+        store.clear()
+        #expect(store.mirrors.isEmpty)
+        store.undo()
+        #expect(store.mirrors[coord] == .east)
+    }
+
+    @Test func mirrorsStopWalkingOnReturnTrips() async {
+        let scene = SCNScene()
+        let camera = SCNNode(); camera.position.y = 1.6
+        scene.rootNode.addChildNode(camera)
+        let start = GridCoordinate(row: 0, col: 0)
+        let mirror = GridCoordinate(row: 0, col: 2)
+        let end = GridCoordinate(row: 0, col: 4)
+        let controller = TapNavigationController(cameraNode: camera, scene: scene,
+            cells: Set((0...4).map { GridCoordinate(row: 0, col: $0) }), cellSize: 3.2,
+            startCell: start, startFacing: .east, endCell: end, mirrors: [mirror: .north])
+        let renderer = SCNRenderer(device: nil, options: nil)
+        var time = 1.0
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.currentCell == mirror)
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.currentCell == end)
+        controller.rotate(toward: .west); await finishMove(controller, renderer: renderer, time: &time)
+        controller.advance(); await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.currentCell == mirror)
+    }
+
+    @Test func mirrorFacesIntoHallwayOnEveryWall() throws {
+        let coord = GridCoordinate(row: 3, col: 4)
+        let center = SCNVector3(12.8, 1.6, 9.6)
+        for direction in Direction.allCases {
+            let mirror = HallwayScene.makeMirrorNode(at: coord, direction: direction, cellSize: 3.2)
+            let surface = try #require(mirror.childNode(withName: "mirrorSurface", recursively: true))
+            let facing = mirror.convertVector(SCNVector3(0, 0, 1), to: nil)
+            let toCenter = SCNVector3(center.x - mirror.position.x, 0, center.z - mirror.position.z)
+            #expect(facing.x * toCenter.x + facing.z * toCenter.z > 0)
+            #expect(surface.geometry?.firstMaterial?.diffuse.contents is UIImage)
+        }
     }
 
 }

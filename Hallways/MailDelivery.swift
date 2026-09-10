@@ -61,6 +61,18 @@ extension HallwayScene {
         return root
     }
 
+    private static let doorHardwareReflection: UIImage = {
+        UIGraphicsImageRenderer(size: CGSize(width: 256, height: 128)).image { context in
+            let colors = [UIColor.white.cgColor, UIColor(white: 0.75, alpha: 1).cgColor,
+                          UIColor(white: 0.08, alpha: 1).cgColor, UIColor(white: 0.5, alpha: 1).cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.38, 0.5, 1]) {
+                context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: 128), options: [])
+            }
+            UIColor.white.setFill()
+            context.cgContext.fill(CGRect(x: 32, y: 12, width: 22, height: 35))
+        }
+    }()
+
     static func makeRoomDoorNode(_ door: RoomDoorPlacement, cellSize: CGFloat) -> SCNNode {
         let root = SCNNode()
         root.name = "roomDoor_\(door.roomNumber)"
@@ -104,8 +116,31 @@ extension HallwayScene {
         let plaque = box(0.46, 0.184, 0.02, .black, 0, 1.8, 0.102)
         plaque.geometry?.firstMaterial?.diffuse.contents = plaqueImage
         _ = box(0.32, 0.085, 0.02, .darkGray, 0, 1.05, 0.105) // mail slot
-        _ = box(0.06, 0.16, 0.04, .lightGray, 0.36, 0.98, 0.12)
-        _ = box(0.2, 0.035, 0.065, .lightGray, 0.3, 0.98, 0.15)
+        // Rounded chrome hardware catches the moving headlamp; the reflection texture
+        // provides stylized light/dark reflections even in a dim corridor.
+        let chrome = SCNMaterial()
+        chrome.lightingModel = .blinn
+        chrome.diffuse.contents = UIColor(white: 0.48, alpha: 1)
+        chrome.specular.contents = UIColor.white
+        chrome.shininess = 0.95
+        chrome.reflective.contents = Self.doorHardwareReflection
+        chrome.reflective.intensity = 0.65
+        func hardware(_ geometry: SCNGeometry, name: String, z: Float) -> SCNNode {
+            geometry.materials = [chrome]
+            let node = SCNNode(geometry: geometry)
+            node.name = name
+            node.position = SCNVector3(0.36, 0.98, z)
+            root.addChildNode(node)
+            return node
+        }
+        let rose = hardware(SCNCylinder(radius: 0.075, height: 0.018), name: "doorKnobRose", z: 0.1)
+        rose.eulerAngles.x = .pi / 2
+        let stem = hardware(SCNCylinder(radius: 0.025, height: 0.07), name: "doorKnobStem", z: 0.14)
+        stem.eulerAngles.x = .pi / 2
+        let knob = SCNSphere(radius: 0.06)
+        knob.segmentCount = 32
+        let grip = hardware(knob, name: "doorKnob", z: 0.195)
+        grip.scale.z = 0.8
         let delta = door.direction.delta
         root.position = SCNVector3(
             Float(CGFloat(door.coord.col) * cellSize + CGFloat(delta.col) * (cellSize / 2 - 0.07)),

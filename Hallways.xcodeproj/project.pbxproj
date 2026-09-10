@@ -401,6 +401,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Hallways uses your front camera as a live wall mirror. No photos or videos are saved.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Hallways uses photos from your library for framed pictures and the My Photos hallway theme.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -435,6 +436,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Hallways uses your front camera as a live wall mirror. No photos or videos are saved.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Hallways uses photos from your library for framed pictures and the My Photos hallway theme.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

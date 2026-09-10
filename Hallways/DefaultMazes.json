@@ -681,6 +681,41 @@
         "col": 7
       }
     ],
-    "pictures": []
+    "pictures": [],
+    "nextMazeID": 4
+  },
+  {
+    "id": 4,
+    "cells": [
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 11,
+        "col": 7
+      }
+    ],
+    "objects": [],
+    "destinations": [],
+    "exitSigns": [],
+    "floorMaps": [],
+    "spotlights": [],
+    "missionSigns": [],
+    "pictures": [],
+    "mirrors": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 7
+        },
+        "direction": "south"
+      }
+    ],
+    "roomDoors": [],
+    "itemRooms": [],
+    "picturesUseCameraRoll": false,
+    "missionHeading": "4th Floor",
+    "missionBody": ""
   }
 ]

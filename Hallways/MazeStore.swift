@@ -256,6 +256,7 @@ private struct MazeRecord {
     /// Picture, and which wall each one hangs on. Same
     /// decodeIfPresent-or-empty treatment, no legacy shape to migrate.
     var pictures: [PicturePlacement]
+    var mirrors: [PicturePlacement] = []
     var roomDoors: [RoomDoorPlacement] = []
     var itemRooms: [RoomAssignment] = []
     var picturesUseCameraRoll: Bool = false
@@ -283,7 +284,7 @@ private struct MazeRecord {
 
 extension MazeRecord: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, roomDoors, itemRooms, mailAddresses
+        case mirrors, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, roomDoors, itemRooms, mailAddresses
     }
 
     // Hand-written so older mazes.json shapes still load cleanly
@@ -316,6 +317,7 @@ extension MazeRecord: Codable {
         floorMaps = try container.decodeIfPresent([FloorMapPlacement].self, forKey: .floorMaps) ?? []
         spotlights = try container.decodeIfPresent([GridCoordinate].self, forKey: .spotlights) ?? []
         missionSigns = try container.decodeIfPresent([MissionSignPlacement].self, forKey: .missionSigns) ?? []
+        mirrors = try container.decodeIfPresent([PicturePlacement].self, forKey: .mirrors) ?? []
         pictures = try container.decodeIfPresent([PicturePlacement].self, forKey: .pictures) ?? []
         roomDoors = try container.decodeIfPresent([RoomDoorPlacement].self, forKey: .roomDoors) ?? []
         itemRooms = try container.decodeIfPresent([RoomAssignment].self, forKey: .itemRooms)
@@ -346,6 +348,7 @@ extension MazeRecord: Codable {
         try container.encode(floorMaps, forKey: .floorMaps)
         try container.encode(spotlights, forKey: .spotlights)
         try container.encode(missionSigns, forKey: .missionSigns)
+        try container.encode(mirrors, forKey: .mirrors)
         try container.encode(pictures, forKey: .pictures)
         try container.encode(roomDoors, forKey: .roomDoors)
         try container.encode(itemRooms, forKey: .itemRooms)
@@ -490,6 +493,7 @@ final class MazeStore: ObservableObject {
     /// Sept 9: purely aesthetic ("nothing that has to be solved - just
     /// looked at"), unlike every other wall fixture here -- see
     /// PicturePlacement's own doc comment for why no image is stored.
+    @Published private(set) var mirrors: [GridCoordinate: Direction] = [:]
     @Published private(set) var pictures: [GridCoordinate: Direction]
     @Published private(set) var roomDoors: [GridCoordinate: RoomDoorPlacement] = [:]
     @Published private(set) var itemRooms: [GridCoordinate: Int] = [:]
@@ -606,6 +610,7 @@ final class MazeStore: ObservableObject {
             floorMaps = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.floorMaps ?? []).map { ($0.coord, $0.direction) })
             spotlights = Set(loaded[firstID]?.spotlights ?? [])
             missionSigns = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.missionSigns ?? []).map { ($0.coord, $0.direction) })
+            mirrors = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.mirrors ?? []).map { ($0.coord, $0.direction) })
             pictures = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.pictures ?? []).map { ($0.coord, $0.direction) })
             roomDoors = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.roomDoors ?? []).map { ($0.coord, $0) })
             itemRooms = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.itemRooms ?? []).map { ($0.coord, $0.roomNumber) })
@@ -630,6 +635,7 @@ final class MazeStore: ObservableObject {
             spotlights = []
             missionSigns = [Self.missionCoordinate: .south]
             pictures = [:]
+            mirrors = [:]
             roomDoors = [:]
             itemRooms = [:]
             picturesUseCameraRoll = false
@@ -780,7 +786,7 @@ final class MazeStore: ObservableObject {
     /// rule as placeObject) -- which wall it actually ends up mounted
     /// on is HallwayScene.build(fromMaze:)'s call, not this one's.
     func placeDestination(_ kind: ObjectKind, at coord: GridCoordinate) {
-        guard roomDoors[coord] == nil, cells.contains(coord) else { return }
+        guard roomDoors[coord] == nil, mirrors[coord] == nil, cells.contains(coord) else { return }
         destinations[coord] = kind
         version += 1
     }
@@ -819,7 +825,7 @@ final class MazeStore: ObservableObject {
     /// down just quietly doesn't render instead of drawing floating in
     /// midair.
     func placeFloorMap(_ direction: Direction, at coord: GridCoordinate) {
-        guard roomDoors[coord] == nil, cells.contains(coord) else { return }
+        guard roomDoors[coord] == nil, mirrors[coord] == nil, cells.contains(coord) else { return }
         floorMaps[coord] = direction
         version += 1
     }
@@ -848,7 +854,7 @@ final class MazeStore: ObservableObject {
         let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
         guard cells.contains(coord), !cells.contains(neighbor),
               coord != Self.elevatorCoordinate, coord != Self.missionCoordinate,
-              floorMaps[coord] == nil, pictures[coord] == nil, destinations[coord] == nil else { return }
+              floorMaps[coord] == nil, pictures[coord] == nil, mirrors[coord] == nil, destinations[coord] == nil else { return }
         let number = roomDoors[coord]?.roomNumber ?? (max(roomNumbers.max() ?? (currentMazeID * 100), itemRooms.values.max() ?? (currentMazeID * 100)) + 1)
         roomDoors[coord] = RoomDoorPlacement(coord: coord, direction: direction, roomNumber: number, cashReward: roomDoors[coord]?.cashReward ?? (missionObjectKind == .key ? 100 : nil))
         assignUnassignedRoomItems()
@@ -887,8 +893,29 @@ final class MazeStore: ObservableObject {
         }
     }
 
+    func mirrorDirection(at coord: GridCoordinate) -> Direction? { mirrors[coord] }
+
+    func canPlaceMirror(_ direction: Direction, at coord: GridCoordinate) -> Bool {
+        let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+        return cells.contains(coord) && !cells.contains(neighbor) &&
+            coord != Self.elevatorCoordinate && roomDoors[coord] == nil &&
+            pictures[coord] == nil && floorMaps[coord] == nil && destinations[coord] == nil &&
+            missionSigns[coord] != direction
+    }
+
+    func placeMirror(_ direction: Direction, at coord: GridCoordinate) {
+        guard canPlaceMirror(direction, at: coord) else { return }
+        mirrors[coord] = direction
+        version += 1
+    }
+
+    func removeMirror(at coord: GridCoordinate) {
+        guard mirrors.removeValue(forKey: coord) != nil else { return }
+        version += 1
+    }
+
     func placePicture(_ direction: Direction, at coord: GridCoordinate) {
-        guard roomDoors[coord] == nil, cells.contains(coord) else { return }
+        guard roomDoors[coord] == nil, mirrors[coord] == nil, cells.contains(coord) else { return }
         pictures[coord] = direction
         version += 1
     }
@@ -930,6 +957,7 @@ final class MazeStore: ObservableObject {
         spotlights.remove(coord)
         missionSigns.removeValue(forKey: coord)
         pictures.removeValue(forKey: coord)
+        mirrors.removeValue(forKey: coord)
         roomDoors.removeValue(forKey: coord)
         itemRooms.removeValue(forKey: coord)
         version += 1
@@ -984,7 +1012,7 @@ final class MazeStore: ObservableObject {
         let floorMapPlacements = floorMaps.map { FloorMapPlacement(coord: $0.key, direction: $0.value) }
         let missionSignPlacements = missionSigns.map { MissionSignPlacement(coord: $0.key, direction: $0.value) }
         let picturePlacements = pictures.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights), missionSigns: missionSignPlacements, pictures: picturePlacements, roomDoors: Array(roomDoors.values), itemRooms: itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
+        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights), missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrors.map { PicturePlacement(coord: $0.key, direction: $0.value) }, roomDoors: Array(roomDoors.values), itemRooms: itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
         MazeLibrary.saveAll(library)
     }
 
@@ -1032,6 +1060,7 @@ final class MazeStore: ObservableObject {
             floorMaps = Dictionary(uniqueKeysWithValues: record.floorMaps.map { ($0.coord, $0.direction) })
             spotlights = Set(record.spotlights)
             missionSigns = Dictionary(uniqueKeysWithValues: record.missionSigns.map { ($0.coord, $0.direction) })
+            mirrors = Dictionary(uniqueKeysWithValues: record.mirrors.map { ($0.coord, $0.direction) })
             pictures = Dictionary(uniqueKeysWithValues: record.pictures.map { ($0.coord, $0.direction) })
             roomDoors = Dictionary(uniqueKeysWithValues: record.roomDoors.map { ($0.coord, $0) })
             itemRooms = Dictionary(uniqueKeysWithValues: record.itemRooms.map { ($0.coord, $0.roomNumber) })
@@ -1051,6 +1080,7 @@ final class MazeStore: ObservableObject {
             spotlights = []
             missionSigns = [Self.missionCoordinate: .south]
             pictures = [:]
+            mirrors = [:]
             roomDoors = [:]
             itemRooms = [:]
             picturesUseCameraRoll = false
@@ -1074,7 +1104,7 @@ final class MazeStore: ObservableObject {
 
     // MARK: - Undo / Clear
 
-    private var undoStack: [(cells: Set<GridCoordinate>, objects: [GridCoordinate: ObjectKind], destinations: [GridCoordinate: ObjectKind], exitSigns: [GridCoordinate: Direction], floorMaps: [GridCoordinate: Direction], spotlights: Set<GridCoordinate>, missionSigns: [GridCoordinate: Direction], pictures: [GridCoordinate: Direction], picturesUseCameraRoll: Bool, roomDoors: [GridCoordinate: RoomDoorPlacement], itemRooms: [GridCoordinate: Int])] = []
+    private var undoStack: [(cells: Set<GridCoordinate>, objects: [GridCoordinate: ObjectKind], destinations: [GridCoordinate: ObjectKind], exitSigns: [GridCoordinate: Direction], floorMaps: [GridCoordinate: Direction], spotlights: Set<GridCoordinate>, missionSigns: [GridCoordinate: Direction], pictures: [GridCoordinate: Direction], mirrors: [GridCoordinate: Direction], picturesUseCameraRoll: Bool, roomDoors: [GridCoordinate: RoomDoorPlacement], itemRooms: [GridCoordinate: Int])] = []
     private let maxUndoDepth = 30
 
     /// Snapshots the current maze so a later undo() can restore it.
@@ -1084,7 +1114,7 @@ final class MazeStore: ObservableObject {
     /// together so undo works correctly no matter which mode (wall
     /// painting or object placing) the stroke was in.
     func snapshotForUndo() {
-        undoStack.append((cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms))
+        undoStack.append((cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, mirrors: mirrors, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms))
         if undoStack.count > maxUndoDepth {
             undoStack.removeFirst()
         }
@@ -1102,6 +1132,7 @@ final class MazeStore: ObservableObject {
         spotlights = previous.spotlights
         missionSigns = previous.missionSigns
         pictures = previous.pictures
+        mirrors = previous.mirrors
         roomDoors = previous.roomDoors
         itemRooms = previous.itemRooms
         picturesUseCameraRoll = previous.picturesUseCameraRoll
@@ -1130,6 +1161,7 @@ final class MazeStore: ObservableObject {
         spotlights = []
         missionSigns = [Self.missionCoordinate: .south]
         pictures = [:]
+        mirrors = [:]
         roomDoors = [:]
         itemRooms = [:]
         version += 1

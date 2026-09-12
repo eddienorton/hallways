@@ -20,6 +20,21 @@
 import AVFoundation
 
 enum SoundEffects {
+    /// Resolve lazy audio players while the title screen is visible, without playing.
+    static func prepareForGameplay() async {
+        let loaders: [() -> AVAudioPlayer?] = [
+            { walkingPlayer }, { elevatorArrivalPlayer }, { elevatorMusicPlayer },
+            { cashPickupPlayer }, { intersectionLockPlayer }, { alarmPlayer },
+            { trashPickup1Player }, { trashPickup2Player }, { trashChuteOpenPlayer }, { trashChuteClosePlayer },
+            { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer },
+            { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer }
+        ]
+        for load in loaders {
+            try? await Task.sleep(for: .milliseconds(10))
+            _ = load()
+        }
+    }
+
     /// Loads one bundled sound by filename (extension included) into a
     /// ready-to-play AVAudioPlayer, or nil (with a console log, not a
     /// crash) if that file isn't in the app bundle yet -- lets every
@@ -46,6 +61,20 @@ enum SoundEffects {
     // rapid repeats don't pay file-load cost -- currentTime is rewound
     // before each play so a second trigger mid-sound restarts cleanly.
     private static let cashPickupPlayer = loadPlayer("ka-ching.wav")
+
+    private static let hitWallPlayer = loadPlayer("hit-wall.mp3")
+    private static let warningBuzzPlayer = loadPlayer("warning-buzz.mp3")
+    private static let paintSplatPlayer = loadPlayer("paint-splat.mp3")
+
+    static func playHitWall() { hitWallPlayer?.currentTime = 0; hitWallPlayer?.play() }
+    static func playWarningBuzz() { warningBuzzPlayer?.currentTime = 0; warningBuzzPlayer?.play() }
+    static func playPaintSplat() { paintSplatPlayer?.currentTime = 0; paintSplatPlayer?.play() }
+
+    private(set) static var walkingRate: Float = 1
+    static func setWalkingPace(_ pace: Float) {
+        walkingRate = min(1.6, max(1, pace))
+        walkingPlayer?.rate = walkingRate
+    }
 
     static func playCashPickup() {
         guard let player = cashPickupPlayer else { return }
@@ -104,11 +133,13 @@ enum SoundEffects {
     private static let walkingPlayer: AVAudioPlayer? = {
         let player = loadPlayer("walking.mp3")
         player?.numberOfLoops = -1
+        player?.enableRate = true
         return player
     }()
 
     static func startWalking() {
         guard let player = walkingPlayer, !player.isPlaying else { return }
+        player.rate = walkingRate
         player.play()
     }
 
@@ -171,11 +202,17 @@ enum SoundEffects {
     /// The chute swallowing a delivered trash can -- collectObjectIfPresent's
     /// pickup sound above has its deposit-side counterpart here,
     /// called from depositIfPresent.
-    private static let trashChutePlayer = loadPlayer("trash-chute.mp3")
+    private static let trashChuteOpenPlayer = loadPlayer("trash-chute-open.mp3")
+    private static let trashChuteClosePlayer = loadPlayer("trash-chute-close.mp3")
 
     @discardableResult
-    static func playTrashChute() -> Bool {
-        guard let player = trashChutePlayer else { return false }
+    static func playTrashChuteOpen() -> Bool { playChuteSound(trashChuteOpenPlayer) }
+
+    @discardableResult
+    static func playTrashChuteClose() -> Bool { playChuteSound(trashChuteClosePlayer) }
+
+    private static func playChuteSound(_ player: AVAudioPlayer?) -> Bool {
+        guard let player else { return false }
         // Explicit game audio avoids the default session silently following
         // the device's Ring/Silent switch. Keep other background audio mixing.
         do {
@@ -188,7 +225,7 @@ enum SoundEffects {
         player.currentTime = 0
         let started = player.play()
         if !started {
-            print("SoundEffects: trash-chute.mp3 playback did not start")
+            print("SoundEffects: chute playback did not start")
         }
         return started
     }
@@ -200,6 +237,27 @@ enum SoundEffects {
 
     @discardableResult
     static func playMailDelivery() -> Bool { playMailSound(mailDeliveryPlayer) }
+
+    private static let extinguisherSprayPlayer = loadPlayer("fire_extinguisher.mp3")
+    private static let fireExtinguishedPlayer = loadPlayer("fire-extinguished.mp3")
+    private static let cameraClickPlayer = loadPlayer("iphone-camera-click.mp3")
+
+    static func playCameraClick() {
+        _ = playMailSound(cameraClickPlayer)
+    }
+
+    @discardableResult
+    static func playExtinguisherSpray() -> Bool {
+        playMailSound(extinguisherSprayPlayer)
+    }
+
+    static func stopExtinguisherSpray() { extinguisherSprayPlayer?.stop() }
+
+    static func playFireExtinguished() {
+        guard let player = fireExtinguishedPlayer else { return }
+        player.currentTime = 0
+        player.play()
+    }
 
     private static func playMailSound(_ player: AVAudioPlayer?) -> Bool {
         guard let player else { return false }

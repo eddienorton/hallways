@@ -1,3 +1,15 @@
+## Employee ID mission update
+Floor 6 now has one smile booth (row 2, col 1, west wall). Other two expression stations removed; maze geometry unchanged. One accepted photo completes the existing booth mission gate. Green monospaced readout below preview keeps instructions visible and confirms ID photo acceptance. Swiping cancels an unfinished session and turns away; capture's brief flash remains protected. Smile thresholds and camera pipeline unchanged.
+
+## Startup follow-up
+Title screen now waits for SceneKit prepare and lazy sound-player preparation, shows a spinner, and remembers early entry taps. Does not preload every floor or request camera access at launch. Device timing still needs checking.
+
+## Current Photo Booth work — September 10, 2026
+
+This section supersedes the historical task instructions below. Another agent has implemented Floor 6 Photo Booth stations and AR face-expression detection. Eddie reports SMILE successfully triggered capture on a physical iPhone; preserve its existing threshold (0.52, three matches). Do not resume the old Floor 4 task or revert other agents' work. Current instruction: no commit/push.
+
+Focused fixes: active booths lock navigation/rotation; activation happens automatically after a completed walk or turn leaves the player at the booth facing its wall (sideways arrival must not lock navigation; no tap required); capture ignores duplicate completion and late preview updates; frozen photo clears white flash emission after 0.16 seconds. Camera conversion accounts for Core Image versus AR display coordinate origins. AR delegates run explicitly on main, preview is limited to 10 fps without extra queued preview callbacks, and session pauses immediately after capture. Physical-device orientation/performance still require verification. No mission/layout/threshold changes in this pass.
+
 # Hallways — AI handoff (September 10, 2026)
 
 ## Start here

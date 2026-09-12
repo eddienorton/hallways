@@ -121,10 +121,20 @@ struct HallwaysTests {
         #expect(store.objects.values.contains(.paintBucket))
         #expect(store.cells.count == 55)
         #expect(store.mirrors.count == 3)
-        let url = try #require(Bundle.main.url(forResource: "trash-chute", withExtension: "mp3"))
-        let player = try AVAudioPlayer(contentsOf: url)
-        #expect(player.duration > 2)
-        #expect(SoundEffects.playTrashChute())
+
+    }
+
+
+    @Test func separateChuteSoundsAreBundledPreparedAndPlayable() async throws {
+        for name in ["trash-chute-open", "trash-chute-close"] {
+            let url = try #require(Bundle.main.url(forResource: name, withExtension: "mp3"))
+            let player = try AVAudioPlayer(contentsOf: url)
+            #expect(player.duration > 0)
+            #expect(player.prepareToPlay())
+        }
+        await SoundEffects.prepareForGameplay()
+        #expect(SoundEffects.playTrashChuteOpen())
+        #expect(SoundEffects.playTrashChuteClose())
         #expect(AVAudioSession.sharedInstance().category == .playback)
     }
 

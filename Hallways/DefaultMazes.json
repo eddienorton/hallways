@@ -278,11 +278,18 @@
           "row": 15
         },
         "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
       }
     ],
     "id": 2,
-    "missionBody": "Mission\n\nCollect and throw out trash",
-    "missionHeading": "2nd Floor",
+    "missionBody": "YOUR FIRST MISSION\n\nCOLLECT ALL TRASH\nAND DROP IT IN THE CHUTE.",
+    "missionHeading": "WELCOME TO HALLWAYS\n\nCOMPLETE EACH FLOOR'S MISSION\nTO UNLOCK THE ELEVATOR\nAND MOVE UP.",
     "missionObjectKind": "trashCan",
     "missionSigns": [
       {
@@ -321,6 +328,97 @@
           "row": 8
         },
         "kind": "trashCan"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 6
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 12
+        },
+        "kind": "cash100"
       }
     ],
     "pictures": [
@@ -611,6 +709,62 @@
           "col": 11
         },
         "kind": "envelope"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 4
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 7,
+          "col": 11
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 11
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 4
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 8
+        },
+        "kind": "cash100"
       }
     ],
     "mailAddresses": [
@@ -708,6 +862,13 @@
           "col": 7
         },
         "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
       }
     ],
     "missionSigns": [
@@ -789,6 +950,7 @@
   },
   {
     "id": 4,
+    "nextMazeID": 5,
     "cells": [
       {
         "row": 5,
@@ -868,7 +1030,7 @@
       },
       {
         "row": 8,
-        "col": 7
+        "col": 10
       },
       {
         "row": 8,
@@ -1018,6 +1180,125 @@
           "col": 8
         },
         "kind": "paintBucket"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 5
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 9
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 4
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 6
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 9
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 12,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 5
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 5
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 8
+        },
+        "kind": "cash100"
       }
     ],
     "destinations": [],
@@ -1043,6 +1324,20 @@
           "col": 12
         },
         "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 3
+        },
+        "direction": "west"
       }
     ],
     "spotlights": [],
@@ -1128,5 +1423,1602 @@
     "missionHeading": "4th Floor \u2014 A Fresh Coat",
     "missionBody": "Pick up the blue paint bucket. Walk through every hallway to paint its walls. Use the wall maps to find unfinished areas, then return to the elevator.",
     "missionObjectKind": "paintBucket"
+  },
+  {
+    "id": 5,
+    "cells": [
+      {
+        "row": 2,
+        "col": 1
+      },
+      {
+        "row": 2,
+        "col": 2
+      },
+      {
+        "row": 2,
+        "col": 3
+      },
+      {
+        "row": 2,
+        "col": 4
+      },
+      {
+        "row": 2,
+        "col": 5
+      },
+      {
+        "row": 2,
+        "col": 6
+      },
+      {
+        "row": 2,
+        "col": 7
+      },
+      {
+        "row": 2,
+        "col": 8
+      },
+      {
+        "row": 2,
+        "col": 9
+      },
+      {
+        "row": 2,
+        "col": 10
+      },
+      {
+        "row": 2,
+        "col": 11
+      },
+      {
+        "row": 2,
+        "col": 12
+      },
+      {
+        "row": 2,
+        "col": 13
+      },
+      {
+        "row": 3,
+        "col": 1
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 13
+      },
+      {
+        "row": 4,
+        "col": 1
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 4,
+        "col": 13
+      },
+      {
+        "row": 5,
+        "col": 1
+      },
+      {
+        "row": 5,
+        "col": 13
+      },
+      {
+        "row": 6,
+        "col": 1
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 3
+      },
+      {
+        "row": 6,
+        "col": 4
+      },
+      {
+        "row": 6,
+        "col": 5
+      },
+      {
+        "row": 6,
+        "col": 6
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 8
+      },
+      {
+        "row": 6,
+        "col": 9
+      },
+      {
+        "row": 6,
+        "col": 10
+      },
+      {
+        "row": 6,
+        "col": 11
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 13
+      },
+      {
+        "row": 7,
+        "col": 1
+      },
+      {
+        "row": 7,
+        "col": 13
+      },
+      {
+        "row": 8,
+        "col": 1
+      },
+      {
+        "row": 8,
+        "col": 13
+      },
+      {
+        "row": 9,
+        "col": 1
+      },
+      {
+        "row": 9,
+        "col": 13
+      },
+      {
+        "row": 10,
+        "col": 1
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 13
+      },
+      {
+        "row": 11,
+        "col": 1
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 3
+      },
+      {
+        "row": 11,
+        "col": 4
+      },
+      {
+        "row": 11,
+        "col": 5
+      },
+      {
+        "row": 11,
+        "col": 6
+      },
+      {
+        "row": 11,
+        "col": 7
+      },
+      {
+        "row": 11,
+        "col": 13
+      },
+      {
+        "row": 12,
+        "col": 1
+      },
+      {
+        "row": 12,
+        "col": 13
+      },
+      {
+        "row": 13,
+        "col": 1
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 3
+      },
+      {
+        "row": 13,
+        "col": 4
+      },
+      {
+        "row": 13,
+        "col": 5
+      },
+      {
+        "row": 13,
+        "col": 6
+      },
+      {
+        "row": 13,
+        "col": 7
+      },
+      {
+        "row": 13,
+        "col": 8
+      },
+      {
+        "row": 13,
+        "col": 9
+      },
+      {
+        "row": 13,
+        "col": 10
+      },
+      {
+        "row": 13,
+        "col": 11
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 13
+      },
+      {
+        "row": 14,
+        "col": 1
+      },
+      {
+        "row": 14,
+        "col": 13
+      },
+      {
+        "row": 15,
+        "col": 1
+      },
+      {
+        "row": 15,
+        "col": 9
+      },
+      {
+        "row": 15,
+        "col": 13
+      },
+      {
+        "row": 16,
+        "col": 1
+      },
+      {
+        "row": 16,
+        "col": 9
+      },
+      {
+        "row": 16,
+        "col": 13
+      },
+      {
+        "row": 17,
+        "col": 1
+      },
+      {
+        "row": 17,
+        "col": 2
+      },
+      {
+        "row": 17,
+        "col": 3
+      },
+      {
+        "row": 17,
+        "col": 4
+      },
+      {
+        "row": 17,
+        "col": 5
+      },
+      {
+        "row": 17,
+        "col": 6
+      },
+      {
+        "row": 17,
+        "col": 7
+      },
+      {
+        "row": 17,
+        "col": 8
+      },
+      {
+        "row": 17,
+        "col": 9
+      },
+      {
+        "row": 17,
+        "col": 10
+      },
+      {
+        "row": 17,
+        "col": 11
+      },
+      {
+        "row": 17,
+        "col": 12
+      },
+      {
+        "row": 17,
+        "col": 13
+      }
+    ],
+    "nextMazeID": 6,
+    "objects": [
+      {
+        "coord": {
+          "row": 2,
+          "col": 5
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 3,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 3,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 4,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 5,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 11
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 7,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 6
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 12,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 11
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 16,
+          "col": 9
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 4
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 7
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 13
+        },
+        "kind": "cash100"
+      }
+    ],
+    "destinations": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 1
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 1
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 13
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 1
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 13
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 7
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 9
+        },
+        "direction": "west"
+      }
+    ],
+    "floorMaps": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 3
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 11
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 7
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 1
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 13
+        },
+        "direction": "east"
+      }
+    ],
+    "spotlights": [
+      {
+        "row": 11,
+        "col": 7
+      },
+      {
+        "row": 13,
+        "col": 10
+      },
+      {
+        "row": 2,
+        "col": 3
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 17,
+        "col": 3
+      },
+      {
+        "row": 15,
+        "col": 9
+      }
+    ],
+    "missionSigns": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 7
+        },
+        "direction": "south"
+      }
+    ],
+    "pictures": [
+      {
+        "coord": {
+          "row": 2,
+          "col": 4
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 4,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 8
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 9,
+          "col": 13
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 5
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 1
+        },
+        "direction": "west"
+      }
+    ],
+    "mirrors": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 3
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 16,
+          "col": 13
+        },
+        "direction": "east"
+      }
+    ],
+    "fires": [
+      {
+        "coord": {
+          "row": 2,
+          "col": 3
+        }
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 12
+        }
+      },
+      {
+        "coord": {
+          "row": 17,
+          "col": 3
+        }
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 9
+        }
+      }
+    ],
+    "extinguishers": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 7
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 10
+        },
+        "direction": "south"
+      }
+    ],
+    "roomDoors": [],
+    "itemRooms": [],
+    "picturesUseCameraRoll": true,
+    "missionHeading": "5th Floor \u2014 Fire Safety",
+    "missionBody": "Unscheduled flames are not a team-building exercise.\nFind an extinguisher. Put out every fire.\nThen return to the elevator.",
+    "missionObjectKind": null
+  },
+  {
+    "id": 6,
+    "cells": [
+      {
+        "row": 2,
+        "col": 1
+      },
+      {
+        "row": 2,
+        "col": 2
+      },
+      {
+        "row": 2,
+        "col": 3
+      },
+      {
+        "row": 2,
+        "col": 4
+      },
+      {
+        "row": 2,
+        "col": 5
+      },
+      {
+        "row": 2,
+        "col": 6
+      },
+      {
+        "row": 2,
+        "col": 7
+      },
+      {
+        "row": 2,
+        "col": 8
+      },
+      {
+        "row": 2,
+        "col": 9
+      },
+      {
+        "row": 2,
+        "col": 10
+      },
+      {
+        "row": 2,
+        "col": 11
+      },
+      {
+        "row": 2,
+        "col": 12
+      },
+      {
+        "row": 2,
+        "col": 13
+      },
+      {
+        "row": 3,
+        "col": 1
+      },
+      {
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 13
+      },
+      {
+        "row": 4,
+        "col": 1
+      },
+      {
+        "row": 4,
+        "col": 5
+      },
+      {
+        "row": 4,
+        "col": 13
+      },
+      {
+        "row": 5,
+        "col": 1
+      },
+      {
+        "row": 5,
+        "col": 13
+      },
+      {
+        "row": 6,
+        "col": 1
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 3
+      },
+      {
+        "row": 6,
+        "col": 4
+      },
+      {
+        "row": 6,
+        "col": 5
+      },
+      {
+        "row": 6,
+        "col": 6
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 8
+      },
+      {
+        "row": 6,
+        "col": 9
+      },
+      {
+        "row": 6,
+        "col": 10
+      },
+      {
+        "row": 6,
+        "col": 11
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 13
+      },
+      {
+        "row": 7,
+        "col": 1
+      },
+      {
+        "row": 7,
+        "col": 10
+      },
+      {
+        "row": 7,
+        "col": 13
+      },
+      {
+        "row": 8,
+        "col": 1
+      },
+      {
+        "row": 8,
+        "col": 10
+      },
+      {
+        "row": 8,
+        "col": 13
+      },
+      {
+        "row": 9,
+        "col": 1
+      },
+      {
+        "row": 9,
+        "col": 10
+      },
+      {
+        "row": 9,
+        "col": 13
+      },
+      {
+        "row": 10,
+        "col": 1
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 10
+      },
+      {
+        "row": 10,
+        "col": 13
+      },
+      {
+        "row": 11,
+        "col": 1
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 3
+      },
+      {
+        "row": 11,
+        "col": 4
+      },
+      {
+        "row": 11,
+        "col": 5
+      },
+      {
+        "row": 11,
+        "col": 6
+      },
+      {
+        "row": 11,
+        "col": 7
+      },
+      {
+        "row": 11,
+        "col": 10
+      },
+      {
+        "row": 11,
+        "col": 13
+      },
+      {
+        "row": 12,
+        "col": 1
+      },
+      {
+        "row": 12,
+        "col": 10
+      },
+      {
+        "row": 12,
+        "col": 13
+      },
+      {
+        "row": 13,
+        "col": 1
+      },
+      {
+        "row": 13,
+        "col": 10
+      },
+      {
+        "row": 13,
+        "col": 13
+      },
+      {
+        "row": 14,
+        "col": 1
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 13
+      },
+      {
+        "row": 15,
+        "col": 1
+      },
+      {
+        "row": 15,
+        "col": 13
+      },
+      {
+        "row": 16,
+        "col": 1
+      },
+      {
+        "row": 16,
+        "col": 5
+      },
+      {
+        "row": 16,
+        "col": 13
+      },
+      {
+        "row": 17,
+        "col": 1
+      },
+      {
+        "row": 17,
+        "col": 5
+      },
+      {
+        "row": 17,
+        "col": 13
+      },
+      {
+        "row": 18,
+        "col": 1
+      },
+      {
+        "row": 18,
+        "col": 2
+      },
+      {
+        "row": 18,
+        "col": 3
+      },
+      {
+        "row": 18,
+        "col": 4
+      },
+      {
+        "row": 18,
+        "col": 5
+      },
+      {
+        "row": 18,
+        "col": 6
+      },
+      {
+        "row": 18,
+        "col": 7
+      },
+      {
+        "row": 18,
+        "col": 8
+      },
+      {
+        "row": 18,
+        "col": 9
+      },
+      {
+        "row": 18,
+        "col": 10
+      },
+      {
+        "row": 18,
+        "col": 11
+      },
+      {
+        "row": 18,
+        "col": 12
+      },
+      {
+        "row": 18,
+        "col": 13
+      }
+    ],
+    "nextMazeID": null,
+    "objects": [
+      {
+        "coord": {
+          "row": 2,
+          "col": 2
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 4,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 4,
+          "col": 5
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 4,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 7,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 7,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 8,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 3
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 6
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 12,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 13,
+          "col": 10
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 4
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 12
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 15,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 16,
+          "col": 5
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 16,
+          "col": 13
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 1
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 4
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 8
+        },
+        "kind": "cash100"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 12
+        },
+        "kind": "cash100"
+      }
+    ],
+    "destinations": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 1
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 1
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 10
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 13
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 1
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 10
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 13
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 5
+        },
+        "direction": "west"
+      }
+    ],
+    "floorMaps": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 4
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 14,
+          "col": 11
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 7
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 2,
+          "col": 13
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 13
+        },
+        "direction": "east"
+      }
+    ],
+    "spotlights": [
+      {
+        "row": 11,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 4,
+        "col": 5
+      },
+      {
+        "row": 16,
+        "col": 5
+      }
+    ],
+    "missionSigns": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 7
+        },
+        "direction": "south"
+      }
+    ],
+    "pictures": [
+      {
+        "coord": {
+          "row": 2,
+          "col": 4
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 4,
+          "col": 5
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 6,
+          "col": 7
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 13
+        },
+        "direction": "east"
+      },
+      {
+        "coord": {
+          "row": 11,
+          "col": 10
+        },
+        "direction": "west"
+      },
+      {
+        "coord": {
+          "row": 16,
+          "col": 5
+        },
+        "direction": "north"
+      },
+      {
+        "coord": {
+          "row": 18,
+          "col": 9
+        },
+        "direction": "south"
+      }
+    ],
+    "mirrors": [],
+    "fires": [],
+    "extinguishers": [],
+    "photoBooths": [
+      {
+        "coord": {
+          "row": 2,
+          "col": 1
+        },
+        "direction": "west",
+        "expression": "smile"
+      }
+    ],
+    "roomDoors": [],
+    "itemRooms": [],
+    "picturesUseCameraRoll": true,
+    "missionHeading": "6th Floor \u2014 Employee ID",
+    "missionBody": "YOUR FACE IS REQUIRED FOR OUR RECORDS.\nFind the photo station and smile for your employee ID.\nOne photo. Then return to the elevator.",
+    "missionObjectKind": null
   }
 ]

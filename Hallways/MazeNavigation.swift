@@ -122,6 +122,7 @@ enum NavigationOutcome {
     /// moment to look, same as a floor map or the mission sign.
     case viewedRoomDoor
     case viewedPicture
+    case fire
 }
 
 /// Same rule HallwayScene.build(fromMaze:) uses to orient the camera at

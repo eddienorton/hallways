@@ -5,6 +5,13 @@ import SwiftUI
 enum TrashPickupArtwork: CaseIterable {
     case bananaPeel, sodaCan, trashCan
 
+    /// Resolve the two small cached rasters before the first pickup animation.
+    /// No scene, camera, or audio work; repeated calls reuse the same images.
+    static func prepareForGameplay() {
+        _ = peelImage
+        _ = canImage
+    }
+
     var image: Image {
         switch self {
         case .bananaPeel: return Image(uiImage: Self.peelImage).renderingMode(.template)

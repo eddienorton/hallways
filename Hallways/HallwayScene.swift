@@ -13,6 +13,309 @@ import UIKit
 
 enum HallwayScene {
 
+    /// A lightweight, non-interactive environmental prop for the Floor 4
+    /// visual prototype. The local +Z side faces out into the hallway.
+    static func makeFireExtinguisherNode(at coord: GridCoordinate, direction: Direction, cellSize: CGFloat) -> SCNNode {
+        let root = SCNNode()
+        root.name = "fireExtinguisher"
+
+        let red = SCNMaterial()
+        red.diffuse.contents = UIColor(red: 0.72, green: 0.035, blue: 0.025, alpha: 1)
+        red.lightingModel = .physicallyBased
+        red.roughness.contents = 0.42
+        red.metalness.contents = 0.08
+
+        let dark = SCNMaterial()
+        dark.diffuse.contents = UIColor(white: 0.035, alpha: 1)
+        dark.lightingModel = .physicallyBased
+        dark.roughness.contents = 0.72
+
+        let bracketMaterial = SCNMaterial()
+        bracketMaterial.diffuse.contents = UIColor(white: 0.42, alpha: 1)
+        bracketMaterial.specular.contents = UIColor.white
+        bracketMaterial.shininess = 0.8
+
+        func addBox(width: CGFloat, height: CGFloat, length: CGFloat, material: SCNMaterial, y: CGFloat, z: CGFloat) {
+            let geometry = SCNBox(width: width, height: height, length: length, chamferRadius: 0.012)
+            geometry.materials = [material]
+            let node = SCNNode(geometry: geometry)
+            node.position = SCNVector3(0, Float(y), Float(z))
+            root.addChildNode(node)
+        }
+
+        // Wall plate and two small retaining bands.
+        addBox(width: 0.42, height: 1.0, length: 0.055, material: bracketMaterial, y: 1.22, z: -0.045)
+        addBox(width: 0.48, height: 0.08, length: 0.08, material: bracketMaterial, y: 0.96, z: 0.0)
+        addBox(width: 0.48, height: 0.08, length: 0.08, material: bracketMaterial, y: 1.48, z: 0.0)
+
+        let bodyGeometry = SCNCylinder(radius: 0.17, height: 0.62)
+        bodyGeometry.radialSegmentCount = 20
+        bodyGeometry.materials = [red]
+        let body = SCNNode(geometry: bodyGeometry)
+        body.position = SCNVector3(0, 1.22, 0.14)
+        root.addChildNode(body)
+
+        let neckGeometry = SCNCylinder(radius: 0.075, height: 0.14)
+        neckGeometry.radialSegmentCount = 16
+        neckGeometry.materials = [dark]
+        let neck = SCNNode(geometry: neckGeometry)
+        neck.position = SCNVector3(0, 1.60, 0.14)
+        root.addChildNode(neck)
+
+        // A dark handle/valve silhouette above the red cylinder.
+        let handleGeometry = SCNTorus(ringRadius: 0.095, pipeRadius: 0.018)
+        handleGeometry.ringSegmentCount = 16
+        handleGeometry.pipeSegmentCount = 8
+        handleGeometry.materials = [dark]
+        let handle = SCNNode(geometry: handleGeometry)
+        handle.position = SCNVector3(0, 1.72, 0.14)
+        handle.eulerAngles.x = .pi / 2
+        root.addChildNode(handle)
+
+        // A short dark hose and nozzle, angled visibly across the front.
+        let hoseGeometry = SCNCylinder(radius: 0.026, height: 0.32)
+        hoseGeometry.radialSegmentCount = 12
+        hoseGeometry.materials = [dark]
+        let hose = SCNNode(geometry: hoseGeometry)
+        hose.position = SCNVector3(0.14, 1.43, 0.22)
+        hose.eulerAngles.z = -.pi / 3
+        root.addChildNode(hose)
+
+        let nozzleGeometry = SCNCylinder(radius: 0.04, height: 0.18)
+        nozzleGeometry.radialSegmentCount = 12
+        nozzleGeometry.materials = [dark]
+        let nozzle = SCNNode(geometry: nozzleGeometry)
+        nozzle.position = SCNVector3(0.22, 1.28, 0.28)
+        nozzle.eulerAngles.x = .pi / 2
+        nozzle.eulerAngles.z = -.pi / 3
+        root.addChildNode(nozzle)
+
+        let x = CGFloat(coord.col) * cellSize
+        let z = CGFloat(coord.row) * cellSize
+        let half = cellSize / 2
+        switch direction {
+        case .north:
+            root.position = SCNVector3(Float(x), 0, Float(z - half - 0.07))
+        case .south:
+            root.position = SCNVector3(Float(x), 0, Float(z + half + 0.07))
+            root.eulerAngles.y = .pi
+        case .east:
+            root.position = SCNVector3(Float(x + half + 0.07), 0, Float(z))
+            root.eulerAngles.y = -.pi / 2
+        case .west:
+            root.position = SCNVector3(Float(x - half - 0.07), 0, Float(z))
+            root.eulerAngles.y = .pi / 2
+        }
+        return root
+    }
+
+    static func makeCarriedFireExtinguisherNode() -> SCNNode {
+        let node = makeFireExtinguisherNode(at: GridCoordinate(row: 0, col: 0), direction: .north, cellSize: 0)
+        node.position = SCNVector3(0.42, -0.32, -0.72)
+        node.eulerAngles = SCNVector3(0, Float.pi / 8, 0)
+        node.scale = SCNVector3(0.28, 0.28, 0.28)
+        return node
+    }
+
+    static func makePhotoBoothNode(at coord: GridCoordinate, direction: Direction, expression: PhotoBoothExpression, cellSize: CGFloat) -> SCNNode {
+        let root = SCNNode()
+        root.name = "photoBooth_\(coord.row)_\(coord.col)"
+        let hitGeometry = SCNBox(width: 1.05, height: 1.55, length: 0.28, chamferRadius: 0.04)
+        let hitMaterial = SCNMaterial()
+        hitMaterial.diffuse.contents = UIColor.clear
+        hitMaterial.transparency = 0.001
+        hitGeometry.materials = [hitMaterial]
+        let hitNode = SCNNode(geometry: hitGeometry)
+        hitNode.name = "photoBoothHitArea"
+        hitNode.position.z = 0.01
+        root.addChildNode(hitNode)
+        let frameMaterial = SCNMaterial()
+        frameMaterial.diffuse.contents = UIColor(white: 0.12, alpha: 1)
+        frameMaterial.metalness.contents = 0.55
+        frameMaterial.roughness.contents = 0.3
+        let frame = SCNBox(width: 0.92, height: 1.3, length: 0.12, chamferRadius: 0.04)
+        frame.materials = [frameMaterial]
+        root.addChildNode(SCNNode(geometry: frame))
+
+        let screen = SCNPlane(width: 0.72, height: 0.82)
+        screen.materials = [photoBoothScreenMaterial(prompt: expression.prompt)]
+        let screenNode = SCNNode(geometry: screen)
+        screenNode.name = "photoBoothScreen"
+        screenNode.position.z = 0.071
+        screenNode.position.y = 0.12
+        root.addChildNode(screenNode)
+        let readout = SCNNode(geometry: SCNPlane(width: 0.78, height: 0.22))
+        readout.name = "photoBoothReadout"
+        readout.position = SCNVector3(0, -0.46, 0.072)
+        let readoutMaterial = SCNMaterial()
+        readoutMaterial.lightingModel = .constant
+        readout.geometry?.materials = [readoutMaterial]
+        root.addChildNode(readout)
+        setPhotoBoothStatus(expression.prompt, on: root)
+
+        let lensHousing = SCNCylinder(radius: 0.042, height: 0.025)
+        let housingMaterial = SCNMaterial()
+        housingMaterial.diffuse.contents = UIColor(white: 0.08, alpha: 1)
+        housingMaterial.lightingModel = .physicallyBased
+        housingMaterial.roughness.contents = 0.7
+        lensHousing.materials = [housingMaterial]
+        let housingNode = SCNNode(geometry: lensHousing)
+        housingNode.name = "photoBoothLensHousing"
+        housingNode.position = SCNVector3(0, 0.58, 0.08)
+        housingNode.eulerAngles.x = .pi / 2
+        root.addChildNode(housingNode)
+
+        let lens = SCNSphere(radius: 0.022)
+        let lensMaterial = SCNMaterial()
+        lensMaterial.diffuse.contents = UIColor(red: 0.05, green: 0.12, blue: 0.16, alpha: 1)
+        lensMaterial.emission.contents = UIColor(red: 0.05, green: 0.25, blue: 0.35, alpha: 1)
+        lensMaterial.lightingModel = .constant
+        lens.materials = [lensMaterial]
+        let lensNode = SCNNode(geometry: lens)
+        lensNode.name = "photoBoothLens"
+        lensNode.position = SCNVector3(0, 0.58, 0.098)
+        root.addChildNode(lensNode)
+
+        let delta = direction.delta
+        root.position = SCNVector3(Float(CGFloat(coord.col) * cellSize + CGFloat(delta.col) * (cellSize / 2 - 0.12)),
+                                    1.55,
+                                    Float(CGFloat(coord.row) * cellSize + CGFloat(delta.row) * (cellSize / 2 - 0.12)))
+        switch direction {
+        case .north: break
+        case .south: root.eulerAngles.y = .pi
+        case .east: root.eulerAngles.y = -.pi / 2
+        case .west: root.eulerAngles.y = .pi / 2
+        }
+        return root
+    }
+
+    private static func photoBoothScreenMaterial(prompt: String, capturedImage: UIImage? = nil) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = capturedImage ?? UIGraphicsImageRenderer(size: CGSize(width: 500, height: 620)).image { context in
+            UIColor(red: 0.04, green: 0.09, blue: 0.12, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 500, height: 620))
+            UIColor.systemTeal.setStroke()
+            let border = UIBezierPath(roundedRect: CGRect(x: 18, y: 18, width: 464, height: 584), cornerRadius: 24)
+            border.lineWidth = 10
+            border.stroke()
+            let style = NSMutableParagraphStyle()
+            style.alignment = .center
+            (prompt as NSString).draw(in: CGRect(x: 35, y: 250, width: 430, height: 120), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 38),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: style
+            ])
+            ("EMPLOYEE PHOTO\nSTATION" as NSString).draw(in: CGRect(x: 45, y: 58, width: 410, height: 100), withAttributes: [
+                .font: UIFont.systemFont(ofSize: 24, weight: .semibold),
+                .foregroundColor: UIColor.systemTeal,
+                .paragraphStyle: style
+            ])
+        }
+        return material
+    }
+
+    static func setPhotoBoothImage(_ image: UIImage, on node: SCNNode) {
+        guard let material = node.childNode(withName: "photoBoothScreen", recursively: true)?.geometry?.firstMaterial else { return }
+        material.diffuse.contents = image
+        material.emission.contents = UIColor.black
+    }
+
+    static func setPhotoBoothLiveImage(_ image: UIImage, on node: SCNNode) {
+        guard let material = node.childNode(withName: "photoBoothScreen", recursively: true)?.geometry?.firstMaterial else { return }
+        material.diffuse.contents = image
+        material.emission.contents = UIColor(white: 0.12, alpha: 1)
+    }
+
+    static func flashPhotoBoothScreen(on node: SCNNode) {
+        guard let material = node.childNode(withName: "photoBoothScreen", recursively: true)?.geometry?.firstMaterial else { return }
+        material.diffuse.contents = UIColor.white
+        material.emission.contents = UIColor.white
+    }
+
+    static func resetPhotoBoothScreen(on node: SCNNode, prompt: String) {
+        node.childNode(withName: "photoBoothScreen", recursively: true)?.geometry?.firstMaterial = photoBoothScreenMaterial(prompt: prompt)
+        setPhotoBoothStatus(prompt, on: node)
+    }
+
+    static func setPhotoBoothStatus(_ status: String, on node: SCNNode) {
+        let size = CGSize(width: 780, height: 220)
+        let image = UIGraphicsImageRenderer(size: size).image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            (status as NSString).draw(in: CGRect(x: 20, y: 35, width: 740, height: 170), withAttributes: [
+                .font: UIFont.monospacedSystemFont(ofSize: 36, weight: .semibold),
+                .foregroundColor: UIColor.green, .paragraphStyle: paragraph
+            ])
+        }
+        node.childNode(withName: "photoBoothReadout", recursively: true)?.geometry?.firstMaterial?.diffuse.contents = image
+    }
+
+    private static func makeFireTexture() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 180, height: 260)).image { context in
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: 90, y: 250))
+            path.addCurve(to: CGPoint(x: 34, y: 158), controlPoint1: CGPoint(x: 54, y: 226), controlPoint2: CGPoint(x: 20, y: 202))
+            path.addCurve(to: CGPoint(x: 86, y: 108), controlPoint1: CGPoint(x: 46, y: 136), controlPoint2: CGPoint(x: 80, y: 128))
+            path.addCurve(to: CGPoint(x: 81, y: 34), controlPoint1: CGPoint(x: 100, y: 80), controlPoint2: CGPoint(x: 76, y: 54))
+            path.addCurve(to: CGPoint(x: 146, y: 146), controlPoint1: CGPoint(x: 115, y: 76), controlPoint2: CGPoint(x: 153, y: 103))
+            path.addCurve(to: CGPoint(x: 90, y: 250), controlPoint1: CGPoint(x: 153, y: 206), controlPoint2: CGPoint(x: 126, y: 241))
+            path.close()
+            UIColor(red: 1.0, green: 0.16, blue: 0.015, alpha: 0.95).setFill()
+            path.fill()
+            let inner = UIBezierPath(ovalIn: CGRect(x: 68, y: 130, width: 45, height: 86))
+            UIColor(red: 1.0, green: 0.82, blue: 0.08, alpha: 0.95).setFill()
+            inner.fill()
+        }
+    }
+
+    static func makeFireNode(at coord: GridCoordinate, cellSize: CGFloat) -> SCNNode {
+        let root = SCNNode()
+        root.name = "fire_\(coord.row)_\(coord.col)"
+        let texture = makeFireTexture()
+        let material = SCNMaterial()
+        material.diffuse.contents = texture
+        material.emission.contents = texture
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        material.blendMode = .alpha
+        material.writesToDepthBuffer = false
+
+        for yaw in [CGFloat(0), .pi / 2] {
+            let plane = SCNPlane(width: 0.78, height: 1.12)
+            plane.materials = [material.copy() as! SCNMaterial]
+            let node = SCNNode(geometry: plane)
+            node.position.y = 0.58
+            node.eulerAngles.y = Float(yaw)
+            root.addChildNode(node)
+        }
+
+        let glow = SCNLight()
+        glow.type = .omni
+        glow.color = UIColor(red: 1.0, green: 0.18, blue: 0.02, alpha: 1)
+        glow.intensity = 85
+        glow.attenuationEndDistance = 2.2
+        let glowNode = SCNNode()
+        glowNode.light = glow
+        glowNode.position.y = 0.55
+        root.addChildNode(glowNode)
+
+        root.position = SCNVector3(Float(CGFloat(coord.col) * cellSize), 0, Float(CGFloat(coord.row) * cellSize))
+        root.runAction(.repeatForever(.sequence([
+            .group([
+                .rotateBy(x: 0, y: 0.16, z: 0, duration: 0.22),
+                .scale(to: 1.08, duration: 0.22)
+            ]),
+            .group([
+                .rotateBy(x: 0, y: -0.16, z: 0, duration: 0.22),
+                .scale(to: 0.94, duration: 0.22)
+            ])
+        ])), forKey: "fireAnimation")
+        return root
+    }
+
     struct Config {
         var leg1Length: CGFloat = 34      // straight run before the turn
         var leg2Length: CGFloat = 34      // straight run after the turn
@@ -196,7 +499,7 @@ enum HallwayScene {
     /// FloorRect, inset only on the sides that actually have a wall, so
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
-    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode]) {
+    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -218,6 +521,9 @@ enum HallwayScene {
 
         var walkableRects: [FloorRect] = []
         var objectNodes: [GridCoordinate: SCNNode] = [:]
+        var fireNodes: [GridCoordinate: SCNNode] = [:]
+        var extinguisherNodes: [GridCoordinate: SCNNode] = [:]
+        var photoBoothNodes: [GridCoordinate: SCNNode] = [:]
         // Every Exit Sign built below, keyed by the intersection cell
         // it's mounted at -- TapNavigationController uses this to know
         // exactly which node to light up neon-bright once the player
@@ -611,7 +917,7 @@ enum HallwayScene {
         // 1.6 as elevatorDoorWidth), so dead-center becomes 0.8 from
         // every wall -- 4x the breathing room, no more nose-to-the-
         // glass feeling on the photo or on the doors at pivot's end.
-        let elevatorShaftDepth: CGFloat = 1.6
+        let elevatorShaftDepth: CGFloat = 3.0
         let elevatorPanelThickness: CGFloat = 0.03
         let elevatorShaftGap: CGFloat = 0.01
         let elevatorDoorGap: CGFloat = 0.06
@@ -670,36 +976,9 @@ enum HallwayScene {
             if let buildingPhotoPath = Bundle.main.path(forResource: "BuildingIntro", ofType: "png"),
                let buildingPhoto = UIImage(contentsOfFile: buildingPhotoPath) {
                 let photoAspect = buildingPhoto.size.height / max(buildingPhoto.size.width, 1)
-                // Eddie, Sept 8: shrinking this from 0.75 to 0.5
-                // did NOT cut the zoom down -- "its still zooming in
-                // just as much." Confirms the zoom was never about
-                // this photo's own size, only about how close the
-                // camera's fixed resting spot was to the wall it's
-                // mounted on. elevatorShaftDepth (above) now backs
-                // that resting spot off to a real distance, so this
-                // goes back to its original, actually-readable size.
-                // Eddie, Sept 8, from a screenshot at the dolly's
-                // resting spot: "the side borders of the pic...
-                // they look weird being bigger than the width
-                // [of the screen]." The camera's own fieldOfView
-                // (75) is the VERTICAL angle, so on a phone's tall,
-                // narrow portrait screen the HORIZONTAL angle is a
-                // good deal tighter -- on a typical iPhone's ~0.46
-                // width/height ratio, about 39 degrees wide versus
-                // 75 tall. At the ride's fixed ~0.77 camera-to-
-                // frame distance, that narrower horizontal frustum
-                // only has about 0.54 of clearance.
-                //
-                // Eddie, Sept 8, next report: "the borders are
-                // just overlapping the edges of the screen." 0.48
-                // fit the PHOTO itself inside that 0.54, but missed
-                // that the visible edge is the FRAME around it
-                // (photoFrameGeo below is photoWidth + 0.08), which
-                // came out to 0.56 -- wider than the 0.54 available,
-                // so of course it still clipped. 0.4 makes the
-                // frame 0.48, comfortably inside 0.54 with real
-                // margin this time, not just barely under it.
-                let photoWidth: CGFloat = 0.4
+                // Poster scale. The deeper back wall keeps the full frame inside
+                // the portrait viewport at the unchanged ride camera position.
+                let photoWidth: CGFloat = 1.12
                 let photoHeight = photoWidth * photoAspect
 
                 // Same point-blank headlamp blowout as the doors --
@@ -741,6 +1020,27 @@ enum HallwayScene {
                 photoFrame.addChildNode(photoPlane)
 
                 shaft.addChildNode(photoFrame)
+            }
+
+            // The 180-degree ride turn sweeps past the car's left wall.
+            let sidePhoto = SCNNode(geometry: SCNBox(width: 0.48, height: 0.65, length: 0.03, chamferRadius: 0.005))
+            let sideFrameMaterial = SCNMaterial()
+            sideFrameMaterial.diffuse.contents = UIColor(red: 0.62, green: 0.47, blue: 0.26, alpha: 1)
+            sidePhoto.geometry?.materials = [sideFrameMaterial]
+            sidePhoto.name = "elevatorSidePhoto"
+            sidePhoto.position = SCNVector3(-halfW + 0.035, 0.3, -0.8)
+            sidePhoto.eulerAngles.y = .pi / 2
+            let sideImage = SCNNode(geometry: SCNPlane(width: 0.40, height: 0.40 * 0.85 / 0.6))
+            sideImage.position.z = 0.016
+            let sideMaterial = SCNMaterial()
+            sideMaterial.lightingModel = .constant
+            sideMaterial.diffuse.contents = randomPictureImage().map { framedPhoto($0) } ?? UIImage()
+            sideImage.geometry?.materials = [sideMaterial]
+            sidePhoto.addChildNode(sideImage)
+            shaft.addChildNode(sidePhoto)
+            PhotoRollProvider.shared.randomImages(count: 1) { _, image in
+                guard let image else { return }
+                sideMaterial.diffuse.contents = framedPhoto(image)
             }
 
             // Eddie, Sept 8: "that hand rail i spoke about may be
@@ -989,7 +1289,7 @@ enum HallwayScene {
             // per-direction position/rotation for free.
             let hasMissionItem = missionObjectKind != nil
             let hasMissionDestination = missionObjectKind != nil && (destinations.values.contains(missionObjectKind!) || (missionObjectKind == .envelope && !roomDoors.isEmpty))
-            let legendTexture = makeMapLegendTexture(hasMissionItem: hasMissionItem, missionItemLabel: missionObjectKind?.missionLegendLabel ?? "", hasMissionDestination: hasMissionDestination)
+            let legendTexture = makeMapLegendTexture(hasMissionItem: hasMissionItem, missionItemLabel: missionObjectKind?.missionLegendLabel ?? "", hasMissionDestination: hasMissionDestination, hasPhotoBooths: !photoBooths.isEmpty)
             let legendAspect = legendTexture.size.height / max(legendTexture.size.width, 1)
             let legendWidth = (panelWidth / 1.4) * 0.85
             let legendHeight = legendWidth * legendAspect
@@ -1383,7 +1683,7 @@ enum HallwayScene {
             // judged before any carrying/delivering logic gets built on
             // top.
             if let kind = objects[coord] {
-                let node = kind == .envelope ? makeEnvelopeNode(roomNumber: itemRooms[coord]) : makeObjectNode(kind, size: cellSize * 0.22)
+                let node = kind == .envelope ? makeEnvelopeNode(roomNumber: itemRooms[coord]) : makeObjectNode(kind, size: cellSize * 0.22, floorNumber: floorNumber)
                 node.position = SCNVector3(Float(x), Float(wallHeight * (kind == .envelope ? 0.4 : 0.25)), Float(z))
                 root.addChildNode(node)
                 objectNodes[coord] = node
@@ -1430,6 +1730,34 @@ enum HallwayScene {
             let zLower = z - half + (hasWallNorth ? margin : 0)
             let zUpper = z + half - (hasWallSouth ? margin : 0)
             walkableRects.append(FloorRect(xRange: xLower...xUpper, zRange: zLower...zUpper))
+        }
+
+        // Floor 4 visual prototype: a reachable extinguisher on the north
+        // wall of the open cell at (row: 8, col: 5). It is deliberately a
+        // static scene prop for now; no persistence, pickup, fire, or mission
+        // behavior is attached.
+        if floorNumber == 4 {
+            root.addChildNode(makeFireExtinguisherNode(
+                at: GridCoordinate(row: 8, col: 5),
+                direction: .north,
+                cellSize: cellSize
+            ))
+        }
+
+        for (coord, direction) in extinguishers where cells.contains(coord) {
+            let node = makeFireExtinguisherNode(at: coord, direction: direction, cellSize: cellSize)
+            root.addChildNode(node)
+            extinguisherNodes[coord] = node
+        }
+        for coord in fires where cells.contains(coord) {
+            let node = makeFireNode(at: coord, cellSize: cellSize)
+            root.addChildNode(node)
+            fireNodes[coord] = node
+        }
+        for (coord, placement) in photoBooths where cells.contains(coord) {
+            let node = makePhotoBoothNode(at: coord, direction: placement.direction, expression: placement.expression, cellSize: cellSize)
+            root.addChildNode(node)
+            photoBoothNodes[coord] = node
         }
 
         // Exit Signs -- manually placed in GridEditorView now (Eddie,
@@ -1522,7 +1850,7 @@ enum HallwayScene {
             // (below) whenever currentCell changes afterward, so the red
             // dot tracks you live from here on -- see its
             // refreshFloorMapTexture().
-            let mapTexture = makeFloorMapTexture(cells: cells, end: end, maxRow: maxRow, maxCol: maxCol, playerAt: start, missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), roomDoors: roomDoors, itemRooms: itemRooms)
+            let mapTexture = makeFloorMapTexture(cells: cells, end: end, maxRow: maxRow, maxCol: maxCol, playerAt: start, facing: startingFacing(at: start, cells: cells), missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), photoBoothCells: Array(photoBooths.keys), roomDoors: roomDoors, itemRooms: itemRooms)
             for (coord, direction) in floorMaps {
                 guard cells.contains(coord) else { continue }
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
@@ -1713,7 +2041,7 @@ enum HallwayScene {
         // marks the spot, and reads a lot more like "the mechanism
         // that takes you to the next floor" than a stray ball did.
 
-        return (scene, cameraNode, walkableRects, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes)
+        return (scene, cameraNode, walkableRects, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes)
     }
 
     // MARK: - Materials (unchanged from Prototype 1)
@@ -1889,7 +2217,7 @@ enum HallwayScene {
     /// destination-icon placement (mounted flat behind a wall shutter),
     /// so there's exactly one switch over ObjectKind's cases instead of
     /// one per call site.
-    private static func makeObjectNode(_ kind: ObjectKind, size: CGFloat) -> SCNNode {
+    private static func makeObjectNode(_ kind: ObjectKind, size: CGFloat, floorNumber: Int = 1) -> SCNNode {
         switch kind {
         case .heart:
             return makeHeartNode(size: size)
@@ -1910,7 +2238,7 @@ enum HallwayScene {
         case .trashCan:
             return makeTrashCanNode(size: size)
         case .cash100:
-            return makeCash100Node(size: size)
+            return makeCashNode(value: kind.cashValue(onFloor: floorNumber) ?? 100, size: size)
         case .envelope:
             return makeEnvelopeNode(size: size)
         case .paintBucket:
@@ -2052,7 +2380,7 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, maxRow: Int, maxCol: Int, playerAt: GridCoordinate, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], paintedCells: Set<GridCoordinate>? = nil) -> UIImage {
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, maxRow: Int, maxCol: Int, playerAt: GridCoordinate, facing: Direction = .north, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], paintedCells: Set<GridCoordinate>? = nil) -> UIImage {
         let cellPx: CGFloat = 48
         let margin: CGFloat = 16
         let width = CGFloat(maxCol + 1) * cellPx + margin * 2
@@ -2109,7 +2437,10 @@ enum HallwayScene {
             // separately: "get rid of the start position."
             let elevatorRect = CGRect(x: margin + CGFloat(end.col) * cellPx, y: margin + CGFloat(end.row) * cellPx, width: cellPx, height: cellPx)
             elevatorColor.setFill()
-            cg.fillEllipse(in: elevatorRect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+            let elevatorInset = elevatorRect.insetBy(dx: cellPx * 0.16, dy: cellPx * 0.16)
+            cg.setLineWidth(3)
+            cg.stroke(elevatorInset)
+            cg.fill(elevatorInset.insetBy(dx: cellPx * 0.14, dy: cellPx * 0.14))
 
             // Green dots for this floor's mission -- whatever's still
             // out there to find (missionItemCells, shrinks live as you
@@ -2122,6 +2453,17 @@ enum HallwayScene {
             for coord in missionItemCells {
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
                 cg.fillEllipse(in: rect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+            }
+
+            let boothColor = UIColor(red: 0.15, green: 0.45, blue: 0.85, alpha: 1)
+            boothColor.setFill()
+            for coord in photoBoothCells {
+                let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
+                let boothRect = rect.insetBy(dx: cellPx * 0.19, dy: cellPx * 0.19)
+                cg.fill(boothRect)
+                UIColor.white.setStroke()
+                cg.setLineWidth(2)
+                cg.stroke(boothRect.insetBy(dx: 3, dy: 3))
             }
 
             UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1).setFill()
@@ -2160,13 +2502,28 @@ enum HallwayScene {
                 ("\(room)" as NSString).draw(in: rect, withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.black, .paragraphStyle: centerStyle])
             }
 
-            let playerColor = UIColor(red: 0.1, green: 0.35, blue: 0.95, alpha: 1)
             let playerRect = CGRect(x: margin + CGFloat(playerAt.col) * cellPx, y: margin + CGFloat(playerAt.row) * cellPx, width: cellPx, height: cellPx)
-            playerColor.setFill()
-            cg.fillEllipse(in: playerRect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+            let center = CGPoint(x: playerRect.midX, y: playerRect.midY)
+            let angle: CGFloat
+            switch facing {
+            case .north: angle = 0
+            case .east: angle = .pi / 2
+            case .south: angle = .pi
+            case .west: angle = -.pi / 2
+            }
+            cg.saveGState()
+            cg.translateBy(x: center.x, y: center.y)
+            cg.rotate(by: angle)
+            UIColor(red: 0.08, green: 0.12, blue: 0.85, alpha: 1).setFill()
+            cg.move(to: CGPoint(x: 0, y: -cellPx * 0.34))
+            cg.addLine(to: CGPoint(x: cellPx * 0.27, y: cellPx * 0.24))
+            cg.addLine(to: CGPoint(x: -cellPx * 0.27, y: cellPx * 0.24))
+            cg.closePath()
+            cg.fillPath()
+            cg.restoreGState()
 
             let labelFont = UIFont.boldSystemFont(ofSize: cellPx * 0.5)
-            let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: playerColor]
+            let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: UIColor.black]
             let label = "HERE" as NSString
             let labelSize = label.size(withAttributes: labelAttrs)
             // Above the dot by default, below it instead if that would
@@ -2188,7 +2545,7 @@ enum HallwayScene {
     /// the wall previously explained what that dot meant at a glance --
     /// this is the same idea a real building directory uses, pairing
     /// its floor plan with a small fixed legend below it.
-    private static func makeMapLegendTexture(hasMissionItem: Bool, missionItemLabel: String, hasMissionDestination: Bool) -> UIImage {
+    private static func makeMapLegendTexture(hasMissionItem: Bool, missionItemLabel: String, hasMissionDestination: Bool, hasPhotoBooths: Bool = false) -> UIImage {
         struct LegendRow {
             let color: UIColor
             let text: String
@@ -2203,6 +2560,9 @@ enum HallwayScene {
         }
         if hasMissionDestination {
             rows.append(LegendRow(color: missionItemLabel == "Mail" ? UIColor(red: 0.4, green: 0.22, blue: 0.1, alpha: 1) : UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1), text: missionItemLabel == "Mail" ? "Rooms" : "Chute"))
+        }
+        if hasPhotoBooths {
+            rows.append(LegendRow(color: UIColor(red: 0.15, green: 0.45, blue: 0.85, alpha: 1), text: "Photo Booth"))
         }
 
         let rowHeight: CGFloat = 90
@@ -2220,7 +2580,24 @@ enum HallwayScene {
                 let rowY = CGFloat(index) * rowHeight
                 let dotRect = CGRect(x: 26, y: rowY + rowHeight / 2 - dotRadius, width: dotRadius * 2, height: dotRadius * 2)
                 row.color.setFill()
-                cg.fillEllipse(in: dotRect)
+                if row.text == "You Are Here" {
+                    cg.move(to: CGPoint(x: dotRect.midX, y: dotRect.minY))
+                    cg.addLine(to: CGPoint(x: dotRect.maxX, y: dotRect.maxY))
+                    cg.addLine(to: CGPoint(x: dotRect.minX, y: dotRect.maxY))
+                    cg.closePath()
+                    cg.fillPath()
+                } else if row.text == "Elevator" {
+                    cg.setLineWidth(3)
+                    cg.stroke(dotRect.insetBy(dx: 4, dy: 4))
+                    cg.fill(dotRect.insetBy(dx: 12, dy: 12))
+                } else if row.text == "Photo Booth" {
+                    cg.fill(dotRect.insetBy(dx: 3, dy: 3))
+                    UIColor.white.setStroke()
+                    cg.setLineWidth(2)
+                    cg.stroke(dotRect.insetBy(dx: 7, dy: 7))
+                } else {
+                    cg.fillEllipse(in: dotRect)
+                }
 
                 let text = row.text as NSString
                 let textSize = text.size(withAttributes: textAttrs)
@@ -2242,7 +2619,8 @@ enum HallwayScene {
     /// track here.
     static func makeMissionSignTexture(heading: String, body: String) -> UIImage {
         let width: CGFloat = 700
-        let height: CGFloat = 625
+        let isIntroduction = heading.hasPrefix("WELCOME TO HALLWAYS")
+        let height: CGFloat = isIntroduction ? 900 : 625
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))
         let backgroundColor = UIColor(white: 0.93, alpha: 1)
         let borderColor = UIColor(red: 0.3, green: 0.22, blue: 0.1, alpha: 1)
@@ -2259,19 +2637,20 @@ enum HallwayScene {
 
             let margin: CGFloat = 40
 
-            let headingFont = UIFont.boldSystemFont(ofSize: 80)
+            // The welcome heading has five lines; 58 pt clipped its progression instructions.
+            let headingFont = UIFont.boldSystemFont(ofSize: isIntroduction ? 40 : 80)
             let headingStyle = NSMutableParagraphStyle()
             headingStyle.alignment = .center
             headingStyle.lineBreakMode = .byWordWrapping
             let headingAttrs: [NSAttributedString.Key: Any] = [.font: headingFont, .foregroundColor: headingColor, .paragraphStyle: headingStyle]
-            let headingRect = CGRect(x: margin, y: margin, width: width - margin * 2, height: 110)
+            let headingRect = CGRect(x: margin, y: margin, width: width - margin * 2, height: isIntroduction ? 340 : 110)
             (heading as NSString).draw(in: headingRect, withAttributes: headingAttrs)
 
-            let bodyFont = UIFont.systemFont(ofSize: 45, weight: .medium)
+            let bodyFont = UIFont.systemFont(ofSize: isIntroduction ? 40 : 45, weight: .medium)
             let bodyStyle = NSMutableParagraphStyle()
             bodyStyle.lineBreakMode = .byWordWrapping
             let bodyAttrs: [NSAttributedString.Key: Any] = [.font: bodyFont, .foregroundColor: bodyColor, .paragraphStyle: bodyStyle]
-            let bodyTop = margin + 135
+            let bodyTop = isIntroduction ? 400 : margin + 135
             let bodyRect = CGRect(x: margin, y: bodyTop, width: width - margin * 2, height: height - bodyTop - margin)
             (body as NSString).draw(in: bodyRect, withAttributes: bodyAttrs)
         }

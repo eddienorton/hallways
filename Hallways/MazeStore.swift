@@ -44,6 +44,29 @@ struct GridCoordinate: Hashable, Codable {
     let col: Int
 }
 
+struct FirePlacement: Codable, Hashable {
+    var coord: GridCoordinate
+}
+
+struct ExtinguisherPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var direction: Direction
+}
+
+enum PhotoBoothExpression: String, Codable, Hashable {
+    case smile
+    case mouthOpen
+    case eyebrowsRaised
+
+    var prompt: String {
+        switch self {
+        case .smile: return "PLEASE SMILE"
+        case .mouthOpen: return "OPEN YOUR MOUTH"
+        case .eyebrowsRaised: return "RAISE YOUR EYEBROWS"
+        }
+    }
+}
+
 /// Which kind of pick-up-able object sits on a cell. Adding a new kind
 /// is meant to stay cheap — a new case here, a new make*Node(size:) in
 /// HallwayScene, one new case in that switch — no new per-object data
@@ -98,6 +121,9 @@ enum ObjectKind: String, Codable, CaseIterable {
 /// TapNavigationController tells "instant-absorb cash" apart from
 /// "carry it, deliver it later" trash: everything else stays nil.
 extension ObjectKind {
+    /// Denominations start at $100 on Floor 2; the introductory lobby has no cash.
+    func cashValue(onFloor floor: Int) -> Int? { cashValue.map { $0 * max(0, floor - 1) } }
+
     var cashValue: Int? {
         switch self {
         case .cash100: return 100
@@ -218,6 +244,12 @@ private struct PicturePlacement: Codable {
     var direction: Direction
 }
 
+private struct PhotoBoothPlacement: Codable {
+    var coord: GridCoordinate
+    var direction: Direction
+    var expression: PhotoBoothExpression
+}
+
 // spotlights themselves need no struct -- a plain [GridCoordinate], same
 // as `cells` -- since a ceiling light has no direction/kind of its own
 // (Eddie, Sept 6: "how difficult to have a spotlight that we could
@@ -260,6 +292,9 @@ private struct MazeRecord {
     /// decodeIfPresent-or-empty treatment, no legacy shape to migrate.
     var pictures: [PicturePlacement]
     var mirrors: [PicturePlacement] = []
+    var fires: [FirePlacement] = []
+    var extinguishers: [ExtinguisherPlacement] = []
+    var photoBooths: [PhotoBoothPlacement] = []
     var roomDoors: [RoomDoorPlacement] = []
     var itemRooms: [RoomAssignment] = []
     var picturesUseCameraRoll: Bool = false
@@ -287,7 +322,7 @@ private struct MazeRecord {
 
 extension MazeRecord: Codable {
     enum CodingKeys: String, CodingKey {
-        case mirrors, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, roomDoors, itemRooms, mailAddresses
+        case mirrors, fires, extinguishers, photoBooths, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, roomDoors, itemRooms, mailAddresses
     }
 
     // Hand-written so older mazes.json shapes still load cleanly
@@ -321,6 +356,9 @@ extension MazeRecord: Codable {
         spotlights = try container.decodeIfPresent([GridCoordinate].self, forKey: .spotlights) ?? []
         missionSigns = try container.decodeIfPresent([MissionSignPlacement].self, forKey: .missionSigns) ?? []
         mirrors = try container.decodeIfPresent([PicturePlacement].self, forKey: .mirrors) ?? []
+        fires = try container.decodeIfPresent([FirePlacement].self, forKey: .fires) ?? []
+        extinguishers = try container.decodeIfPresent([ExtinguisherPlacement].self, forKey: .extinguishers) ?? []
+        photoBooths = try container.decodeIfPresent([PhotoBoothPlacement].self, forKey: .photoBooths) ?? []
         pictures = try container.decodeIfPresent([PicturePlacement].self, forKey: .pictures) ?? []
         roomDoors = try container.decodeIfPresent([RoomDoorPlacement].self, forKey: .roomDoors) ?? []
         itemRooms = try container.decodeIfPresent([RoomAssignment].self, forKey: .itemRooms)
@@ -352,6 +390,9 @@ extension MazeRecord: Codable {
         try container.encode(spotlights, forKey: .spotlights)
         try container.encode(missionSigns, forKey: .missionSigns)
         try container.encode(mirrors, forKey: .mirrors)
+        try container.encode(fires, forKey: .fires)
+        try container.encode(extinguishers, forKey: .extinguishers)
+        try container.encode(photoBooths, forKey: .photoBooths)
         try container.encode(pictures, forKey: .pictures)
         try container.encode(roomDoors, forKey: .roomDoors)
         try container.encode(itemRooms, forKey: .itemRooms)
@@ -497,6 +538,9 @@ final class MazeStore: ObservableObject {
     /// looked at"), unlike every other wall fixture here -- see
     /// PicturePlacement's own doc comment for why no image is stored.
     @Published private(set) var mirrors: [GridCoordinate: Direction] = [:]
+    @Published private(set) var fires: Set<GridCoordinate> = []
+    @Published private(set) var extinguishers: [GridCoordinate: Direction] = [:]
+    @Published private(set) var photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:]
     @Published private(set) var pictures: [GridCoordinate: Direction]
     @Published private(set) var roomDoors: [GridCoordinate: RoomDoorPlacement] = [:]
     @Published private(set) var itemRooms: [GridCoordinate: Int] = [:]
@@ -615,6 +659,9 @@ final class MazeStore: ObservableObject {
             missionSigns = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.missionSigns ?? []).map { ($0.coord, $0.direction) })
             mirrors = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.mirrors ?? []).map { ($0.coord, $0.direction) })
             pictures = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.pictures ?? []).map { ($0.coord, $0.direction) })
+            fires = Set((loaded[firstID]?.fires ?? []).map(\.coord))
+            extinguishers = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.extinguishers ?? []).map { ($0.coord, $0.direction) })
+            photoBooths = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.photoBooths ?? []).map { ($0.coord, ($0.direction, $0.expression)) })
             roomDoors = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.roomDoors ?? []).map { ($0.coord, $0) })
             itemRooms = Dictionary(uniqueKeysWithValues: (loaded[firstID]?.itemRooms ?? []).map { ($0.coord, $0.roomNumber) })
             picturesUseCameraRoll = loaded[firstID]?.picturesUseCameraRoll ?? false
@@ -639,6 +686,9 @@ final class MazeStore: ObservableObject {
             missionSigns = [Self.missionCoordinate: .south]
             pictures = [:]
             mirrors = [:]
+            fires = []
+            extinguishers = [:]
+            photoBooths = [:]
             roomDoors = [:]
             itemRooms = [:]
             picturesUseCameraRoll = false
@@ -1015,7 +1065,8 @@ final class MazeStore: ObservableObject {
         let floorMapPlacements = floorMaps.map { FloorMapPlacement(coord: $0.key, direction: $0.value) }
         let missionSignPlacements = missionSigns.map { MissionSignPlacement(coord: $0.key, direction: $0.value) }
         let picturePlacements = pictures.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights), missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrors.map { PicturePlacement(coord: $0.key, direction: $0.value) }, roomDoors: Array(roomDoors.values), itemRooms: itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
+        let photoBoothPlacements = photoBooths.map { PhotoBoothPlacement(coord: $0.key, direction: $0.value.direction, expression: $0.value.expression) }
+        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights), missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrors.map { PicturePlacement(coord: $0.key, direction: $0.value) }, fires: fires.map { FirePlacement(coord: $0) }, extinguishers: extinguishers.map { ExtinguisherPlacement(coord: $0.key, direction: $0.value) }, photoBooths: photoBoothPlacements, roomDoors: Array(roomDoors.values), itemRooms: itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
         MazeLibrary.saveAll(library)
     }
 
@@ -1064,6 +1115,9 @@ final class MazeStore: ObservableObject {
             spotlights = Set(record.spotlights)
             missionSigns = Dictionary(uniqueKeysWithValues: record.missionSigns.map { ($0.coord, $0.direction) })
             mirrors = Dictionary(uniqueKeysWithValues: record.mirrors.map { ($0.coord, $0.direction) })
+            fires = Set(record.fires.map(\.coord))
+            extinguishers = Dictionary(uniqueKeysWithValues: record.extinguishers.map { ($0.coord, $0.direction) })
+            photoBooths = Dictionary(uniqueKeysWithValues: record.photoBooths.map { ($0.coord, ($0.direction, $0.expression)) })
             pictures = Dictionary(uniqueKeysWithValues: record.pictures.map { ($0.coord, $0.direction) })
             roomDoors = Dictionary(uniqueKeysWithValues: record.roomDoors.map { ($0.coord, $0) })
             itemRooms = Dictionary(uniqueKeysWithValues: record.itemRooms.map { ($0.coord, $0.roomNumber) })
@@ -1084,6 +1138,9 @@ final class MazeStore: ObservableObject {
             missionSigns = [Self.missionCoordinate: .south]
             pictures = [:]
             mirrors = [:]
+            fires = []
+            extinguishers = [:]
+            photoBooths = [:]
             roomDoors = [:]
             itemRooms = [:]
             picturesUseCameraRoll = false
@@ -1165,6 +1222,9 @@ final class MazeStore: ObservableObject {
         missionSigns = [Self.missionCoordinate: .south]
         pictures = [:]
         mirrors = [:]
+        fires = []
+        extinguishers = [:]
+        photoBooths = [:]
         roomDoors = [:]
         itemRooms = [:]
         version += 1

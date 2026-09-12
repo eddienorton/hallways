@@ -119,6 +119,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 transientMessage = nil
             }
             refreshFloorMapTexture()
+
         }
     }
     /// A short one-line status message, on screen only for as long as
@@ -135,7 +136,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// which D-pad buttons are enabled (forward is only lit up when
     /// this direction is actually open from currentCell) and how the 2D
     /// marker's arrow is drawn.
-    @Published private(set) var facing: Direction
+    @Published private(set) var facing: Direction {
+        didSet {
+            guard oldValue != facing else { return }
+            refreshFloorMapTexture()
+        }
+    }
 
     /// Which cell holds which object, as of scene-build time -- an
     /// immutable snapshot, same idea as `cells`. objectNodes pairs each
@@ -150,6 +156,25 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// .trashCan (Eddie, Sept 7: "since we already have the trash
     /// pretty much in there, lets make it the first floors mission").
     private let missionObjectKind: ObjectKind?
+    private let fireCoords: Set<GridCoordinate>
+    private let fireNodes: [GridCoordinate: SCNNode]
+    private let extinguisherCoords: [GridCoordinate: Direction]
+    private let extinguisherNodes: [GridCoordinate: SCNNode]
+    private let photoBoothNodes: [GridCoordinate: SCNNode]
+    private let photoBoothDirections: [GridCoordinate: Direction]
+    private let photoBoothExpressions: [GridCoordinate: PhotoBoothExpression]
+    private var completedPhotoBooths: Set<GridCoordinate> = []
+    @Published private(set) var activePhotoBooth: GridCoordinate?
+    @Published private(set) var photoBoothCompletionImage: UIImage?
+    @Published private(set) var photoBoothCameraState: String?
+    private let extinguisherRestingTransforms: [GridCoordinate: (position: SCNVector3, eulerAngles: SCNVector3, scale: SCNVector3)]
+    private var extinguishedFireCoords: Set<GridCoordinate> = []
+    @Published private(set) var carryingExtinguisher = false
+    private var carriedExtinguisherNode: SCNNode?
+    private var extinguisherPickupInProgress = false
+    private var pickedUpExtinguisherCoords: Set<GridCoordinate> = []
+    private var extinguishingFireCoords: Set<GridCoordinate> = []
+    private var fireInteractionID = UUID()
     /// Which of objectKinds' coordinates have been picked up this run --
     /// doubles as the "already collected?" check so walking back over an
     /// empty cell doesn't re-collect it. Cleared by reset(), which also
@@ -169,6 +194,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private func paintIfCarryingBucket(at coord: GridCoordinate) {
         guard missionObjectKind == .paintBucket, hasPaintBucket, paintedCells.insert(coord).inserted else { return }
         wallPainter?.paint(coord)
+        SoundEffects.playPaintSplat()
         if paintedCells == cells { showMessage("Every hallway is painted! Return to the elevator.") }
     }
 
@@ -218,6 +244,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// leads to -- mazeIDs double as floor numbers (see MazeStore's
     /// floorCount), so these are just mazeStore.currentMazeID/
     /// nextMazeID at the moment this controller got built.
+    var currentFloorNumber: Int { floorNumber }
+    var floorLabel: String { floorNumber == 1 ? "LOBBY" : "FLOOR \(floorNumber)" }
     private let floorNumber: Int
     private let nextFloorNumber: Int?
     /// Each door panel's shut position, captured once at init -- same
@@ -274,8 +302,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // elevator all day... feel free"). !elevatorInUse is the real
     // remaining concern -- don't let the player walk off mid-slide
     // while the doors are actually open/animating.
-    var canGoForward: Bool { !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && openDirections.contains(facing) }
-    var canRotate: Bool { !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse }
+    var canGoForward: Bool { !handheldMapVisible && activePhotoBooth == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && openDirections.contains(facing) }
+    var canRotate: Bool { !handheldMapVisible && activePhotoBooth == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
 
     private enum SegmentPhase {
         case pivot      // rotating in place, position unchanged
@@ -327,6 +355,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// built the node; this controller only decides whether walking
     /// through is worth stopping for).
     private let floorMapCoords: Set<GridCoordinate>
+    private let photoBoothCoords: Set<GridCoordinate>
     /// Which floor-map cells you've actually arrived at and stood in
     /// front of this run -- same "already handled, don't re-trigger"
     /// role as collectedCoords/deliveredCoords, except nothing ever
@@ -381,7 +410,44 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// no extra bookkeeping a dedicated close method would need to do.
     @Published var floorMapOverlayVisible = false
 
-    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionObjectKind: ObjectKind? = nil) {
+    @Published private(set) var handheldMapVisible = false
+    /// Cancels the coordinator's held-walk timer when the map opens.
+    var onHandheldMapOpened: (() -> Void)?
+    private var deferredMapNavigationUpdates: [() -> Void] = []
+
+    var canOpenHandheldMap: Bool {
+        !elevatorInUse && !chuteInUse && activePhotoBooth == nil &&
+        !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty
+    }
+
+    func openHandheldMap() {
+        guard !handheldMapVisible, canOpenHandheldMap else { return }
+        // A two-finger interaction may open the map during a drag. Preserve
+        // the camera position and settle back to the committed heading on close.
+        if isDragRotating { endDragRotate(fraction: 0) }
+        handheldMapVisible = true
+        onHandheldMapOpened?()
+        SoundEffects.stopWalking()
+    }
+
+    func closeHandheldMap() {
+        guard handheldMapVisible else { return }
+        handheldMapVisible = false
+        lastTime = 0 // Never integrate time spent reading the map into movement.
+        let updates = deferredMapNavigationUpdates
+        deferredMapNavigationUpdates.removeAll()
+        updates.forEach { $0() }
+        if isAnimating, phase == .translate { SoundEffects.startWalking() }
+    }
+
+    /// A renderer callback may already be queued when the map opens. Keep
+    /// its arrival/mission effects paused too, then deliver them once on close.
+    private func applyNavigationUpdate(_ update: @escaping () -> Void) {
+        if handheldMapVisible { deferredMapNavigationUpdates.append(update) }
+        else { update() }
+    }
+
+    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionObjectKind: ObjectKind? = nil) {
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -397,6 +463,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.objectKinds = objects
         self.objectNodes = objectNodes
         self.missionObjectKind = missionObjectKind
+        self.fireCoords = fires
+        self.fireNodes = fireNodes
+        self.extinguisherCoords = extinguishers
+        self.extinguisherNodes = extinguisherNodes
+        self.photoBoothNodes = photoBoothNodes
+        self.photoBoothDirections = photoBooths.mapValues(\.direction)
+        self.photoBoothExpressions = photoBooths.mapValues(\.expression)
+        self.extinguisherRestingTransforms = extinguisherNodes.mapValues {
+            (position: $0.position, eulerAngles: $0.eulerAngles, scale: $0.scale)
+        }
         self.wallPainter = missionObjectKind == .paintBucket ? WallPainter(scene: scene) : nil
         self.destinationKinds = destinations
         self.destinationNodes = destinationNodes
@@ -412,6 +488,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.exitSignNodes = exitSignNodes
         self.exitSignDirections = exitSigns
         self.floorMapCoords = Set(floorMaps.keys)
+        self.photoBoothCoords = Set(photoBooths.keys)
         self.missionSignCoords = Set(missionSigns.keys)
         self.pictureCoords = Set(pictures.keys).union(mirrors.keys)
         self.floorMapPlaneNodes = floorMapPlaneNodes
@@ -440,6 +517,108 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // to currentCell above, so this covers the (rare, but real)
         // case where startCell itself happens to be an Exit Sign cell.
         updateExitSignHighlight()
+    }
+
+    var fireMissionProgress: String? {
+        guard !fireCoords.isEmpty else { return nil }
+        return "Fires remaining: \(fireCoords.subtracting(extinguishedFireCoords).count)"
+    }
+
+    var photoBoothMissionProgress: String? {
+        guard !photoBoothExpressions.isEmpty else { return nil }
+        return "Photos complete: \(completedPhotoBooths.count)/\(photoBoothExpressions.count)"
+    }
+
+    var activePhotoBoothPrompt: String? {
+        activePhotoBooth.flatMap { photoBoothExpressions[$0]?.prompt }
+    }
+
+    func activatePhotoBooth(at coord: GridCoordinate) {
+        guard activePhotoBooth == nil, canRotate, coord == currentCell, photoBoothDirections[coord] == facing, photoBoothExpressions[coord] != nil, !completedPhotoBooths.contains(coord) else { return }
+        navLog("photo booth activating at \(coord), facing \(facing)")
+        activePhotoBooth = coord
+        photoBoothCameraState = "starting"
+        if let booth = photoBoothNodes[coord] {
+            HallwayScene.setPhotoBoothStatus("STARTING CAMERA...", on: booth)
+        }
+    }
+
+    func cancelPhotoBooth() {
+        if let coord = activePhotoBooth, !completedPhotoBooths.contains(coord),
+           let node = photoBoothNodes[coord], let prompt = photoBoothExpressions[coord]?.prompt {
+            HallwayScene.resetPhotoBoothScreen(on: node, prompt: prompt)
+        }
+        activePhotoBooth = nil
+        photoBoothCompletionImage = nil
+        photoBoothCameraState = nil
+    }
+
+    func reportPhotoBoothError(_ message: String) {
+        photoBoothCameraState = "error"
+        showMessage(message)
+        activePhotoBooth = nil
+    }
+
+    func reportPhotoBoothCameraLive(at coord: GridCoordinate) {
+        guard activePhotoBooth == coord, !completedPhotoBooths.contains(coord) else { return }
+        guard photoBoothCameraState != "live" && photoBoothCameraState != "face" else { return }
+        photoBoothCameraState = "live"
+        if let node = photoBoothNodes[coord], let prompt = photoBoothExpressions[coord]?.prompt {
+            HallwayScene.setPhotoBoothStatus(prompt + "\nSWIPE TO STEP AWAY", on: node)
+        }
+    }
+
+    func reportPhotoBoothFaceTracking(at coord: GridCoordinate) {
+        guard activePhotoBooth == coord, !completedPhotoBooths.contains(coord) else { return }
+        guard photoBoothCameraState != "face" else { return }
+        if let node = photoBoothNodes[coord], let prompt = photoBoothExpressions[coord]?.prompt {
+            HallwayScene.setPhotoBoothStatus(prompt + "\nSWIPE TO STEP AWAY", on: node)
+        }
+        photoBoothCameraState = "face"
+    }
+
+    func completePhotoBooth(at coord: GridCoordinate, image: UIImage) {
+        guard activePhotoBooth == coord, !completedPhotoBooths.contains(coord), photoBoothExpressions[coord] != nil else { return }
+        completedPhotoBooths.insert(coord)
+        photoBoothCompletionImage = image
+        photoBoothCameraState = "captured"
+        SoundEffects.playCameraClick()
+        if let booth = photoBoothNodes[coord] {
+            HallwayScene.flashPhotoBoothScreen(on: booth)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                guard self.activePhotoBooth == coord, self.photoBoothCameraState == "captured", self.completedPhotoBooths.contains(coord) else { return }
+                HallwayScene.setPhotoBoothImage(image, on: booth)
+                HallwayScene.setPhotoBoothStatus("THANK YOU.\nID PHOTO ACCEPTED.", on: booth)
+                self.activePhotoBooth = nil
+                self.photoBoothCameraState = nil
+            }
+        } else {
+            activePhotoBooth = nil
+            photoBoothCameraState = nil
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage(isMissionComplete ? "ID photo accepted! Return to the elevator." : (photoBoothMissionProgress ?? "Photo accepted."))
+    }
+
+    func updatePhotoBoothLiveImage(_ image: UIImage, at coord: GridCoordinate) {
+        guard activePhotoBooth == coord, !completedPhotoBooths.contains(coord), let booth = photoBoothNodes[coord] else { return }
+        reportPhotoBoothCameraLive(at: coord)
+        HallwayScene.setPhotoBoothLiveImage(image, on: booth)
+    }
+
+    func photoBoothCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = photoBoothNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var photoBoothAtCurrentCell: GridCoordinate? {
+        guard photoBoothDirections[currentCell] == facing, photoBoothExpressions[currentCell] != nil,
+              !completedPhotoBooths.contains(currentCell) else { return nil }
+        return currentCell
     }
 
     /// Shows whichever Exit Sign sits at currentCell (bright/enlarged
@@ -527,6 +706,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// D-pad buttons. Pure pivot, no movement, and doesn't touch
     /// currentCell/history at all.
     func rotate(toward direction: Direction) {
+        if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
         guard canRotate, direction != facing else {
             navLog("rotate(toward: \(direction)) ignored -- canRotate=\(canRotate), facing=\(facing)")
             return
@@ -545,6 +725,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// the finger now drives the camera's yaw directly until it lifts.
     /// Refuses if a walk/rotate/another drag is already in progress.
     func beginDragRotate() {
+        if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
         guard canRotate else {
             navLog("beginDragRotate() ignored -- canRotate=false")
             return
@@ -590,6 +771,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     /// One tick of held walking. Use the existing pivot/glide animations;
     /// never queue a walk after the pivot, so releasing cancels continuation.
+    private var walkingHeld = false
+    private var continuousRun = false
+    private var heldDistance: Double = 0
+    private(set) var movementPace: Double = 1
+
+    func setWalkingHeld(_ held: Bool) {
+        walkingHeld = held
+        if !held { heldDistance = 0 }
+        if !isAnimating {
+            movementPace = 1
+            SoundEffects.setWalkingPace(1)
+        }
+    }
+
+    /// Only an idle, unblocked control state can represent an attempted wall move.
+    var forwardIsBlockedByWall: Bool { canRotate && !openDirections.contains(facing) }
+
     func advanceWhileHeld() {
         guard canRotate else { return }
         if canGoForward {
@@ -610,10 +808,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// the next real decision, dead end, or the target.
     func advance() {
         guard canGoForward else {
+            if forwardIsBlockedByWall { SoundEffects.playHitWall() }
             navLog("advance() ignored -- canGoForward=false (isAnimating=\(isAnimating), isDragRotating=\(isDragRotating), elevatorInUse=\(elevatorInUse), facing=\(facing), open=\(openDirections))")
             return
         }
 
+        if !walkingHeld {
+            movementPace = 1
+            SoundEffects.setWalkingPace(1)
+        }
+        continuousRun = walkingHeld
         let (steps, outcome) = walkToNextDecision(from: currentCell, heading: facing, cells: cells, end: endCell)
         guard !steps.isEmpty else {
             navLog("advance() from \(currentCell) facing \(facing) produced zero steps")
@@ -648,6 +852,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if let kind = objectKinds[coord], !collectedCoords.contains(coord) {
                 return true // would pick up (or absorb, for cash) something new -- worth stopping for
             }
+            if extinguisherCoords[coord] != nil, !carryingExtinguisher {
+                return true
+            }
+            if fireCoords.contains(coord), !extinguishedFireCoords.contains(coord) {
+                return true
+            }
             if destinationKinds[coord] != nil {
                 return true // an unopened chute -- worth stopping for whether or not you're carrying anything, so there's always a chance to tap the door
             }
@@ -661,12 +871,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if pictureCoords.contains(coord) {
                 return true // Stop at pictures and mirrors on every pass, including return trips.
             }
+            if photoBoothCoords.contains(coord), !completedPhotoBooths.contains(coord) {
+                return true
+            }
             return false
         }), stopIndex < steps.count - 1 {
             runSteps = Array(steps[0...stopIndex])
             let stopCoord = runSteps.last!.cell
             if let kind = objectKinds[stopCoord], !collectedCoords.contains(stopCoord) {
                 runOutcome = .pickedUpObject
+            } else if (extinguisherCoords[stopCoord] != nil && !carryingExtinguisher) ||
+                        (fireCoords.contains(stopCoord) && !extinguishedFireCoords.contains(stopCoord)) {
+                runOutcome = .fire
             } else if destinationKinds[stopCoord] != nil {
                 runOutcome = .delivered
             } else if floorMapCoords.contains(stopCoord) {
@@ -675,6 +891,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 runOutcome = .viewedMissionSign
             } else if roomDoors[stopCoord] != nil {
                 runOutcome = .viewedRoomDoor
+            } else if photoBoothCoords.contains(stopCoord) {
+                runOutcome = .viewedPicture
             } else {
                 runOutcome = .viewedPicture
             }
@@ -715,6 +933,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Back up one open cell without turning the camera around.
     func stepBackward() {
         guard canRotate, openDirections.contains(facing.opposite) else { return }
+        setWalkingHeld(false)
+        continuousRun = false
         let delta = facing.opposite.delta
         let target = GridCoordinate(row: currentCell.row + delta.row, col: currentCell.col + delta.col)
         animationSteps = [NavigationStep(cell: target, heading: facing)]
@@ -737,6 +957,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// clears, so Reset genuinely restarts the floor rather than leaving
     /// already-gobbled objects permanently missing.
     func reset() {
+        setWalkingHeld(false)
+        movementPace = 1
+        SoundEffects.setWalkingPace(1)
+        handheldMapVisible = false
+        deferredMapNavigationUpdates.removeAll()
         paintedCells.removeAll()
         hasPaintBucket = false
         wallPainter?.reset()
@@ -751,6 +976,44 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         standaloneRotation = false
         cameraNode.position = worldPosition(for: startCell)
         cameraNode.eulerAngles = SCNVector3(0, Float(startFacing.yaw), 0)
+        carriedExtinguisherNode?.removeFromParentNode()
+        carriedExtinguisherNode = nil
+        carryingExtinguisher = false
+        completedPhotoBooths.removeAll()
+        activePhotoBooth = nil
+        photoBoothCompletionImage = nil
+        photoBoothCameraState = nil
+        for (coord, node) in photoBoothNodes {
+            if let prompt = photoBoothExpressions[coord]?.prompt {
+                HallwayScene.resetPhotoBoothScreen(on: node, prompt: prompt)
+            }
+        }
+        fireInteractionID = UUID()
+        if !fireCoords.isEmpty { SoundEffects.stopExtinguisherSpray() }
+        pickedUpExtinguisherCoords.removeAll()
+        extinguishingFireCoords.removeAll()
+        extinguisherPickupInProgress = false
+        extinguishedFireCoords.removeAll()
+        fireNodes.values.forEach {
+            $0.removeAllActions()
+            $0.isHidden = false
+            $0.opacity = 1
+            $0.scale = SCNVector3(1, 1, 1)
+            $0.runAction(.repeatForever(.sequence([
+                .group([.rotateBy(x: 0, y: 0.16, z: 0, duration: 0.22), .scale(to: 1.08, duration: 0.22)]),
+                .group([.rotateBy(x: 0, y: -0.16, z: 0, duration: 0.22), .scale(to: 0.94, duration: 0.22)])
+            ])), forKey: "fireAnimation")
+        }
+        extinguisherNodes.forEach { coord, node in
+            node.removeAllActions()
+            if let resting = extinguisherRestingTransforms[coord] {
+                node.position = resting.position
+                node.eulerAngles = resting.eulerAngles
+                node.scale = resting.scale
+            }
+            node.opacity = 1
+            scene?.rootNode.addChildNode(node)
+        }
 
         if !collectedCoords.isEmpty {
             navLog("reset() restoring \(collectedCoords.count) collected object(s)")
@@ -843,7 +1106,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         collectedCoords.insert(coord)
         objectNodes[coord]?.removeFromParentNode()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        if let value = kind.cashValue {
+        if let value = kind.cashValue(onFloor: floorNumber) {
             // Cash: instant absorb, straight into the running total,
             // never added to the carried list -- no HUD strip icon, no
             // elevator gate, nothing left to deliver.
@@ -866,6 +1129,64 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 onCollectTrash?()
             }
         }
+    }
+
+    private func collectExtinguisherIfPresent(at coord: GridCoordinate) {
+        guard extinguisherCoords[coord] != nil,
+              !carryingExtinguisher,
+              !extinguisherPickupInProgress,
+              let wallNode = extinguisherNodes[coord] else { return }
+        extinguisherPickupInProgress = true
+        let interactionID = fireInteractionID
+        wallNode.removeAllActions()
+        wallNode.runAction(.sequence([
+            .group([
+                .moveBy(x: 0, y: 0.04, z: 0.28, duration: 0.24),
+                .rotateBy(x: 0, y: 0, z: -.pi / 8, duration: 0.24),
+                .scale(to: 1.08, duration: 0.24)
+            ]),
+            .fadeOut(duration: 0.12),
+            .run { [weak self, weak wallNode] _ in
+                DispatchQueue.main.async {
+                    guard let self, self.fireInteractionID == interactionID else { return }
+                    wallNode?.removeFromParentNode()
+                    self.pickedUpExtinguisherCoords.insert(coord)
+                    let carried = HallwayScene.makeCarriedFireExtinguisherNode()
+                    self.cameraNode.addChildNode(carried)
+                    self.carriedExtinguisherNode = carried
+                    self.carryingExtinguisher = true
+                    self.extinguisherPickupInProgress = false
+                    SoundEffects.playTrashPickup()
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    self.showMessage("Extinguisher ready. Tap a fire to put it out.")
+                }
+            }
+        ]), forKey: "extinguisherPickup")
+    }
+
+    /// A visible fixture is reachable in this cell or the open cell directly ahead.
+    /// Distant hits must fall through to walking instead of swallowing the tap.
+    private func canReachFireFixture(at coord: GridCoordinate) -> Bool {
+        if coord == currentCell { return true }
+        let delta = facing.delta
+        return cells.contains(coord) && coord == GridCoordinate(row: currentCell.row + delta.row, col: currentCell.col + delta.col)
+    }
+
+    @discardableResult
+    func pickUpExtinguisher(at coord: GridCoordinate) -> Bool {
+        guard canRotate, canReachFireFixture(at: coord), !carryingExtinguisher,
+              !pickedUpExtinguisherCoords.contains(coord),
+              extinguisherNodes[coord]?.parent != nil else { return false }
+        collectExtinguisherIfPresent(at: coord)
+        return extinguisherPickupInProgress
+    }
+
+    var extinguisherAtCurrentCell: GridCoordinate? {
+        guard !carryingExtinguisher, !extinguisherPickupInProgress,
+              !pickedUpExtinguisherCoords.contains(currentCell),
+              extinguisherCoords[currentCell] == facing,
+              extinguisherNodes[currentCell]?.parent != nil else { return nil }
+        return currentCell
     }
 
     /// Called alongside collectObjectIfPresent at every cell a walk
@@ -897,6 +1218,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         viewedFloorMapCoords.insert(coord)
     }
 
+    /// Sept 12: lets ContentView's handleTap tell "actually standing at a
+    /// wall map" apart from "a wall map is just visible down the hall" --
+    /// same "AtCurrentCell" shape as extinguisherAtCurrentCell/
+    /// activeFireAtCurrentCell/photoBoothAtCurrentCell above. Without this,
+    /// a tap whose hit-test happened to land on a map mounted on the wall
+    /// beyond the very next open cell was being swallowed as "wall maps
+    /// are read in place, no-op" before ever reaching advance() -- even
+    /// though the player hadn't actually arrived at that cell yet.
+    var floorMapAtCurrentCell: Bool { floorMapCoords.contains(currentCell) }
+
     /// Same shape as markFloorMapViewedIfPresent, for the Floor Mission
     /// sign.
     private func markMissionSignViewedIfPresent(at coord: GridCoordinate) {
@@ -912,6 +1243,117 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// gestures or hit-testing itself.
     func destinationCoordinate(for node: SCNNode) -> GridCoordinate? {
         destinationNodes.first(where: { $0.value === node })?.key
+    }
+
+    func fireCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var candidate: SCNNode? = node
+        while let current = candidate {
+            if let match = fireNodes.first(where: { $0.value === current }) {
+                return match.key
+            }
+            candidate = current.parent
+        }
+        return nil
+    }
+
+    func extinguisherCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var candidate: SCNNode? = node
+        while let current = candidate {
+            if let match = extinguisherNodes.first(where: { $0.value === current }) {
+                return match.key
+            }
+            candidate = current.parent
+        }
+        return nil
+    }
+
+    var activeFireAtCurrentCell: GridCoordinate? {
+        guard fireCoords.contains(currentCell),
+              !extinguishedFireCoords.contains(currentCell) else { return nil }
+        return currentCell
+    }
+
+    @discardableResult
+    func extinguishFire(at coord: GridCoordinate) -> Bool {
+        guard canRotate, canReachFireFixture(at: coord),
+              fireCoords.contains(coord), !extinguishedFireCoords.contains(coord),
+              let fire = fireNodes[coord], fire.parent != nil else { return false }
+        guard carryingExtinguisher else {
+            showMessage("Pick up a wall extinguisher first.")
+            return true
+        }
+        extinguishingFireCoords.insert(coord)
+        let interactionID = fireInteractionID
+        let spray = SCNNode(geometry: SCNCone(topRadius: 0.01, bottomRadius: 0.16, height: 0.6))
+        let sprayMaterial = SCNMaterial()
+        sprayMaterial.diffuse.contents = UIColor(white: 0.85, alpha: 0.7)
+        sprayMaterial.emission.contents = UIColor(white: 0.55, alpha: 0.4)
+        sprayMaterial.lightingModel = .constant
+        sprayMaterial.transparency = 0.8
+        spray.geometry?.materials = [sprayMaterial]
+        spray.position = cameraNode.position
+        spray.position.y -= 0.22
+        spray.eulerAngles = cameraNode.eulerAngles
+        spray.scale = SCNVector3(0.15, 0.15, 0.15)
+        scene?.rootNode.addChildNode(spray)
+        SoundEffects.playExtinguisherSpray()
+        fire.removeAllActions()
+        fire.runAction(.sequence([
+            .group([
+                .sequence([
+                    .scale(to: 1.18, duration: 0.12),
+                    .scale(to: 0.82, duration: 0.18),
+                    .scale(to: 0.58, duration: 0.22)
+                ]),
+                .sequence([
+                    .wait(duration: 0.25),
+                    .fadeOpacity(to: 0.7, duration: 0.12),
+                    .fadeIn(duration: 0.12),
+                    .fadeOpacity(to: 0.35, duration: 0.18)
+                ])
+            ]),
+            .group([.scale(to: 0.08, duration: 0.28), .fadeOut(duration: 0.28)]),
+            .hide(),
+            .run { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self, self.fireInteractionID == interactionID else { return }
+                    self.extinguishingFireCoords.remove(coord)
+                    self.extinguishedFireCoords.insert(coord)
+                    SoundEffects.playFireExtinguished()
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    self.showMessage(self.isMissionComplete ? "All fires out! Return to the elevator." : "\(self.fireMissionProgress ?? "Fire extinguished.")")
+                }
+            }
+        ]))
+        spray.runAction(.sequence([
+            .group([
+                .scale(to: 1.15, duration: 0.35),
+                .fadeOpacity(to: 0.9, duration: 0.12)
+            ]),
+            .wait(duration: 0.18),
+            .fadeOut(duration: 0.3),
+            .removeFromParentNode()
+        ]))
+        let smoke = SCNSphere(radius: 0.08)
+        let smokeMaterial = SCNMaterial()
+        smokeMaterial.diffuse.contents = UIColor(white: 0.7, alpha: 0.3)
+        smokeMaterial.emission.contents = UIColor(white: 0.35, alpha: 0.15)
+        smokeMaterial.lightingModel = .constant
+        smokeMaterial.transparency = 0.35
+        smoke.materials = [smokeMaterial]
+        let smokeNode = SCNNode(geometry: smoke)
+        smokeNode.position = fire.presentation.position
+        scene?.rootNode.addChildNode(smokeNode)
+        smokeNode.runAction(.sequence([
+            .wait(duration: 0.45),
+            .group([
+                .moveBy(x: 0, y: 0.32, z: 0, duration: 0.55),
+                .scale(to: 2.4, duration: 0.55),
+                .fadeOut(duration: 0.55)
+            ]),
+            .removeFromParentNode()
+        ]))
+        return true
     }
 
     /// The ONLY way a destination door actually opens now -- a real tap
@@ -1005,11 +1447,25 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// at all (floorMapPlaneNodes empty, nothing to loop over) beyond
     /// the one throwaway image HallwayScene.build(fromMaze:) already
     /// skips generating in that case.
-    private func refreshFloorMapTexture() {
-        guard !floorMapPlaneNodes.isEmpty else { return }
+    func currentFloorMapImage() -> UIImage {
         let missionItemCells = objectKinds.filter { $0.value == missionObjectKind && !collectedCoords.contains($0.key) }.map { $0.key }
         let missionDestinationCells = destinationKinds.filter { $0.value == missionObjectKind }.map { $0.key }
-        let image = HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, roomDoors: roomDoors, itemRooms: itemRooms, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil)
+        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell, facing: facing, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, photoBoothCells: Array(photoBoothCoords), roomDoors: roomDoors, itemRooms: itemRooms, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil)
+    }
+
+    private var applyingArrival = false
+    private func applyArrival(cell: GridCoordinate, heading: Direction) {
+        applyingArrival = true
+        facing = heading
+        currentCell = cell
+        collectObjectIfPresent(at: cell)
+        applyingArrival = false
+        refreshFloorMapTexture()
+    }
+
+    private func refreshFloorMapTexture() {
+        guard !applyingArrival, !floorMapPlaneNodes.isEmpty else { return }
+        let image = currentFloorMapImage()
         for plane in floorMapPlaneNodes {
             plane.geometry?.materials.first?.diffuse.contents = image
         }
@@ -1047,6 +1503,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// 7: "you have to do that in order for the elevator to let you
     /// get in and go to the next floor."
     var isMissionComplete: Bool {
+        if !fireCoords.isEmpty {
+            return extinguishedFireCoords == fireCoords
+        }
+        if !photoBoothExpressions.isEmpty {
+            return completedPhotoBooths == Set(photoBoothExpressions.keys)
+        }
         guard let kind = missionObjectKind else { return true }
         if kind == .paintBucket { return hasPaintBucket && paintedCells == cells }
         let requiredCoords = objectKinds.filter { $0.value == kind }.keys
@@ -1080,6 +1542,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
     @Published private(set) var floorTransitionRequested: FloorTransitionEvent?
 
+    /// Sept 12: lets ContentView's handleTap tell "actually standing at
+    /// the elevator" apart from "the elevator doors are just visible down
+    /// the hall" -- same currentCell == endCell test openElevator() below
+    /// already uses as its own real guard, and the same test
+    /// pinchForward() already uses to choose between opening the elevator
+    /// and just walking forward. Without this, a tap whose hit-test
+    /// happened to land on a door panel visible beyond the very next open
+    /// cell was calling openElevator() (which silently no-ops when not at
+    /// endCell yet) and then unconditionally returning -- swallowing a tap
+    /// that should have walked one legal cell forward instead.
+    var elevatorAtCurrentCell: Bool { currentCell == endCell }
+
     func openElevator() {
         guard currentCell == endCell, !elevatorInUse, !chuteInUse,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
@@ -1093,6 +1567,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // still a plain-English reason on screen once the alarm
             // itself settles down.
             UINotificationFeedbackGenerator().notificationOccurred(.error)
+            SoundEffects.playWarningBuzz()
             showElevatorMissionWarning()
             elevatorRejected = ElevatorRejectionEvent()
             return
@@ -1255,7 +1730,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // same motion, not a rushed longer trip).
         let dolly = SCNAction.move(by: SCNVector3(Float(forwardX * dollyDistance), 0, Float(forwardZ * dollyDistance)), duration: 1.73)
         dolly.timingMode = .easeInEaseOut
-        let rotate = SCNAction.rotateBy(x: 0, y: .pi, z: 0, duration: 1.3)
+        let rotate = SCNAction.rotateBy(x: 0, y: .pi, z: 0, duration: 2.6)
         rotate.timingMode = .easeInEaseOut
 
         func closeDoorsNow() {
@@ -1397,7 +1872,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let runID = chuteRunID
         let slideDuration = 0.65
         let openPause = 2.5
-        if kind == .trashCan { SoundEffects.playTrashChute() }
+        if kind == .trashCan { SoundEffects.playTrashChuteOpen() }
         let open = SCNAction.move(to: SCNVector3(closed.x, closed.y + 0.66, closed.z), duration: slideDuration)
         let close = SCNAction.move(to: closed, duration: slideDuration)
         open.timingMode = .easeInEaseOut
@@ -1438,7 +1913,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             .run { [weak self] _ in
                 DispatchQueue.main.async {
                     guard let self, self.chuteRunID == runID else { return }
-                    if kind == .trashCan { SoundEffects.playTrashChute() }
+                    if kind == .trashCan { SoundEffects.playTrashChuteClose() }
                 }
             },
             close,
@@ -1455,12 +1930,21 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// A lit notice attached to the elevator's world position, not the HUD.
     private func showElevatorMissionWarning() {
         guard let scene, let left = elevatorLeftDoor, let right = elevatorRightDoor,
-              let direction = elevatorMountDirection, let kind = missionObjectKind else { return }
-        let remaining = objectKinds.filter { $0.value == kind && !collectedCoords.contains($0.key) }.count
-        let carried = kind == .envelope ? carriedMail.count : collectedObjects.filter { $0 == kind }.count
-        let message = kind == .paintBucket
-            ? "ELEVATOR LOCKED\n\(cells.count - paintedCells.count) hallway cells need paint\n\(hasPaintBucket ? "Check the wall maps" : "Find the blue paint bucket")"
-            : "ELEVATOR LOCKED\n\(kind.missionLegendLabel): \(remaining) left to collect\n\(carried) still to drop off"
+              let direction = elevatorMountDirection else { return }
+        let message: String
+        if !fireCoords.isEmpty {
+            message = "FIRE EMERGENCY IN PROGRESS.\nPLEASE EXTINGUISH ALL FIRES BEFORE USING ELEVATOR.\n\(fireMissionProgress ?? "")"
+        } else if !photoBoothExpressions.isEmpty {
+            message = "EMPLOYEE PHOTO COMPLIANCE REQUIRED.\nPLEASE TAKE YOUR EMPLOYEE ID PHOTO BEFORE USING THE ELEVATOR.\n\(photoBoothMissionProgress ?? "")"
+        } else if let kind = missionObjectKind {
+            let remaining = objectKinds.filter { $0.value == kind && !collectedCoords.contains($0.key) }.count
+            let carried = kind == .envelope ? carriedMail.count : collectedObjects.filter { $0 == kind }.count
+            message = kind == .paintBucket
+                ? "ELEVATOR LOCKED\n\(cells.count - paintedCells.count) hallway cells need paint\n\(hasPaintBucket ? "Check the wall maps" : "Find the blue paint bucket")"
+                : "ELEVATOR LOCKED\n\(kind.missionLegendLabel): \(remaining) left to collect\n\(carried) still to drop off"
+        } else {
+            return
+        }
         let size = CGSize(width: 900, height: 360)
         let texture = UIGraphicsImageRenderer(size: size).image { context in
             UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()
@@ -1495,7 +1979,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             .repeat(.sequence([.fadeOpacity(to: 0.65, duration: 0.22), .fadeIn(duration: 0.22)]), count: 3),
             .wait(duration: 4), .fadeOut(duration: 0.5), .removeFromParentNode()
         ]))
-        navLog("elevator locked: uncollected=\(remaining), carried=\(carried), kind=\(kind)")
+        navLog("elevator locked: \(message.replacingOccurrences(of: "\n", with: " | "))")
     }
 
     /// Puts a short status line up on screen -- see transientMessage's
@@ -1561,6 +2045,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         defer { lastTime = time }
         applyAspectCompensation(renderer)
+        guard !handheldMapVisible else { return }
         guard lastTime > 0 else { return }
         let dt = min(time - lastTime, 1.0 / 20.0)
         guard dt > 0, isAnimating else { return }
@@ -1582,10 +2067,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 standaloneRotation = false
                 let newFacing = pendingRotationTarget
                 DispatchQueue.main.async { [weak self] in
-                    self?.facing = newFacing
-                    self?.isAnimating = false
-                    self?.updateExitSignHighlight()
-                    navLog("rotate complete -- now facing \(newFacing)")
+                    self?.applyNavigationUpdate { [weak self] in
+                        self?.facing = newFacing
+                        self?.isAnimating = false
+                        self?.updateExitSignHighlight()
+                        if let self { self.activatePhotoBooth(at: self.currentCell) }
+                        navLog("rotate complete -- now facing \(newFacing)")
+                    }
                 }
                 return
             }
@@ -1601,9 +2089,15 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // resetting to a standstill at every cell boundary along
             // the way. Eddie: "smooth the whole way," Sept 5.
             let segmentDuration = Double(cellSize) * Double(animationSteps.count) / travelSpeed
-            segmentProgress += dt / max(segmentDuration, 0.001)
+            let targetPace = walkingHeld && heldDistance >= 2 * Double(cellSize) ? 1.6 : 1.0
+            movementPace += (targetPace - movementPace) * (1 - exp(-dt / 0.3))
+            SoundEffects.setWalkingPace(Float(movementPace))
+            let previousProgress = min(1.0, segmentProgress)
+            segmentProgress += dt * movementPace / max(segmentDuration, 0.001)
             let t = min(1.0, segmentProgress)
-            let eased = t * t * (3 - 2 * t) // smoothstep — gentle start/stop for the whole run
+            let eased = continuousRun ? t : t * t * (3 - 2 * t)
+            let previousEased = continuousRun ? previousProgress : previousProgress * previousProgress * (3 - 2 * previousProgress)
+            if walkingHeld { heldDistance += (eased - previousEased) * Double(cellSize) * Double(animationSteps.count) }
 
             cameraNode.position = SCNVector3(
                 segmentStart.x + Float(eased) * (segmentTarget.x - segmentStart.x),
@@ -1628,56 +2122,57 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
                 if !isFinalStep {
                     DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        // facing before currentCell -- see round-9 note
-                        // above setExitSignNeon's relative-label logic.
-                        self.facing = newFacing
-                        self.currentCell = newCell
-                        self.collectObjectIfPresent(at: newCell)
-                        self.markFloorMapViewedIfPresent(at: newCell)
-                        self.markMissionSignViewedIfPresent(at: newCell)
-                        navLog("arrived at \(newCell) facing \(newFacing) -- mid-run")
+                        self?.applyNavigationUpdate { [weak self] in
+                            guard let self else { return }
+                            // facing before currentCell -- see round-9 note
+                            // above setExitSignNeon's relative-label logic.
+                            self.applyArrival(cell: newCell, heading: newFacing)
+                            self.markFloorMapViewedIfPresent(at: newCell)
+                            self.markMissionSignViewedIfPresent(at: newCell)
+                            navLog("arrived at \(newCell) facing \(newFacing) -- mid-run")
+                        }
                     }
                 } else {
                     let outcome = pendingOutcome
                     DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        self.isAnimating = false
-                        SoundEffects.stopWalking()
-                        // facing before currentCell -- see round-9 note
-                        // above setExitSignNeon's relative-label logic.
-                        self.facing = newFacing
-                        self.currentCell = newCell
-                        self.collectObjectIfPresent(at: newCell)
-                        self.markFloorMapViewedIfPresent(at: newCell)
-                        self.markMissionSignViewedIfPresent(at: newCell)
-                        navLog("walk finished at \(newCell) facing \(newFacing), outcome=\(outcome)")
-                        // Eddie, Sept 6: wanted a cue the moment the
-                        // walk locks into an intersection (a real fork
-                        // or a forced turn -- .intersection covers
-                        // both, see walkToNextDecision). Sound tried
-                        // first, then pulled the same day -- it hits
-                        // often enough (every fork, every bend) that it
-                        // got annoying fast; a haptic alone reads as
-                        // "locked in" without wearing out its welcome.
-                        // Deliberately NOT fired for .pickedUpObject/
-                        // .delivered/.viewedMap even though those also
-                        // stop the walk -- those already get their own
-                        // haptic elsewhere (collectObjectIfPresent,
-                        // depositIfPresent), this is specifically the
-                        // "you now have a direction to choose" cue.
-                        if case .intersection = outcome {
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        self?.applyNavigationUpdate { [weak self] in
+                            guard let self else { return }
+                            self.isAnimating = false
+                            SoundEffects.stopWalking()
+                            // facing before currentCell -- see round-9 note
+                            // above setExitSignNeon's relative-label logic.
+                            self.applyArrival(cell: newCell, heading: newFacing)
+                            self.markFloorMapViewedIfPresent(at: newCell)
+                            self.markMissionSignViewedIfPresent(at: newCell)
+                            self.activatePhotoBooth(at: newCell)
+                            navLog("walk finished at \(newCell) facing \(newFacing), outcome=\(outcome)")
+                            // Eddie, Sept 6: wanted a cue the moment the
+                            // walk locks into an intersection (a real fork
+                            // or a forced turn -- .intersection covers
+                            // both, see walkToNextDecision). Sound tried
+                            // first, then pulled the same day -- it hits
+                            // often enough (every fork, every bend) that it
+                            // got annoying fast; a haptic alone reads as
+                            // "locked in" without wearing out its welcome.
+                            // Deliberately NOT fired for .pickedUpObject/
+                            // .delivered/.viewedMap even though those also
+                            // stop the walk -- those already get their own
+                            // haptic elsewhere (collectObjectIfPresent,
+                            // depositIfPresent), this is specifically the
+                            // "you now have a direction to choose" cue.
+                            if case .intersection = outcome {
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            }
+                            // .reachedEnd used to also flip a published
+                            // `reachedEnd` flag here -- gone along with the
+                            // flag itself (see canGoForward/canRotate and
+                            // openElevator()'s own comments): the outcome
+                            // still does its real job of stopping the walk
+                            // AT the elevator's cell instead of sweeping
+                            // past it (that's walkToNextDecision's doing,
+                            // untouched), there's just nothing left to set
+                            // once it gets here.
                         }
-                        // .reachedEnd used to also flip a published
-                        // `reachedEnd` flag here -- gone along with the
-                        // flag itself (see canGoForward/canRotate and
-                        // openElevator()'s own comments): the outcome
-                        // still does its real job of stopping the walk
-                        // AT the elevator's cell instead of sweeping
-                        // past it (that's walkToNextDecision's doing,
-                        // untouched), there's just nothing left to set
-                        // once it gets here.
                     }
                 }
             }

@@ -84,10 +84,28 @@ Deduplicated and grouped by what kind of thought each one is trying to produce. 
 
 ## Future Mission Concepts
 
-These are intentionally simple, object-first office-building tasks that keep the same Hallways philosophy: one obvious interaction, one clear physical object in the corridor, and a mission that reads instantly without a tutorial. Both fit the existing world as building maintenance / compliance / workplace absurdity rather than a fantasy quest.
+These are intentionally simple, object-first office-building tasks that preserve the Hallways philosophy: physical interactions, obvious objects that naturally belong in the building, minimal explanation, one clear action at a time, satisfying feedback, and slightly strange corporate-office humor. The building itself should communicate what the player needs to do rather than relying on complicated instructions or puzzle dependencies.
 
-- **Fire Safety Floor** (Hall+Wall, Carry) — A wall-mounted fire extinguisher sits in a hallway like a real office safety fixture. The player breaks the glass or otherwise triggers the extinguisher pickup, then obvious animated flames start appearing in the corridors. They have to walk up and use the extinguisher on each required fire. The fire is a loud, visual, high-contrast event rather than a subtle puzzle: flames spin, glow, and clearly read as “put this out.” The elevator stays locked until every required fire is extinguished, so the floor mission is simple and unambiguous.
-- **Employee Photo Booth Floor** (Wall+Hall, Instant / Multi-step) — Several wall-mounted photo booth stations sit around the floor, each with a simple instruction such as smile, raise eyebrows, open mouth, or look serious. The booth uses the front camera to detect whether the player performs the requested expression. On success, the booth flashes, accepts the photo, and gives a satisfying shutter/approval response. Each booth may ask for a different expression, and the elevator unlocks only after all required booths are completed. This keeps the interaction grounded in ordinary office objects, with a slightly absurd corporate tone and no heavy explanation.
+### Fire Safety Mission
+
+Fire extinguishers are mounted on hallway walls. The player can take an extinguisher, including an appropriate break-glass interaction that makes the pickup feel like a real building safety fixture.
+
+Fires appear directly in the hallways as very obvious animated or spinning flames. The player carries the extinguisher to each fire and uses it to put the fire out. A floor could contain several fires and possibly several extinguishers, with the elevator remaining locked until all required fires have been extinguished.
+
+The interaction should be immediately understandable: see the fire, find and take an extinguisher, extinguish the fire, and receive satisfying visual and audio feedback. The fire should be an unmistakable hallway event rather than a subtle puzzle.
+
+### Employee Photo Booth Mission
+
+Wall-mounted camera/photo stations appear throughout the floor. When the player approaches one, it asks for a simple facial expression, such as:
+
+- Smile
+- Raise your eyebrows
+- Open your mouth
+- Look serious
+
+The front-facing camera detects whether the requested expression has been made. On success, the station gives obvious feedback such as a camera flash and an acceptance sound or animation. A floor could contain several stations requesting different expressions, with the elevator remaining locked until all required photo stations have been completed.
+
+This should feel like a slightly absurd corporate requirement: **“EMPLOYEE PHOTO REQUIRED — PLEASE SMILE.”** The station gives the player one clear action at a time, and the flash/approval response makes completion immediately legible.
 
 ## What's Next
 

@@ -74,6 +74,30 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// becomes just another activity"); this doc comment is what's
     /// left of that history.
     var onReachedEnd: (() -> Void)?
+    /// Fired (main thread, same as onReachedEnd) INSTEAD of it, at the
+    /// exact same scheduled arrival moment, when the player took
+    /// camera control during this ride (playerHasTakenElevatorCameraControl).
+    /// Carries the camera's exact current yaw (radians) at that instant.
+    /// Eddie, Sept 16 (manual elevator exit, 2nd pass): the FIRST
+    /// attempt at this deferred the actual floor advance until a
+    /// second, separate "tap the doors again" gesture, and reopened
+    /// the OLD (about-to-be-abandoned) floor's own doors -- confirmed
+    /// broken by physical testing on two counts (the curtain showing
+    /// whatever the arbitrary camera was facing instead of real doors,
+    /// and "exiting" just walking back into the SAME old floor, since
+    /// the destination never actually became real). This callback
+    /// fixes both by doing exactly what onReachedEnd does, on the
+    /// exact same schedule -- ContentView wires it to advance
+    /// mazeStore to the real destination floor immediately, same as
+    /// a passive ride, just carrying the preserved yaw along so the
+    /// brand-new destination floor's camera can be put back to it
+    /// (see TapNavigationController.presentArrivalInsideElevator(preservedYaw:))
+    /// instead of the normal default spawn facing. There is no
+    /// separate "deferred second half" anymore -- once the destination
+    /// floor is loaded, getting out of the elevator is just ordinary
+    /// tap/long-press navigation, the same as everywhere else in
+    /// Hallways.
+    var onElevatorArrivedControlled: ((Double) -> Void)?
     /// Fired (main thread, same as onReachedEnd) the instant a cash
     /// object is absorbed, with its dollar value -- ContentView wires
     /// this straight to MazeStore.addMoney(_:). Kept as a callback
@@ -119,7 +143,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 transientMessage = nil
             }
             refreshFloorMapTexture()
-
+            // Eddie, Sept 14 (round 3): "close behind the player" --
+            // every step through the maze already lands here exactly
+            // once per single-cell move (applyArrival sets currentCell
+            // one step at a time even mid-glide -- see its own call
+            // site), so this is the one real "you just crossed a
+            // boundary" event to hang the close on, deliberately NOT a
+            // timer (Eddie: "the player may open the door and stand
+            // there looking at it before walking through").
+            closeBathroomDoorIfJustCrossed(from: oldValue, to: currentCell)
+            closeWindowRoomDoorIfJustCrossed(from: oldValue, to: currentCell)
         }
     }
     /// A short one-line status message, on screen only for as long as
@@ -167,6 +200,91 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     @Published private(set) var activePhotoBooth: GridCoordinate?
     @Published private(set) var photoBoothCompletionImage: UIImage?
     @Published private(set) var photoBoothCameraState: String?
+    private let ticTacToeTerminalNodes: [GridCoordinate: SCNNode]
+    private let ticTacToeDirections: [GridCoordinate: Direction]
+    /// Non-nil while the aptitude-test overlay is on screen -- same
+    /// shape as activePhotoBooth/handheldMapVisible.
+    @Published private(set) var activeTicTacToeTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER wins a round -- see
+    /// isMissionComplete. At most one terminal per floor for now, so
+    /// (unlike completedPhotoBooths) a single Bool is enough; a fresh
+    /// TapNavigationController is built per floor load anyway, so this
+    /// never needs resetting mid-floor except by the dev reset() below.
+    @Published private(set) var ticTacToeWon = false
+    private let shellGameStationNodes: [GridCoordinate: SCNNode]
+    private let shellGameDirections: [GridCoordinate: Direction]
+    /// Non-nil while the shell-game overlay is on screen -- same shape
+    /// as activeTicTacToeTerminal.
+    @Published private(set) var activeShellGameTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER taps the correct cup -- see
+    /// isMissionComplete. Same one-Bool shape as ticTacToeWon.
+    @Published private(set) var shellGameWon = false
+    private let rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode]
+    private let rockPaperScissorsDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Rock Paper Scissors overlay is on screen --
+    /// same shape as activeShellGameTerminal.
+    @Published private(set) var activeRockPaperScissorsTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER's move beats the computer's --
+    /// see isMissionComplete. Same one-Bool shape as shellGameWon.
+    @Published private(set) var rockPaperScissorsWon = false
+    private let higherLowerTerminalNodes: [GridCoordinate: SCNNode]
+    private let higherLowerDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Higher/Lower overlay is on screen -- same
+    /// shape as activeRockPaperScissorsTerminal.
+    @Published private(set) var activeHigherLowerTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER reaches a 3-correct streak --
+    /// see isMissionComplete. Same one-Bool shape as rockPaperScissorsWon.
+    @Published private(set) var higherLowerWon = false
+    private let fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode]
+    private let fiveCardDrawDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Five-Card Draw overlay is on screen -- same
+    /// shape as activeHigherLowerTerminal.
+    @Published private(set) var activeFiveCardDrawTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER's final hand qualifies (pair
+    /// or better) -- see isMissionComplete. Same one-Bool shape as
+    /// higherLowerWon.
+    @Published private(set) var fiveCardDrawWon = false
+    private let simonTerminalNodes: [GridCoordinate: SCNNode]
+    private let simonDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Simon overlay is on screen -- same shape as
+    /// activeWhackAMoleTerminal.
+    @Published private(set) var activeSimonTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER completes the length-5
+    /// sequence -- see isMissionComplete. Same one-Bool shape as
+    /// whackAMoleWon.
+    @Published private(set) var simonWon = false
+    private let hangmanTerminalNodes: [GridCoordinate: SCNNode]
+    private let hangmanDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Hangman overlay is on screen -- same shape
+    /// as activeSimonTerminal.
+    @Published private(set) var activeHangmanTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER reveals the whole word -- see
+    /// isMissionComplete. Same one-Bool shape as simonWon.
+    @Published private(set) var hangmanWon = false
+    private let connectFourTerminalNodes: [GridCoordinate: SCNNode]
+    private let connectFourDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Connect Four overlay is on screen -- same
+    /// shape as activeHangmanTerminal.
+    @Published private(set) var activeConnectFourTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER wins a game -- see
+    /// isMissionComplete. Same one-Bool shape as hangmanWon.
+    @Published private(set) var connectFourWon = false
+    private let checkersTerminalNodes: [GridCoordinate: SCNNode]
+    private let checkersDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Checkers overlay is on screen -- same
+    /// shape as activeConnectFourTerminal.
+    @Published private(set) var activeCheckersTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER wins a game -- see
+    /// isMissionComplete. Same one-Bool shape as connectFourWon.
+    @Published private(set) var checkersWon = false
+    private let woidleTerminalNodes: [GridCoordinate: SCNNode]
+    private let woidleDirections: [GridCoordinate: Direction]
+    /// Non-nil while the Woidle overlay is on screen -- same shape as
+    /// activeCheckersTerminal.
+    @Published private(set) var activeWoidleTerminal: GridCoordinate?
+    /// Set once, the instant the PLAYER wins a game -- see
+    /// isMissionComplete. Same one-Bool shape as checkersWon.
+    @Published private(set) var woidleWon = false
     private let extinguisherRestingTransforms: [GridCoordinate: (position: SCNVector3, eulerAngles: SCNVector3, scale: SCNVector3)]
     private var extinguishedFireCoords: Set<GridCoordinate> = []
     @Published private(set) var carryingExtinguisher = false
@@ -205,6 +323,28 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private let roomDoors: [GridCoordinate: RoomDoorPlacement]
     private let itemRooms: [GridCoordinate: Int]
     private var deliveredMail: Set<GridCoordinate> = []
+    /// The building's first real bathroom door(s) -- coord is the
+    /// hallway-side cell the door is mounted in, direction is which
+    /// wall (matches MazeStore.bathroomDoors exactly). See
+    /// openDirections/bathroomDoorAnchor(from:direction:) below for
+    /// how this actually gates movement.
+    private let bathroomDoors: [GridCoordinate: Direction]
+    /// Which bathroom doors (keyed by the same coord as bathroomDoors
+    /// above) have been swung open this session. Eddie, Sept 14: "An
+    /// open door can remain open" -- no auto-close, so this only ever
+    /// grows.
+    @Published private(set) var openBathroomDoors: Set<GridCoordinate> = []
+    /// The building's Window Room door(s) -- same coord/keying
+    /// convention as bathroomDoors, but the value is the whole
+    /// WindowRoomPlacement (direction is inside it) since this class
+    /// also needs to resolve the door's hinge node by the SAME
+    /// "windowRoomDoor_<row>_<col>" name HallwayScene gave it.
+    private let windowRooms: [GridCoordinate: WindowRoomPlacement]
+    /// Which Window Room doors have been swung open this session --
+    /// same "no auto-close, only ever grows" policy as
+    /// openBathroomDoors, since this is the exact same swinging-door
+    /// interaction model reused, not a new one.
+    @Published private(set) var openWindowRoomDoors: Set<GridCoordinate> = []
 
     /// The deposit half of the mechanic -- same shape as objectKinds/
     /// objectNodes above, but destinationNodes points at the metal
@@ -261,6 +401,87 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Guards the open -> dwell -> close -> advance sequence against a
     /// second tap re-triggering it while it's already mid-flight.
     private var elevatorInUse = false
+    /// Eddie, Sept 16 (remove automatic step-out): non-nil from the
+    /// moment a destination floor's build presents the player standing
+    /// inside the just-arrived elevator (see presentArrivalInsideElevator
+    /// below) until they actually walk out -- for BOTH passive and
+    /// player-controlled rides now, never just controlled ones. Its
+    /// value is the ONE direction that counts as "forward, out through
+    /// the doorway" while this is set -- every other direction is
+    /// illegal to walk (even ones openDirections would otherwise call
+    /// open, since the camera is still physically offset inside the
+    /// cab, not yet at the real cell center) until performElevatorEntryWalkOut()
+    /// finishes and clears this back to nil. Turning is completely
+    /// unaffected -- the player can look anywhere while this is set.
+    private(set) var elevatorAwaitingEntryDirection: Direction? = nil
+    /// The real hallway cell-center position performElevatorEntryWalkOut()
+    /// animates back to -- captured once, in presentArrivalInsideElevator,
+    /// before the camera gets offset into the cab.
+    private var elevatorEntryCellCenterPosition: SCNVector3? = nil
+    private var arrivedElevatorDoorOpen = false
+    var canReenterArrivedElevator: Bool {
+        arrivedElevatorDoorOpen && elevatorAwaitingEntryDirection == nil &&
+        currentCell == endCell && facing == elevatorMountDirection
+    }
+    private var forwardConnectionIsOpen: Bool {
+        if let exit = elevatorAwaitingEntryDirection { return facing == exit }
+        return canReenterArrivedElevator || openDirections.contains(facing)
+    }
+
+    // ==== TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator arrival
+    // visual-transition audit) ====
+    // Not a behavior change -- pure read-only logging. Remove once the
+    // black/spiral/white arrival artifact is diagnosed and fixed.
+    // While non-nil, renderer(_:updateAtTime:) logs cameraNode's MODEL
+    // transform (.position/.eulerAngles -- the authoritative value any
+    // code just set) and PRESENTATION transform (.presentation.position/
+    // .presentation.eulerAngles -- what SceneKit is actually
+    // interpolating toward on screen, mid-implicit-animation or
+    // mid-action, which can disagree with the model value for several
+    // frames) EVERY FRAME the two differ meaningfully from the last
+    // logged sample, so the console shows exactly what's moving and
+    // whether it's an in-flight animation (presentation lagging model)
+    // or a repeated/competing model write (model itself changing frame
+    // to frame). Set for a bounded window (arrivalDiagnosticWindowSeconds)
+    // starting the instant presentArrivalInsideElevator finishes.
+    private var arrivalDiagnosticUntil: TimeInterval? = nil
+    private let arrivalDiagnosticWindowSeconds: TimeInterval = 4.0
+    private var arrivalDiagnosticLastModelPos: SCNVector3? = nil
+    private var arrivalDiagnosticLastModelEuler: SCNVector3? = nil
+    private var arrivalDiagnosticLastPresPos: SCNVector3? = nil
+    private var arrivalDiagnosticLastPresEuler: SCNVector3? = nil
+
+    private func arrivalDiagnosticVec3Delta(_ a: SCNVector3, _ b: SCNVector3) -> Float {
+        let dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z
+        return (dx * dx + dy * dy + dz * dz).squareRoot()
+    }
+    // ==== END TEMPORARY DIAGNOSTIC STATE ====
+    /// True once the player has manually steered the camera during
+    /// the CURRENT elevator ride (see beginElevatorCameraDrag()
+    /// below) -- playElevatorRide checks this right before it would
+    /// otherwise run its automatic 180-degree spin, and skips that
+    /// action (while still firing arrival at the exact same
+    /// scheduled wall-clock time -- see that function's own comment)
+    /// once this is true. Reset to false the instant a NEW ride
+    /// begins (openElevator(), right where elevatorInUse itself
+    /// flips true), so the next passive ride gets the normal
+    /// automatic spin again.
+    private(set) var playerHasTakenElevatorCameraControl = false
+    /// Baseline yaw an elevator-camera drag started from -- same role
+    /// as dragBaseYaw above, tracked separately so this freeform look
+    /// (continuous, never snaps to a cardinal facing on release --
+    /// see beginElevatorCameraDrag()) never touches dragBaseYaw/
+    /// isDragRotating or any of the grid-navigation state
+    /// beginDragRotate/updateDragRotate/endDragRotate drive.
+    private var elevatorCameraDragBaseYaw: Double = 0
+    private var isDraggingElevatorCamera = false
+    /// Dedicated SCNAction key for the ride's automatic 180 spin --
+    /// letting beginElevatorCameraDrag() cancel JUST this action via
+    /// removeAction(forKey:) (which does NOT fire that action's
+    /// completion handler) without ever touching the ride's forward
+    /// dolly, an unrelated position action that can still be
+    /// in-flight on this same cameraNode this early in the ride.
+    private static let elevatorAutoSpinActionKey = "elevatorAutoSpin"
 
     /// Every compass direction that's actually walkable from
     /// currentCell right now, computed fresh from the maze data rather
@@ -273,8 +494,41 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     var openDirections: Set<Direction> {
         Set(Direction.allCases.filter { d in
             let n = GridCoordinate(row: currentCell.row + d.delta.row, col: currentCell.col + d.delta.col)
-            return cells.contains(n)
+            guard cells.contains(n) else { return false }
+            if let anchor = bathroomDoorAnchor(from: currentCell, direction: d), !openBathroomDoors.contains(anchor) {
+                return false
+            }
+            if let anchor = windowRoomDoorAnchor(from: currentCell, direction: d), !openWindowRoomDoors.contains(anchor) {
+                return false
+            }
+            return true
         })
+    }
+
+    /// If there's a bathroom door on the boundary between `from` and
+    /// its neighbor in `direction` (defined from either side -- a door
+    /// placed at (10,3) facing .west blocks both (10,3)->west AND
+    /// (10,2)->east, same physical door either way), returns the ONE
+    /// coordinate MazeStore.bathroomDoors actually keys it by (always
+    /// the hallway-side cell it was authored on) -- that's the key
+    /// openBathroomDoors tracks, and the same key openBathroomDoor(at:)
+    /// and bathroomDoorCoordinate(for:) use. Returns nil when this
+    /// boundary has no door at all, i.e. ordinary open passage.
+    private func bathroomDoorAnchor(from: GridCoordinate, direction: Direction) -> GridCoordinate? {
+        if bathroomDoors[from] == direction { return from }
+        let neighbor = GridCoordinate(row: from.row + direction.delta.row, col: from.col + direction.delta.col)
+        if bathroomDoors[neighbor] == direction.opposite { return neighbor }
+        return nil
+    }
+
+    /// Same resolution bathroomDoorAnchor does, for a Window Room
+    /// door -- windowRooms' value is a whole WindowRoomPlacement
+    /// rather than a bare Direction, so this compares `.direction`.
+    private func windowRoomDoorAnchor(from: GridCoordinate, direction: Direction) -> GridCoordinate? {
+        if windowRooms[from]?.direction == direction { return from }
+        let neighbor = GridCoordinate(row: from.row + direction.delta.row, col: from.col + direction.delta.col)
+        if windowRooms[neighbor]?.direction == direction.opposite { return neighbor }
+        return nil
     }
 
     /// A true dead end — only one way in or out of this cell at all —
@@ -302,12 +556,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // elevator all day... feel free"). !elevatorInUse is the real
     // remaining concern -- don't let the player walk off mid-slide
     // while the doors are actually open/animating.
-    var canGoForward: Bool { !handheldMapVisible && activePhotoBooth == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && openDirections.contains(facing) }
-    var canRotate: Bool { !handheldMapVisible && activePhotoBooth == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
+    var canGoForward: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && forwardConnectionIsOpen }
+    var canRotate: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
 
     private enum SegmentPhase {
         case pivot      // rotating in place, position unchanged
         case translate  // moving forward, facing already locked in
+        case awaitingTurnCommit // render finished; main-thread state update pending
+        case scriptedWalkOut // SceneKit action owns translation, not the grid renderer
     }
 
     private var animationSteps: [NavigationStep] = []
@@ -356,6 +612,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// through is worth stopping for).
     private let floorMapCoords: Set<GridCoordinate>
     private let photoBoothCoords: Set<GridCoordinate>
+    private let ticTacToeTerminalCoords: Set<GridCoordinate>
+    private let shellGameStationCoords: Set<GridCoordinate>
+    private let rockPaperScissorsTerminalCoords: Set<GridCoordinate>
+    private let higherLowerTerminalCoords: Set<GridCoordinate>
+    private let fiveCardDrawTerminalCoords: Set<GridCoordinate>
+    private let simonTerminalCoords: Set<GridCoordinate>
+    private let hangmanTerminalCoords: Set<GridCoordinate>
+    private let connectFourTerminalCoords: Set<GridCoordinate>
+    private let checkersTerminalCoords: Set<GridCoordinate>
+    private let woidleTerminalCoords: Set<GridCoordinate>
     /// Which floor-map cells you've actually arrived at and stood in
     /// front of this run -- same "already handled, don't re-trigger"
     /// role as collectedCoords/deliveredCoords, except nothing ever
@@ -399,8 +665,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// same function again later, with a new playerAt, and can't reach
     /// back into a value HallwayScene only computed for its own
     /// one-time build.
-    private let mapMaxRow: Int
-    private let mapMaxCol: Int
     /// Drives ContentView's full-screen "blown up" map view -- Eddie,
     /// Sept 6: "when you tap the wall map, let it blow up and show what
     /// we show on the map editor screen... then tap anywhere to shrink
@@ -413,41 +677,56 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     @Published private(set) var handheldMapVisible = false
     /// Cancels the coordinator's held-walk timer when the map opens.
     var onHandheldMapOpened: (() -> Void)?
-    private var deferredMapNavigationUpdates: [() -> Void] = []
 
     var canOpenHandheldMap: Bool {
-        !elevatorInUse && !chuteInUse && activePhotoBooth == nil &&
+        !elevatorInUse && !chuteInUse && activePhotoBooth == nil && activeTicTacToeTerminal == nil &&
+        activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil &&
+        activeHigherLowerTerminal == nil &&
+        activeFiveCardDrawTerminal == nil &&
+        activeSimonTerminal == nil &&
+        activeHangmanTerminal == nil &&
+        activeConnectFourTerminal == nil &&
+        activeCheckersTerminal == nil &&
+        activeWoidleTerminal == nil &&
         !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty
     }
 
     func openHandheldMap() {
         guard !handheldMapVisible, canOpenHandheldMap else { return }
+        logNavSync("MAP OPEN — before overlay")
         // A two-finger interaction may open the map during a drag. Preserve
         // the camera position and settle back to the committed heading on close.
         if isDragRotating { endDragRotate(fraction: 0) }
+        // Sept 14 (Eddie, round 2): the slide-up transition on
+        // HandheldMapOverlay's card wasn't actually animating on-device --
+        // a transition on a conditional view only animates if the state
+        // change that inserts/removes it happens inside an animation
+        // transaction. That transaction now lives at the actual call
+        // sites in HandheldMapViews.swift (withAnimation wrapping each
+        // controller.openHandheldMap()/closeHandheldMap() call) instead
+        // of here -- this file has no SwiftUI dependency anywhere else
+        // (SceneKit/Combine/UIKit only, see imports at top), and
+        // withAnimation's transaction is thread-local, so wrapping the
+        // call from the SwiftUI layer still animates this same
+        // synchronous assignment without pulling SwiftUI into the
+        // controller.
         handheldMapVisible = true
         onHandheldMapOpened?()
-        SoundEffects.stopWalking()
     }
 
     func closeHandheldMap() {
         guard handheldMapVisible else { return }
+        logNavSync("MAP CLOSE — before overlay dismissal")
         handheldMapVisible = false
-        lastTime = 0 // Never integrate time spent reading the map into movement.
-        let updates = deferredMapNavigationUpdates
-        deferredMapNavigationUpdates.removeAll()
-        updates.forEach { $0() }
-        if isAnimating, phase == .translate { SoundEffects.startWalking() }
     }
 
     /// A renderer callback may already be queued when the map opens. Keep
     /// its arrival/mission effects paused too, then deliver them once on close.
     private func applyNavigationUpdate(_ update: @escaping () -> Void) {
-        if handheldMapVisible { deferredMapNavigationUpdates.append(update) }
-        else { update() }
+        update()
     }
 
-    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionObjectKind: ObjectKind? = nil) {
+    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], ticTacToeTerminalNodes: [GridCoordinate: SCNNode] = [:], shellGameStations: [GridCoordinate: Direction] = [:], shellGameStationNodes: [GridCoordinate: SCNNode] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminalNodes: [GridCoordinate: SCNNode] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode] = [:], simonTerminals: [GridCoordinate: Direction] = [:], simonTerminalNodes: [GridCoordinate: SCNNode] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], hangmanTerminalNodes: [GridCoordinate: SCNNode] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], checkersTerminalNodes: [GridCoordinate: SCNNode] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], woidleTerminalNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], missionObjectKind: ObjectKind? = nil) {
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -460,6 +739,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.eyeHeight = cameraNode.position.y
         self.roomDoors = roomDoors
         self.itemRooms = itemRooms
+        self.bathroomDoors = bathroomDoors
+        self.windowRooms = windowRooms
         self.objectKinds = objects
         self.objectNodes = objectNodes
         self.missionObjectKind = missionObjectKind
@@ -470,6 +751,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.photoBoothNodes = photoBoothNodes
         self.photoBoothDirections = photoBooths.mapValues(\.direction)
         self.photoBoothExpressions = photoBooths.mapValues(\.expression)
+        self.ticTacToeTerminalNodes = ticTacToeTerminalNodes
+        self.ticTacToeDirections = ticTacToeTerminals
+        self.shellGameStationNodes = shellGameStationNodes
+        self.shellGameDirections = shellGameStations
+        self.rockPaperScissorsTerminalNodes = rockPaperScissorsTerminalNodes
+        self.rockPaperScissorsDirections = rockPaperScissorsTerminals
+        self.higherLowerTerminalNodes = higherLowerTerminalNodes
+        self.higherLowerDirections = higherLowerTerminals
+        self.fiveCardDrawTerminalNodes = fiveCardDrawTerminalNodes
+        self.fiveCardDrawDirections = fiveCardDrawTerminals
+        self.simonTerminalNodes = simonTerminalNodes
+        self.simonDirections = simonTerminals
+        self.hangmanTerminalNodes = hangmanTerminalNodes
+        self.hangmanDirections = hangmanTerminals
+        self.connectFourTerminalNodes = connectFourTerminalNodes
+        self.connectFourDirections = connectFourTerminals
+        self.checkersTerminalNodes = checkersTerminalNodes
+        self.checkersDirections = checkersTerminals
+        self.woidleTerminalNodes = woidleTerminalNodes
+        self.woidleDirections = woidleTerminals
         self.extinguisherRestingTransforms = extinguisherNodes.mapValues {
             (position: $0.position, eulerAngles: $0.eulerAngles, scale: $0.scale)
         }
@@ -489,11 +790,19 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.exitSignDirections = exitSigns
         self.floorMapCoords = Set(floorMaps.keys)
         self.photoBoothCoords = Set(photoBooths.keys)
+        self.ticTacToeTerminalCoords = Set(ticTacToeTerminals.keys)
+        self.shellGameStationCoords = Set(shellGameStations.keys)
+        self.rockPaperScissorsTerminalCoords = Set(rockPaperScissorsTerminals.keys)
+        self.higherLowerTerminalCoords = Set(higherLowerTerminals.keys)
+        self.fiveCardDrawTerminalCoords = Set(fiveCardDrawTerminals.keys)
+        self.simonTerminalCoords = Set(simonTerminals.keys)
+        self.hangmanTerminalCoords = Set(hangmanTerminals.keys)
+        self.connectFourTerminalCoords = Set(connectFourTerminals.keys)
+        self.checkersTerminalCoords = Set(checkersTerminals.keys)
+        self.woidleTerminalCoords = Set(woidleTerminals.keys)
         self.missionSignCoords = Set(missionSigns.keys)
         self.pictureCoords = Set(pictures.keys).union(mirrors.keys)
         self.floorMapPlaneNodes = floorMapPlaneNodes
-        self.mapMaxRow = cells.map { $0.row }.max() ?? 0
-        self.mapMaxCol = cells.map { $0.col }.max() ?? 0
         exitSignNodes.values.forEach { $0.isHidden = true }
 
         let foundLight = cameraNode.childNodes.compactMap { $0.light }.first { $0.type == .omni }
@@ -517,6 +826,25 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // to currentCell above, so this covers the (rare, but real)
         // case where startCell itself happens to be an Exit Sign cell.
         updateExitSignHighlight()
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): the exact instant a
+        // NEW floor's TapNavigationController finishes constructing --
+        // marks where HallwayScene.build's own raw default spawn
+        // (cell center, facing south) hands off to this controller,
+        // before presentArrivalInsideElevator (if this is an elevator
+        // arrival) gets a chance to run.
+        navLog("[ARRIVALDIAG] TapNavigationController init END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(floorNumber) startCell=\(startCell) startFacing=\(startFacing) model.pos=\(cameraNode.position) model.euler=\(cameraNode.eulerAngles) pres.pos=\(cameraNode.presentation.position) pres.euler=\(cameraNode.presentation.eulerAngles)")
+    }
+
+    // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): pinpoints exactly when the
+    // OLD floor's controller (and everything it was driving on
+    // cameraNode) actually gets torn down, relative to the NEW floor's
+    // own init END line just above -- if the old controller is still
+    // alive (no dealloc log yet) after the new one has already logged
+    // its init, both could in principle still be touching state at the
+    // same time, though each owns its own cameraNode so that alone
+    // wouldn't explain a visible fight over ONE camera.
+    deinit {
+        navLog("[ARRIVALDIAG] TapNavigationController DEINIT t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(floorNumber)")
     }
 
     var fireMissionProgress: String? {
@@ -540,6 +868,55 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         photoBoothCameraState = "starting"
         if let booth = photoBoothNodes[coord] {
             HallwayScene.setPhotoBoothStatus("STARTING CAMERA...", on: booth)
+            HallwayScene.setPhotoBoothDebugText("STARTING CAMERA...", on: booth) // TEMP DIAGNOSTIC, see HallwayScene.makePhotoBoothNode
+            // TEMP DIAGNOSTIC (Eddie, Sept 13, round 2): both the real
+            // readout and the giant magenta panel were reported
+            // invisible on device, so this proves/disproves scene
+            // attachment and framing at the exact moment you'd be
+            // looking at the booth -- world positions (not local), an
+            // ancestor-walk isHidden/opacity check (a parent could be
+            // hidden even if this node isn't), whether the node is
+            // actually reachable from the live scene, and the camera's
+            // own world position/distance so we can tell if the panel
+            // is simply out of view (e.g. behind the camera, or absurdly
+            // far/near) rather than never rendering at all.
+            func hiddenChain(_ n: SCNNode) -> String {
+                var chain: [String] = []
+                var cur: SCNNode? = n
+                while let node = cur {
+                    chain.append("\(node.name ?? "?")[hidden=\(node.isHidden),opacity=\(node.opacity)]")
+                    cur = node.parent
+                }
+                return chain.joined(separator: " <- ")
+            }
+            // FIX (Eddie, Sept 13): SCNNode has no `scene` property --
+            // that was invalid and broke the build. The valid way to
+            // check "is this node actually attached to the live scene"
+            // is to walk its own parent chain and see whether it ever
+            // reaches the scene's own rootNode (already held weakly on
+            // this controller as `scene`).
+            func isAttached(_ n: SCNNode) -> Bool {
+                guard let root = scene?.rootNode else { return false }
+                var cur: SCNNode? = n
+                while let node = cur {
+                    if node === root { return true }
+                    cur = node.parent
+                }
+                return false
+            }
+            let debugNode = booth.childNode(withName: "photoBoothDebugText", recursively: true)
+            let readoutNode = booth.childNode(withName: "photoBoothReadout", recursively: true)
+            navLog("PBDIAG activate booth=\(coord) boothInScene=\(isAttached(booth)) boothWorldPos=\(booth.worldPosition) cameraWorldPos=\(cameraNode.worldPosition)")
+            if let debugNode {
+                navLog("PBDIAG debugNode worldPos=\(debugNode.worldPosition) inScene=\(isAttached(debugNode)) materialContentsSet=\(debugNode.geometry?.firstMaterial?.diffuse.contents != nil) chain=\(hiddenChain(debugNode))")
+            } else {
+                navLog("PBDIAG debugNode NOT FOUND on booth \(coord) -- childNode(withName:) failed")
+            }
+            if let readoutNode {
+                navLog("PBDIAG readoutNode worldPos=\(readoutNode.worldPosition) inScene=\(isAttached(readoutNode)) materialContentsSet=\(readoutNode.geometry?.firstMaterial?.diffuse.contents != nil) chain=\(hiddenChain(readoutNode))")
+            } else {
+                navLog("PBDIAG readoutNode NOT FOUND on booth \(coord) -- childNode(withName:) failed")
+            }
         }
     }
 
@@ -575,6 +952,43 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             HallwayScene.setPhotoBoothStatus(prompt + "\nSWIPE TO STEP AWAY", on: node)
         }
         photoBoothCameraState = "face"
+    }
+
+    // Eddie, Sept 13: "There was live on-screen text associated with
+    // the face/facial-gesture feature that was working extremely
+    // well. It responded essentially immediately as my facial
+    // expression changed. That live text is no longer visible."
+    // Traced this all the way through: the AR face session, the
+    // blend-shape matching (PhotoBoothCameraView.Coordinator.session(
+    // _:didUpdate anchors:) in ContentView.swift), and the in-scene
+    // "photoBoothReadout" text plane (HallwayScene.makePhotoBoothNode/
+    // setPhotoBoothStatus) are all still present, still wired up, and
+    // still being called -- nothing is hidden, offscreen, covered, or
+    // conditioned out. What's actually missing: reportPhotoBoothFaceTracking
+    // above only ever WRITES that readout text once (guarded by
+    // photoBoothCameraState != "face"), the very first frame a face is
+    // seen -- every frame after that, session(_:didUpdate anchors:)
+    // computes a fresh matched/consecutiveMatches reading from the
+    // live blend shapes and then just throws it away without ever
+    // reaching the screen, so the readout necessarily goes static right
+    // when face-tracking starts, precisely the opposite of "live."
+    // This whole feature landed in a single squash commit (994781a)
+    // with no earlier git history to diff against, so I can't prove
+    // byte-for-byte what the original live text said -- but this is
+    // the same existing readout plane, the same existing per-frame
+    // blend-shape signal, just finally reaching the screen every frame
+    // instead of once. Nothing about the AR session, the capture flow,
+    // the matching thresholds, or the 3-consecutive-frame capture rule
+    // changes.
+    func updatePhotoBoothLiveExpression(matched: Bool, holding: Int, at coord: GridCoordinate) {
+        guard activePhotoBooth == coord, !completedPhotoBooths.contains(coord),
+              photoBoothCameraState != "captured",
+              let node = photoBoothNodes[coord], let prompt = photoBoothExpressions[coord]?.prompt else { return }
+        let held = max(0, min(holding, 3))
+        let dots = String(repeating: "\u{25CF}", count: held) + String(repeating: "\u{25CB}", count: 3 - held)
+        let status = matched ? "\(prompt)\nHOLD IT... \(dots)" : "\(prompt)\nSWIPE TO STEP AWAY"
+        HallwayScene.setPhotoBoothStatus(status, on: node)
+        HallwayScene.setPhotoBoothDebugText(status, on: node) // TEMP DIAGNOSTIC, see HallwayScene.makePhotoBoothNode
     }
 
     func completePhotoBooth(at coord: GridCoordinate, image: UIImage) {
@@ -619,6 +1033,581 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard photoBoothDirections[currentCell] == facing, photoBoothExpressions[currentCell] != nil,
               !completedPhotoBooths.contains(currentCell) else { return nil }
         return currentCell
+    }
+
+    // MARK: - Tic-Tac-Toe terminal (Floor 7's first embedded mini-game)
+    //
+    // Eddie, Sept 13: "the mission is a game" -- same "approach, face
+    // it, it activates" shape as activatePhotoBooth above, but there's
+    // no camera session here: the actual board lives in a SwiftUI
+    // overlay (TicTacToeOverlay.swift) that appears the instant
+    // activeTicTacToeTerminal goes non-nil and calls back into
+    // completeTicTacToeTerminal the moment the player wins.
+
+    func ticTacToeTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = ticTacToeTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var ticTacToeTerminalAtCurrentCell: GridCoordinate? {
+        guard ticTacToeDirections[currentCell] == facing, !ticTacToeWon else { return nil }
+        return currentCell
+    }
+
+    func activateTicTacToeTerminal(at coord: GridCoordinate) {
+        guard activeTicTacToeTerminal == nil, canRotate, coord == currentCell,
+              ticTacToeDirections[coord] == facing, !ticTacToeWon else { return }
+        activeTicTacToeTerminal = coord
+    }
+
+    /// Stepping away without finishing -- swiping/turning while the
+    /// overlay is up calls this first (see rotate/beginDragRotate
+    /// below), same "cancel, don't punish" idea as cancelPhotoBooth.
+    /// The overlay's own board state is thrown away (a fresh
+    /// TicTacToeViewModel next time), which is fine -- Eddie never
+    /// asked for progress to persist between visits, only that a
+    /// LOSS or DRAW never blocks retrying.
+    func cancelTicTacToeTerminal() {
+        activeTicTacToeTerminal = nil
+    }
+
+    /// Called by TicTacToeOverlay's view model the instant the PLAYER
+    /// completes a winning line. One-way gate, same shape as
+    /// completePhotoBooth: sets the permanent ticTacToeWon flag
+    /// (checked by isMissionComplete), updates the in-world screen
+    /// text, and dismisses the overlay itself a beat later instead of
+    /// instantly, so "APTITUDE: EXCEPTIONAL" is actually readable.
+    func completeTicTacToeTerminal(at coord: GridCoordinate) {
+        guard activeTicTacToeTerminal == coord, !ticTacToeWon else { return }
+        ticTacToeWon = true
+        if let node = ticTacToeTerminalNodes[coord] {
+            HallwayScene.setTicTacToeTerminalStatus("APTITUDE: EXCEPTIONAL\nTEST PASSED\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("Aptitude test passed! Return to the elevator.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self, self.activeTicTacToeTerminal == coord else { return }
+            self.activeTicTacToeTerminal = nil
+        }
+    }
+
+    // MARK: - Shell-game station (Floor 8's second embedded mini-game)
+    //
+    // Eddie, Sept 13, right after confirming Floor 7's Tic-Tac-Toe is
+    // "FUCKING PERFECT" on-device: "Shell Game should be the second
+    // clean implementation." Identical shape to the Tic-Tac-Toe
+    // terminal block just above -- approach, face it, it activates;
+    // the cups/ball/shuffle live in ShellGameOverlay.swift, this
+    // controller only owns activation + the one-way win gate.
+
+    func shellGameTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = shellGameStationNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var shellGameTerminalAtCurrentCell: GridCoordinate? {
+        guard shellGameDirections[currentCell] == facing, !shellGameWon else { return nil }
+        return currentCell
+    }
+
+    func activateShellGameTerminal(at coord: GridCoordinate) {
+        guard activeShellGameTerminal == nil, canRotate, coord == currentCell,
+              shellGameDirections[coord] == facing, !shellGameWon else { return }
+        activeShellGameTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelTicTacToeTerminal. The overlay's own round state
+    /// is thrown away (a fresh ShellGameViewModel next time), which is
+    /// fine -- nothing about a loss/draw ever needs to persist between
+    /// visits, only that it never blocks retrying.
+    func cancelShellGameTerminal() {
+        activeShellGameTerminal = nil
+    }
+
+    /// Called by ShellGameOverlay's view model the instant the PLAYER
+    /// taps the correct cup. One-way gate, same shape as
+    /// completeTicTacToeTerminal: sets the permanent shellGameWon flag
+    /// (checked by isMissionComplete), updates the in-world screen
+    /// text, and dismisses the overlay itself a beat later so the
+    /// reveal is actually readable.
+    func completeShellGameTerminal(at coord: GridCoordinate) {
+        guard activeShellGameTerminal == coord, !shellGameWon else { return }
+        shellGameWon = true
+        if let node = shellGameStationNodes[coord] {
+            HallwayScene.setShellGameStationStatus("YOU FOUND IT.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("Found the ball! Return to the elevator.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self, self.activeShellGameTerminal == coord else { return }
+            self.activeShellGameTerminal = nil
+        }
+    }
+
+    // MARK: - Rock Paper Scissors terminal (Floor 9's third embedded mini-game)
+    //
+    // Eddie, Sept 13: the third embedded game, after Tic-Tac-Toe and
+    // the Shell Game. Identical shape to both blocks just above --
+    // approach, face it, it activates; the choices/reveal live in
+    // RockPaperScissorsOverlay.swift, this controller only owns
+    // activation + the one-way win gate.
+
+    func rockPaperScissorsTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = rockPaperScissorsTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var rockPaperScissorsTerminalAtCurrentCell: GridCoordinate? {
+        guard rockPaperScissorsDirections[currentCell] == facing, !rockPaperScissorsWon else { return nil }
+        return currentCell
+    }
+
+    func activateRockPaperScissorsTerminal(at coord: GridCoordinate) {
+        guard activeRockPaperScissorsTerminal == nil, canRotate, coord == currentCell,
+              rockPaperScissorsDirections[coord] == facing, !rockPaperScissorsWon else { return }
+        activeRockPaperScissorsTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelShellGameTerminal. The overlay's own round state
+    /// is thrown away (a fresh RockPaperScissorsViewModel next time),
+    /// which is fine -- a loss or tie never needs to persist between
+    /// visits, only that it never blocks retrying.
+    func cancelRockPaperScissorsTerminal() {
+        activeRockPaperScissorsTerminal = nil
+    }
+
+    /// Called by RockPaperScissorsOverlay's view model the instant the
+    /// PLAYER's move beats the computer's. One-way gate, same shape as
+    /// completeShellGameTerminal: sets the permanent
+    /// rockPaperScissorsWon flag (checked by isMissionComplete),
+    /// updates the in-world screen text, and dismisses the overlay
+    /// itself a beat later so the result is actually readable.
+    func completeRockPaperScissorsTerminal(at coord: GridCoordinate) {
+        guard activeRockPaperScissorsTerminal == coord, !rockPaperScissorsWon else { return }
+        rockPaperScissorsWon = true
+        if let node = rockPaperScissorsTerminalNodes[coord] {
+            HallwayScene.setRockPaperScissorsTerminalStatus("YOU WIN.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self, self.activeRockPaperScissorsTerminal == coord else { return }
+            self.activeRockPaperScissorsTerminal = nil
+        }
+    }
+
+
+    // MARK: - Higher/Lower terminal (Floor 10's fourth embedded mini-game)
+    //
+    // Eddie, Sept 13: the fourth embedded game, after Tic-Tac-Toe, the
+    // Shell Game, and Rock Paper Scissors. Identical shape to the three
+    // blocks just above -- approach, face it, it activates; the
+    // card/streak logic lives in HigherLowerOverlay.swift, this
+    // controller only owns activation + the one-way win gate.
+
+    func higherLowerTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = higherLowerTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var higherLowerTerminalAtCurrentCell: GridCoordinate? {
+        guard higherLowerDirections[currentCell] == facing, !higherLowerWon else { return nil }
+        return currentCell
+    }
+
+    func activateHigherLowerTerminal(at coord: GridCoordinate) {
+        guard activeHigherLowerTerminal == nil, canRotate, coord == currentCell,
+              higherLowerDirections[coord] == facing, !higherLowerWon else { return }
+        activeHigherLowerTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelRockPaperScissorsTerminal. The overlay's own
+    /// streak state is thrown away (a fresh HigherLowerViewModel next
+    /// time), which is fine -- a partial streak never needs to persist
+    /// between visits, only that it never blocks retrying.
+    func cancelHigherLowerTerminal() {
+        activeHigherLowerTerminal = nil
+    }
+
+    /// Called by HigherLowerOverlay's view model the instant the
+    /// PLAYER taps through the streak-of-3 win screen. One-way gate,
+    /// same shape as completeRockPaperScissorsTerminal, but Eddie,
+    /// Sept 13 (pacing fix): "DO NOT auto-dismiss after a timer" --
+    /// by the time this is called the player has already read the
+    /// result at their own pace and tapped TAP TO CONTINUE, so it
+    /// sets the permanent higherLowerWon flag (checked by
+    /// isMissionComplete), updates the in-world screen text, and
+    /// dismisses the overlay right away rather than on a delay.
+    func completeHigherLowerTerminal(at coord: GridCoordinate) {
+        guard activeHigherLowerTerminal == coord, !higherLowerWon else { return }
+        higherLowerWon = true
+        if let node = higherLowerTerminalNodes[coord] {
+            HallwayScene.setHigherLowerTerminalStatus("3 IN A ROW.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeHigherLowerTerminal = nil
+    }
+
+    // MARK: - Five-Card Draw terminal (Floor 11's fifth embedded mini-game)
+    //
+    // Eddie, Sept 13: the fifth embedded game, after Tic-Tac-Toe, the
+    // Shell Game, Rock Paper Scissors, and Higher/Lower. Identical
+    // shape to the four blocks just above -- approach, face it, it
+    // activates; the deal/hold/draw/hand-evaluation logic lives in
+    // FiveCardDrawOverlay.swift, this controller only owns activation
+    // + the one-way win gate.
+
+    func fiveCardDrawTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = fiveCardDrawTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var fiveCardDrawTerminalAtCurrentCell: GridCoordinate? {
+        guard fiveCardDrawDirections[currentCell] == facing, !fiveCardDrawWon else { return nil }
+        return currentCell
+    }
+
+    func activateFiveCardDrawTerminal(at coord: GridCoordinate) {
+        guard activeFiveCardDrawTerminal == nil, canRotate, coord == currentCell,
+              fiveCardDrawDirections[coord] == facing, !fiveCardDrawWon else { return }
+        activeFiveCardDrawTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelHigherLowerTerminal. The overlay's own hand
+    /// (dealt cards, holds, whether it's drawn yet) is thrown away (a
+    /// fresh FiveCardDrawViewModel next time), which is fine -- an
+    /// unfinished or failed hand never needs to persist between
+    /// visits, only that it never blocks retrying.
+    func cancelFiveCardDrawTerminal() {
+        activeFiveCardDrawTerminal = nil
+    }
+
+    /// Called by FiveCardDrawOverlay's view model the instant the
+    /// PLAYER taps through a QUALIFYING (pair or better) result
+    /// screen. One-way gate, same shape as completeHigherLowerTerminal
+    /// -- by the time this is called the player has already read the
+    /// result at their own pace and tapped TAP TO CONTINUE, so it sets
+    /// the permanent fiveCardDrawWon flag (checked by
+    /// isMissionComplete), updates the in-world screen text, and
+    /// dismisses the overlay right away rather than on a delay.
+    func completeFiveCardDrawTerminal(at coord: GridCoordinate) {
+        guard activeFiveCardDrawTerminal == coord, !fiveCardDrawWon else { return }
+        fiveCardDrawWon = true
+        if let node = fiveCardDrawTerminalNodes[coord] {
+            HallwayScene.setFiveCardDrawTerminalStatus("TEST PASSED.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeFiveCardDrawTerminal = nil
+    }
+
+    // MARK: - Simon terminal (Floor 13's seventh embedded mini-game)
+    //
+    // Eddie, Sept 13: the seventh embedded game, after Tic-Tac-Toe,
+    // the Shell Game, Rock Paper Scissors, Higher/Lower, Five-Card
+    // Draw, and Whack-A-Mole. Identical shape to the six blocks just
+    // above -- approach, face it, it activates; the sequence-
+    // generation/playback/tap logic lives in SimonOverlay.swift, this
+    // controller only owns activation + the one-way win gate.
+
+    func simonTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = simonTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var simonTerminalAtCurrentCell: GridCoordinate? {
+        guard simonDirections[currentCell] == facing, !simonWon else { return nil }
+        return currentCell
+    }
+
+    func activateSimonTerminal(at coord: GridCoordinate) {
+        guard activeSimonTerminal == nil, canRotate, coord == currentCell,
+              simonDirections[coord] == facing, !simonWon else { return }
+        activeSimonTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelWhackAMoleTerminal. The overlay's own round state
+    /// (how far into the sequence the player got, whether a playback
+    /// flash is even running) is thrown away (a fresh SimonViewModel
+    /// next time, with its own timers invalidated on deinit -- see
+    /// that file's runToken), which is fine -- an unfinished or
+    /// failed attempt never needs to persist between visits, only
+    /// that it never blocks retrying.
+    func cancelSimonTerminal() {
+        activeSimonTerminal = nil
+    }
+
+    /// Called by SimonOverlay's view model the instant the PLAYER
+    /// taps through a SUCCESS (length-5 sequence completed) result
+    /// screen. One-way gate, same shape as completeWhackAMoleTerminal
+    /// -- by the time this is called the player has already read the
+    /// result at their own pace and tapped TAP TO CONTINUE, so it sets
+    /// the permanent simonWon flag (checked by isMissionComplete),
+    /// updates the in-world screen text, and dismisses the overlay
+    /// right away rather than on a delay.
+    func completeSimonTerminal(at coord: GridCoordinate) {
+        guard activeSimonTerminal == coord, !simonWon else { return }
+        simonWon = true
+        if let node = simonTerminalNodes[coord] {
+            HallwayScene.setSimonTerminalStatus("MEMORY: EXCEPTIONAL.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeSimonTerminal = nil
+    }
+
+    // MARK: - Hangman terminal (Floor 12's embedded mini-game)
+    //
+    // Eddie, Sept 14: replaces the removed Whack-A-Mole in the same
+    // Floor 12 slot -- a familiar, low-difficulty recognition game
+    // rather than a dexterity challenge. Identical shape to every
+    // other terminal above -- approach, face it, it activates; the
+    // word bank/guess/reveal logic lives in HangmanOverlay.swift, this
+    // controller only owns activation + the one-way win gate.
+
+    func hangmanTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = hangmanTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var hangmanTerminalAtCurrentCell: GridCoordinate? {
+        guard hangmanDirections[currentCell] == facing, !hangmanWon else { return nil }
+        return currentCell
+    }
+
+    func activateHangmanTerminal(at coord: GridCoordinate) {
+        guard activeHangmanTerminal == nil, canRotate, coord == currentCell,
+              hangmanDirections[coord] == facing, !hangmanWon else { return }
+        activeHangmanTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelSimonTerminal. The overlay's own round state (the
+    /// current word, which letters have been guessed) is thrown away
+    /// (a fresh HangmanViewModel next time), which is fine -- an
+    /// unfinished or failed word never needs to persist between
+    /// visits, only that it never blocks retrying.
+    func cancelHangmanTerminal() {
+        activeHangmanTerminal = nil
+    }
+
+    /// Called by HangmanOverlay's view model the instant the PLAYER
+    /// taps through a SUCCESS (whole word revealed) result screen.
+    /// One-way gate, same shape as completeSimonTerminal -- by the
+    /// time this is called the player has already read the result at
+    /// their own pace and tapped TAP TO CONTINUE, so it sets the
+    /// permanent hangmanWon flag (checked by isMissionComplete),
+    /// updates the in-world screen text, and dismisses the overlay
+    /// right away rather than on a delay.
+    func completeHangmanTerminal(at coord: GridCoordinate) {
+        guard activeHangmanTerminal == coord, !hangmanWon else { return }
+        hangmanWon = true
+        if let node = hangmanTerminalNodes[coord] {
+            HallwayScene.setHangmanTerminalStatus("WORD: SOLVED.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeHangmanTerminal = nil
+    }
+
+    // MARK: - Connect Four terminal (Floor 14's embedded mini-game)
+    //
+    // Eddie, Sept 14: replaces the removed Skee-Ball in the same
+    // Floor 14 slot -- a familiar, low-difficulty recognition game
+    // rather than a dexterity challenge. Identical shape to every
+    // other terminal above -- approach, face it, it activates; the
+    // board/turn/AI logic lives in ConnectFourOverlay.swift, this
+    // controller only owns activation + the one-way win gate.
+
+    func connectFourTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = connectFourTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var connectFourTerminalAtCurrentCell: GridCoordinate? {
+        guard connectFourDirections[currentCell] == facing, !connectFourWon else { return nil }
+        return currentCell
+    }
+
+    func activateConnectFourTerminal(at coord: GridCoordinate) {
+        guard activeConnectFourTerminal == nil, canRotate, coord == currentCell,
+              connectFourDirections[coord] == facing, !connectFourWon else { return }
+        activeConnectFourTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelHangmanTerminal. The overlay's own round state
+    /// (the board, whose turn it is) is thrown away (a fresh
+    /// ConnectFourViewModel next time), which is fine -- an unfinished
+    /// or lost game never needs to persist between visits, only that
+    /// it never blocks retrying.
+    func cancelConnectFourTerminal() {
+        activeConnectFourTerminal = nil
+    }
+
+    /// Called by ConnectFourOverlay's view model the instant the
+    /// PLAYER taps through a WIN result screen. One-way gate, same
+    /// shape as completeHangmanTerminal -- by the time this is called
+    /// the player has already read the result at their own pace and
+    /// tapped TAP TO CONTINUE, so it sets the permanent connectFourWon
+    /// flag (checked by isMissionComplete), updates the in-world
+    /// screen text, and dismisses the overlay right away rather than
+    /// on a delay.
+    func completeConnectFourTerminal(at coord: GridCoordinate) {
+        guard activeConnectFourTerminal == coord, !connectFourWon else { return }
+        connectFourWon = true
+        if let node = connectFourTerminalNodes[coord] {
+            HallwayScene.setConnectFourTerminalStatus("CONNECT FOUR: WON.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeConnectFourTerminal = nil
+    }
+
+    // Floor 15's Checkers terminal -- same shape as the Connect Four
+    // cluster right above; board/turn/AI logic lives in
+    // CheckersOverlay.swift, this controller only owns activation +
+    // the one-way win gate.
+
+    func checkersTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = checkersTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var checkersTerminalAtCurrentCell: GridCoordinate? {
+        guard checkersDirections[currentCell] == facing, !checkersWon else { return nil }
+        return currentCell
+    }
+
+    func activateCheckersTerminal(at coord: GridCoordinate) {
+        guard activeCheckersTerminal == nil, canRotate, coord == currentCell,
+              checkersDirections[coord] == facing, !checkersWon else { return }
+        activeCheckersTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelConnectFourTerminal. The overlay's own round state
+    /// (the board, whose turn it is) is thrown away (a fresh
+    /// CheckersViewModel next time), which is fine -- an unfinished
+    /// or lost game never needs to persist between visits, only that
+    /// it never blocks retrying.
+    func cancelCheckersTerminal() {
+        activeCheckersTerminal = nil
+    }
+
+    /// Called by CheckersOverlay's view model the instant the
+    /// PLAYER taps through a WIN result screen. One-way gate, same
+    /// shape as completeConnectFourTerminal -- by the time this is
+    /// called the player has already read the result at their own
+    /// pace and tapped TAP TO CONTINUE, so it sets the permanent
+    /// checkersWon flag (checked by isMissionComplete), updates the
+    /// in-world screen text, and dismisses the overlay right away
+    /// rather than on a delay.
+    func completeCheckersTerminal(at coord: GridCoordinate) {
+        guard activeCheckersTerminal == coord, !checkersWon else { return }
+        checkersWon = true
+        if let node = checkersTerminalNodes[coord] {
+            HallwayScene.setCheckersTerminalStatus("CHECKERS: WON.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeCheckersTerminal = nil
+    }
+
+    // Floor 16's Woidle terminal -- same shape as the Checkers
+    // cluster right above; board/keyboard/word logic lives in
+    // WoidleOverlay.swift, this controller only owns activation +
+    // the one-way win gate.
+
+    func woidleTerminalCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let match = woidleTerminalNodes.first(where: { $0.value === candidate }) { return match.key }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    var woidleTerminalAtCurrentCell: GridCoordinate? {
+        guard woidleDirections[currentCell] == facing, !woidleWon else { return nil }
+        return currentCell
+    }
+
+    func activateWoidleTerminal(at coord: GridCoordinate) {
+        guard activeWoidleTerminal == nil, canRotate, coord == currentCell,
+              woidleDirections[coord] == facing, !woidleWon else { return }
+        activeWoidleTerminal = coord
+    }
+
+    /// Stepping away without finishing -- same "cancel, don't punish"
+    /// idea as cancelCheckersTerminal. The overlay's own round state
+    /// (the board, the typed row) is thrown away (a fresh
+    /// WoidleViewModel next time), which is fine -- an unfinished or
+    /// lost puzzle never needs to persist between visits, only that
+    /// it never blocks retrying.
+    func cancelWoidleTerminal() {
+        activeWoidleTerminal = nil
+    }
+
+    /// Called by WoidleOverlay's view model the instant the PLAYER
+    /// taps through a WIN result screen. One-way gate, same shape as
+    /// completeCheckersTerminal -- by the time this is called the
+    /// player has already read the result at their own pace and
+    /// tapped TAP TO CONTINUE, so it sets the permanent woidleWon flag
+    /// (checked by isMissionComplete), updates the in-world screen
+    /// text, and dismisses the overlay right away rather than on a
+    /// delay.
+    func completeWoidleTerminal(at coord: GridCoordinate) {
+        guard activeWoidleTerminal == coord, !woidleWon else { return }
+        woidleWon = true
+        if let node = woidleTerminalNodes[coord] {
+            HallwayScene.setWoidleTerminalStatus("WORD ASSESSMENT: PASSED.\n\nELEVATOR ACCESS GRANTED.", on: node)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        showMessage("You beat the building! Return to the elevator.")
+        activeWoidleTerminal = nil
     }
 
     /// Shows whichever Exit Sign sits at currentCell (bright/enlarged
@@ -702,11 +1691,71 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         SCNVector3(Float(coord.col) * Float(cellSize), eyeHeight, Float(coord.row) * Float(cellSize))
     }
 
+    // TEMP NAVSYNC DIAGNOSTIC (Eddie, Sept 13):
+    // Compare the maze's logical cell/facing with both the camera node's model
+    // transform and SceneKit's presentation transform. This deliberately changes
+    // NO navigation behavior; it only tells us whether the map/navigation state
+    // and what the player is actually seeing have drifted apart.
+    private func logNavSync(_ event: String) {
+        let expectedLocal = worldPosition(for: currentCell)
+        let actualLocal = cameraNode.position
+        let presentationLocal = cameraNode.presentation.position
+
+        // cameraNode.position is expressed in its parent's coordinate space.
+        // Convert the expected cell center through that same parent so the world
+        // comparison remains valid even if the camera ever stops being a direct
+        // child of an identity-transformed node.
+        let expectedWorld = cameraNode.parent?.convertPosition(expectedLocal, to: nil) ?? expectedLocal
+        let actualWorld = cameraNode.worldPosition
+        let presentationWorld = cameraNode.presentation.worldPosition
+
+        let localDX = actualLocal.x - expectedLocal.x
+        let localDZ = actualLocal.z - expectedLocal.z
+        let worldDX = actualWorld.x - expectedWorld.x
+        let worldDZ = actualWorld.z - expectedWorld.z
+
+        let safeCellSize = max(Float(cellSize), 0.0001)
+        let localCellDX = localDX / safeCellSize
+        let localCellDZ = localDZ / safeCellSize
+
+        let actualYaw = Double(cameraNode.eulerAngles.y)
+        let presentationYaw = Double(cameraNode.presentation.eulerAngles.y)
+        let expectedYaw = facing.yaw
+        let yawDelta = shortestDelta(from: actualYaw, to: expectedYaw)
+
+        func v(_ p: SCNVector3) -> String {
+            String(format: "(%.3f, %.3f, %.3f)", p.x, p.y, p.z)
+        }
+
+        navLog("""
+        [NAVSYNC] \(event)
+          logical: floor=\(floorNumber) cell=\(currentCell) facing=\(facing) open=\(openDirections)
+          expectedLocal=\(v(expectedLocal))
+          cameraLocal=\(v(actualLocal)) delta=(\(String(format: "%.3f", localDX)), \(String(format: "%.3f", localDZ))) deltaCells=(\(String(format: "%.3f", localCellDX)), \(String(format: "%.3f", localCellDZ)))
+          presentationLocal=\(v(presentationLocal))
+          expectedWorld=\(v(expectedWorld))
+          cameraWorld=\(v(actualWorld)) worldDelta=(\(String(format: "%.3f", worldDX)), \(String(format: "%.3f", worldDZ)))
+          presentationWorld=\(v(presentationWorld))
+          yaw expected=\(String(format: "%.3f", expectedYaw)) model=\(String(format: "%.3f", actualYaw)) presentation=\(String(format: "%.3f", presentationYaw)) deltaToExpected=\(String(format: "%.3f", yawDelta))
+          state: isAnimating=\(isAnimating) isDragRotating=\(isDragRotating) phase=\(phase) standaloneRotation=\(standaloneRotation) walkingHeld=\(walkingHeld) mapVisible=\(handheldMapVisible)
+        """)
+    }
+
     /// Rotate in place to face a new compass direction — the left/right
     /// D-pad buttons. Pure pivot, no movement, and doesn't touch
     /// currentCell/history at all.
     func rotate(toward direction: Direction) {
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
+        if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
+        if activeShellGameTerminal != nil { cancelShellGameTerminal() }
+        if activeRockPaperScissorsTerminal != nil { cancelRockPaperScissorsTerminal() }
+        if activeHigherLowerTerminal != nil { cancelHigherLowerTerminal() }
+        if activeFiveCardDrawTerminal != nil { cancelFiveCardDrawTerminal() }
+        if activeSimonTerminal != nil { cancelSimonTerminal() }
+        if activeHangmanTerminal != nil { cancelHangmanTerminal() }
+        if activeConnectFourTerminal != nil { cancelConnectFourTerminal() }
+        if activeCheckersTerminal != nil { cancelCheckersTerminal() }
+        if activeWoidleTerminal != nil { cancelWoidleTerminal() }
         guard canRotate, direction != facing else {
             navLog("rotate(toward: \(direction)) ignored -- canRotate=\(canRotate), facing=\(facing)")
             return
@@ -726,12 +1775,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Refuses if a walk/rotate/another drag is already in progress.
     func beginDragRotate() {
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
+        if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
+        if activeShellGameTerminal != nil { cancelShellGameTerminal() }
+        if activeRockPaperScissorsTerminal != nil { cancelRockPaperScissorsTerminal() }
+        if activeHigherLowerTerminal != nil { cancelHigherLowerTerminal() }
+        if activeFiveCardDrawTerminal != nil { cancelFiveCardDrawTerminal() }
+        if activeSimonTerminal != nil { cancelSimonTerminal() }
+        if activeHangmanTerminal != nil { cancelHangmanTerminal() }
+        if activeConnectFourTerminal != nil { cancelConnectFourTerminal() }
+        if activeCheckersTerminal != nil { cancelCheckersTerminal() }
+        if activeWoidleTerminal != nil { cancelWoidleTerminal() }
         guard canRotate else {
             navLog("beginDragRotate() ignored -- canRotate=false")
             return
         }
         dragBaseYaw = Double(cameraNode.eulerAngles.y)
         isDragRotating = true
+        logNavSync("DRAG TURN BEGIN")
         navLog("beginDragRotate() started")
     }
 
@@ -746,25 +1806,65 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cameraNode.eulerAngles = SCNVector3(0, Float(dragBaseYaw + clamped * .pi / 2), 0)
     }
 
-    /// Call when the finger lifts. Past the halfway point (45 degrees,
-    /// |fraction| >= 0.5) the turn completes the rest of the way to a
-    /// full 90; short of it, the camera springs back to the heading the
-    /// drag started from. Either way this animates the remaining
-    /// distance (reusing the same pivot machinery a tapped rotate()
-    /// uses) rather than snapping.
-    func endDragRotate(fraction: Double) {
+    // Eddie, Sept 13: was a flat 50% threshold -- "the positional
+    // commit threshold much lower than 50%." Named here (rather than
+    // inline) so both feel constants for the release decision below
+    // live together and can be retuned as a pair after a device pass.
+    // Both are expressed as fractions of the same 90-degree turn
+    // updateDragRotate already uses (dragRotateDistance's worth of
+    // drag == 1.0), so they stay directly comparable to `fraction`.
+    private let turnCommitFraction: Double = 0.30
+    // How many seconds of the release's own flick speed get credited
+    // toward the position when predicting where the drag was headed --
+    // the same idea as a scroll view predicting its settling offset.
+    // This is what lets a short, fast flick commit a turn it never
+    // physically reached: "the velocity makes the intention completely
+    // obvious" even over "perhaps half an inch." At the default 0.30
+    // commit threshold this works out to roughly a 350 pts/sec flick
+    // (dragRotateDistance's 140pt turn * 0.30 / 0.12s) committing on
+    // its own regardless of how little the finger actually traveled.
+    private let turnFlickProjectionSeconds: Double = 0.12
+    // Below this much real drag, trust the flick's own direction for
+    // which way to turn instead of the (near-meaningless) sign of a
+    // near-zero position -- purely a sign-disambiguation guard, not a
+    // reject-the-gesture dead zone (the projection formula below
+    // already handles rejecting genuinely accidental nudges on its own).
+    private let turnMinimumSignFraction: Double = 0.03
+
+    /// Call when the finger lifts. Turning uses both displacement and
+    /// flick intent: `velocityFraction` is the release velocity in the
+    /// same units as `fraction` (a full 90-degree turn's worth of drag
+    /// per second), so a short, fast swipe can still commit even if it
+    /// never crosses the normal positional threshold on its own -- see
+    /// turnFlickProjectionSeconds above. The commit threshold itself is
+    /// intentionally well below the old 50%: once the player has
+    /// visually turned far enough around a corner, snapping all the way
+    /// back feels contrary to the gesture even when released slowly.
+    /// Either way, this animates ONLY the remaining angle from wherever
+    /// updateDragRotate left the camera to the chosen facing -- it does
+    /// not restart a full 90-degree turn, exactly as before.
+    func endDragRotate(fraction: Double, velocityFraction: Double = 0) {
         guard isDragRotating else { return }
         isDragRotating = false
         let clamped = max(-1, min(1, fraction))
-        let committing = abs(clamped) >= 0.5
-        let target: Direction = committing ? (clamped > 0 ? facing.left : facing.right) : facing
-        navLog("endDragRotate(fraction: \(String(format: "%.2f", fraction))) committing=\(committing) target=\(target)")
+        let absFraction = abs(clamped)
+        let projectedFraction = absFraction + abs(velocityFraction) * turnFlickProjectionSeconds
+        let committing = projectedFraction >= turnCommitFraction
+        // Direction: trust the actual drag position whenever there's
+        // been any real motion to read a sign from; only a near-zero-
+        // distance pure flick falls back to the flick's own direction.
+        let signSource = absFraction >= turnMinimumSignFraction ? clamped : velocityFraction
+        let target: Direction = committing ? (signSource > 0 ? facing.left : facing.right) : facing
+        logNavSync("DRAG TURN RELEASE — target=\(target) committing=\(committing)")
+        navLog("endDragRotate(fraction: \(String(format: "%.2f", fraction)), velocityFraction: \(String(format: "%.2f", velocityFraction)), projected: \(String(format: "%.2f", projectedFraction))) committing=\(committing) target=\(target)")
 
         standaloneRotation = true
         pendingRotationTarget = target
         phase = .pivot
         segmentProgress = 0
         pivotStartYaw = Double(cameraNode.eulerAngles.y)
+        // On release, animate only from the current dragged yaw to the
+        // chosen snapped facing. Do not restart a full 90-degree turn.
         pivotTargetYaw = pivotStartYaw + shortestDelta(from: pivotStartYaw, to: target.yaw)
         isAnimating = true
     }
@@ -786,30 +1886,94 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
 
     /// Only an idle, unblocked control state can represent an attempted wall move.
-    var forwardIsBlockedByWall: Bool { canRotate && !openDirections.contains(facing) }
+    var forwardIsBlockedByWall: Bool { canRotate && !forwardConnectionIsOpen }
+
+    // Eddie, Sept 13: reported tap-forward playing the wall-thump from
+    // a spot (Floor 2, elevator -> mission sign; also seen earlier on
+    // Floor 5) where a following long-press then appears to get
+    // through and turn. Traced both paths in detail -- advanceWhileHeld's
+    // auto-turn-at-an-unambiguous-corner is a real, intentional, already-
+    // shipped feature (2136fce, 3b760e2) that advance() (tap) deliberately
+    // does not have, and canGoForward/canRotate/openDirections are the
+    // exact same computed properties both paths read, recomputed fresh
+    // from the maze each call -- no separate/duplicated logic, no cache
+    // to go stale, and the renderer's own facing/isAnimating updates
+    // apply atomically together on every animated step, so no async
+    // window was found where one path could see stale facing the other
+    // doesn't. Nothing here proves a concrete root cause yet, so per
+    // Eddie: "If you still cannot prove the cause, DO NOT GUESS.
+    // Instead, add narrowly targeted diagnostic logging." One line per
+    // call, prefixed [NAVDIAG] so it's easy to grep for in Xcode's
+    // console, tagged by which input path triggered it -- see the
+    // report for exactly what to capture on the next repro.
+    private func logNavAttempt(path: String) {
+        logNavSync("\(path) INPUT")
+        let candidate = GridCoordinate(row: currentCell.row + facing.delta.row, col: currentCell.col + facing.delta.col)
+        navLog("[NAVDIAG] path=\(path) cell=\(currentCell) facing=\(facing) cameraYaw=\(String(format: "%.3f", Double(cameraNode.eulerAngles.y))) candidate=\(candidate) candidateOpen=\(cells.contains(candidate)) open=\(openDirections) canGoForward=\(canGoForward) canRotate=\(canRotate) isAnimating=\(isAnimating) isDragRotating=\(isDragRotating) elevatorInUse=\(elevatorInUse) chuteInUse=\(chuteInUse) extinguisherPickupInProgress=\(extinguisherPickupInProgress) extinguishingFires=\(extinguishingFireCoords) handheldMapVisible=\(handheldMapVisible) activePhotoBooth=\(String(describing: activePhotoBooth)) walkingHeld=\(walkingHeld) standaloneRotation=\(standaloneRotation) phase=\(phase)")
+    }
 
     func advanceWhileHeld() {
+        logNavAttempt(path: "HELD")
         guard canRotate else { return }
         if canGoForward {
-            advance()
+            advance(source: "HELD")
             return
         }
+        // Eddie, Sept 16 (remove automatic step-out): no auto-turn
+        // fallback while still standing inside the just-arrived
+        // elevator -- openDirections describes the REAL hallway cell
+        // this hasn't been walked back into yet, not what's actually
+        // around the camera right now, so picking a turn from it here
+        // would spin the player toward a direction with nothing to do
+        // with the cab they're still standing in. Finding the doorway
+        // is manual-only until performElevatorEntryWalkOut() clears
+        // this.
+        guard elevatorAwaitingEntryDirection == nil else { return }
         let turns = [facing.left, facing.right].filter { openDirections.contains($0) }
         // Starting against a wall works just like arriving at one: exactly
         // one side exit is unambiguous, regardless of the passage behind us.
         // Two side exits wait for a swipe; never choose a U-turn automatically.
         guard turns.count == 1 else { return }
+        logNavSync("HELD FORCED TURN — about to turn toward \(turns[0])")
         navLog("held walk turning at \(currentCell) from \(facing) toward \(turns[0])")
         rotate(toward: turns[0])
     }
 
     /// The forward D-pad button (and a bare tap): walks from currentCell
     /// in whatever direction you're currently facing, all the way to
-    /// the next real decision, dead end, or the target.
-    func advance() {
+    /// the next real decision, dead end, or the target. `source` is
+    /// purely diagnostic (see logNavAttempt above) -- defaults to "TAP"
+    /// so every existing call site (the tap gesture, the D-pad button)
+    /// is unaffected; advanceWhileHeld() is the only caller that passes
+    /// "HELD", when its own forward check already succeeded.
+    func advance(source: String = "TAP") {
+        logNavAttempt(path: source)
         guard canGoForward else {
             if forwardIsBlockedByWall { SoundEffects.playHitWall() }
             navLog("advance() ignored -- canGoForward=false (isAnimating=\(isAnimating), isDragRotating=\(isDragRotating), elevatorInUse=\(elevatorInUse), facing=\(facing), open=\(openDirections))")
+            return
+        }
+
+        // Eddie, Sept 16 (remove automatic step-out): canGoForward's
+        // own gating above already guarantees facing == elevatorAwaitingEntryDirection
+        // here whenever this is non-nil -- the ONE legal forward move
+        // while still standing inside the just-arrived elevator is
+        // walking straight out through the doorway, back to the real
+        // hallway cell center. Not a normal walkToNextDecision() grid
+        // step (currentCell never actually changes -- the player was
+        // logically always standing at this cell, just physically
+        // offset into the cab) -- see performElevatorEntryWalkOut().
+        if canReenterArrivedElevator, let center = elevatorEntryCellCenterPosition,
+           let direction = elevatorMountDirection {
+            let distance = Float(HallwayScene.ElevatorGeometry(cellSize: cellSize).entryDistance)
+            let target = SCNVector3(center.x + Float(direction.delta.col) * distance, center.y,
+                                    center.z + Float(direction.delta.row) * distance)
+            performElevatorThresholdWalk(to: target, entering: true)
+            return
+        }
+        if elevatorAwaitingEntryDirection != nil {
+            navLog("advance() walking out of the elevator, facing \(facing)")
+            performElevatorEntryWalkOut()
             return
         }
 
@@ -872,6 +2036,36 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 return true // Stop at pictures and mirrors on every pass, including return trips.
             }
             if photoBoothCoords.contains(coord), !completedPhotoBooths.contains(coord) {
+                return true
+            }
+            if ticTacToeTerminalCoords.contains(coord), !ticTacToeWon {
+                return true
+            }
+            if shellGameStationCoords.contains(coord), !shellGameWon {
+                return true
+            }
+            if rockPaperScissorsTerminalCoords.contains(coord), !rockPaperScissorsWon {
+                return true
+            }
+            if higherLowerTerminalCoords.contains(coord), !higherLowerWon {
+                return true
+            }
+            if fiveCardDrawTerminalCoords.contains(coord), !fiveCardDrawWon {
+                return true
+            }
+            if simonTerminalCoords.contains(coord), !simonWon {
+                return true
+            }
+            if hangmanTerminalCoords.contains(coord), !hangmanWon {
+                return true
+            }
+            if connectFourTerminalCoords.contains(coord), !connectFourWon {
+                return true
+            }
+            if checkersTerminalCoords.contains(coord), !checkersWon {
+                return true
+            }
+            if woidleTerminalCoords.contains(coord), !woidleWon {
                 return true
             }
             return false
@@ -957,11 +2151,19 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// clears, so Reset genuinely restarts the floor rather than leaving
     /// already-gobbled objects permanently missing.
     func reset() {
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): reset() is the one
+        // other place in this file that writes cameraNode.position/
+        // eulerAngles directly, unguarded by SCNTransaction.disableActions
+        // -- ruled unlikely to fire on an ordinary elevator arrival
+        // (lastResetToken is synced to runtime.resetToken at the end of
+        // every makeUIView, so a fresh floor's Coordinator shouldn't
+        // see a stale mismatch), but logged here anyway so the console
+        // proves or disproves that instead of leaving it assumed.
+        navLog("[ARRIVALDIAG] reset() CALLED t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(floorNumber) model.pos=\(cameraNode.position) model.euler=\(cameraNode.eulerAngles)")
         setWalkingHeld(false)
         movementPace = 1
         SoundEffects.setWalkingPace(1)
         handheldMapVisible = false
-        deferredMapNavigationUpdates.removeAll()
         paintedCells.removeAll()
         hasPaintBucket = false
         wallPainter?.reset()
@@ -976,6 +2178,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         standaloneRotation = false
         cameraNode.position = worldPosition(for: startCell)
         cameraNode.eulerAngles = SCNVector3(0, Float(startFacing.yaw), 0)
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
+        navLog("[ARRIVALDIAG] reset() camera snapped to startCell -- model.pos=\(cameraNode.position) model.euler=\(cameraNode.eulerAngles)")
         carriedExtinguisherNode?.removeFromParentNode()
         carriedExtinguisherNode = nil
         carryingExtinguisher = false
@@ -987,6 +2191,56 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if let prompt = photoBoothExpressions[coord]?.prompt {
                 HallwayScene.resetPhotoBoothScreen(on: node, prompt: prompt)
             }
+        }
+        ticTacToeWon = false
+        activeTicTacToeTerminal = nil
+        for node in ticTacToeTerminalNodes.values {
+            HallwayScene.resetTicTacToeTerminalScreen(on: node)
+        }
+        shellGameWon = false
+        activeShellGameTerminal = nil
+        for node in shellGameStationNodes.values {
+            HallwayScene.resetShellGameStationScreen(on: node)
+        }
+        rockPaperScissorsWon = false
+        activeRockPaperScissorsTerminal = nil
+        for node in rockPaperScissorsTerminalNodes.values {
+            HallwayScene.resetRockPaperScissorsTerminalScreen(on: node)
+        }
+        higherLowerWon = false
+        activeHigherLowerTerminal = nil
+        for node in higherLowerTerminalNodes.values {
+            HallwayScene.resetHigherLowerTerminalScreen(on: node)
+        }
+        fiveCardDrawWon = false
+        activeFiveCardDrawTerminal = nil
+        for node in fiveCardDrawTerminalNodes.values {
+            HallwayScene.resetFiveCardDrawTerminalScreen(on: node)
+        }
+        simonWon = false
+        activeSimonTerminal = nil
+        for node in simonTerminalNodes.values {
+            HallwayScene.resetSimonTerminalScreen(on: node)
+        }
+        hangmanWon = false
+        activeHangmanTerminal = nil
+        for node in hangmanTerminalNodes.values {
+            HallwayScene.resetHangmanTerminalScreen(on: node)
+        }
+        connectFourWon = false
+        activeConnectFourTerminal = nil
+        for node in connectFourTerminalNodes.values {
+            HallwayScene.resetConnectFourTerminalScreen(on: node)
+        }
+        checkersWon = false
+        activeCheckersTerminal = nil
+        for node in checkersTerminalNodes.values {
+            HallwayScene.resetCheckersTerminalScreen(on: node)
+        }
+        woidleWon = false
+        activeWoidleTerminal = nil
+        for node in woidleTerminalNodes.values {
+            HallwayScene.resetWoidleTerminalScreen(on: node)
         }
         fireInteractionID = UUID()
         if !fireCoords.isEmpty { SoundEffects.stopExtinguisherSpray() }
@@ -1053,6 +2307,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             viewedMissionSignCoords.removeAll()
         }
 
+        if elevatorAwaitingEntryDirection != nil {
+            navLog("reset() cancelling an in-progress elevator entry, snapping to the cell center")
+            cameraNode.removeAllActions()
+            if let target = elevatorEntryCellCenterPosition {
+                cameraNode.position = target
+            }
+            elevatorAwaitingEntryDirection = nil
+            elevatorEntryCellCenterPosition = nil
+        }
+
+        if arrivedElevatorDoorOpen {
+            cameraNode.removeAction(forKey: "elevatorManualWalkOut")
+            elevatorLeftDoor?.position = elevatorLeftClosedPosition ?? SCNVector3Zero
+            elevatorRightDoor?.position = elevatorRightClosedPosition ?? SCNVector3Zero
+            arrivedElevatorDoorOpen = false
+            elevatorEntryCellCenterPosition = nil
+        }
 
         if elevatorInUse {
             navLog("reset() snapping elevator doors shut mid-animation")
@@ -1156,7 +2427,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     self.carriedExtinguisherNode = carried
                     self.carryingExtinguisher = true
                     self.extinguisherPickupInProgress = false
-                    SoundEffects.playTrashPickup()
+                    SoundEffects.playExtinguisherGrab()
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     self.showMessage("Extinguisher ready. Tap a fire to put it out.")
                 }
@@ -1407,6 +2678,189 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         return nil
     }
 
+    /// Same node-name/walk-the-parent-chain pattern as roomDoorCoordinate
+    /// just above, for the bathroom door's hinge node (named
+    /// "bathroomDoor_<row>_<col>" by makeBathroomDoorPanel).
+    func bathroomDoorCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var candidate: SCNNode? = node
+        while let current = candidate {
+            if let name = current.name, name.hasPrefix("bathroomDoor_") {
+                let parts = name.dropFirst("bathroomDoor_".count).split(separator: "_")
+                if parts.count == 2, let row = Int(parts[0]), let col = Int(parts[1]) {
+                    return GridCoordinate(row: row, col: col)
+                }
+            }
+            candidate = current.parent
+        }
+        return nil
+    }
+
+    /// Eddie, Sept 14 (round 3): "the door's visual state and
+    /// traversal state should remain synchronized." True by
+    /// construction -- this is the ONLY thing that decides "are you
+    /// standing somewhere that makes this door interactable," and both
+    /// openBathroomDoor and closeBathroomDoor below gate on it before
+    /// touching openBathroomDoors, so there's one source of truth for
+    /// "who can act on this door right now," not two copies that could
+    /// drift. Works from EITHER side of the doorway -- coord is always
+    /// the anchor bathroomDoors is keyed by (the hallway-side cell),
+    /// but round 3 added the ability to open/close it from the room
+    /// side too (walking BATHROOM -> HALLWAY), which the original
+    /// round-2 "coord == currentCell" guard never accounted for since
+    /// the door never used to close, so tapping it from inside was
+    /// never actually reachable before now.
+    func isAdjacentToBathroomDoor(_ coord: GridCoordinate) -> Bool {
+        guard let doorDirection = bathroomDoors[coord] else { return false }
+        let neighbor = GridCoordinate(row: coord.row + doorDirection.delta.row, col: coord.col + doorDirection.delta.col)
+        return (currentCell == coord && facing == doorDirection) || (currentCell == neighbor && facing == doorDirection.opposite)
+    }
+
+    /// The swing's sign, worked out analytically per direction from
+    /// makeBathroomDoorPanel's own per-direction hinge placement (which
+    /// way the panel's hinge-relative local axis actually points once
+    /// rotated) so the door swings AWAY from the hallway cell, into the
+    /// room, rather than through the wall. Shared by openBathroomDoor
+    /// (forward) and closeBathroomDoor (the exact same rotation negated)
+    /// so the two can never drift out of sync with each other.
+    private func bathroomDoorSwingAngle(for direction: Direction) -> CGFloat {
+        let sign: CGFloat
+        switch direction {
+        case .north, .east: sign = 1
+        case .south, .west: sign = -1
+        }
+        return sign * (100 * .pi / 180)
+    }
+
+    /// Tapping the closed bathroom door swings it open -- same "must be
+    /// standing at the right cell, facing the right wall" guard shape as
+    /// deliverMail above (isAdjacentToBathroomDoor, now valid from
+    /// either side of the doorway). Once open, ordinary grid navigation
+    /// (via openDirections' bathroomDoorAnchor check) handles walking
+    /// through it -- no special-case camera choreography, per Eddie's
+    /// own instruction to prefer that if ordinary grid navigation can
+    /// do it. Preserved exactly as it was in round 2 -- Eddie, round 3:
+    /// "Preserve the existing bathroom-door OPENING animation."
+    func openBathroomDoor(at coord: GridCoordinate) {
+        guard canRotate, !openBathroomDoors.contains(coord), let doorDirection = bathroomDoors[coord], isAdjacentToBathroomDoor(coord) else { return }
+        openBathroomDoors.insert(coord)
+        if let hinge = scene?.rootNode.childNode(withName: "bathroomDoor_\(coord.row)_\(coord.col)", recursively: true) {
+            let swing = SCNAction.rotateBy(x: 0, y: bathroomDoorSwingAngle(for: doorDirection), z: 0, duration: 0.5)
+            swing.timingMode = .easeOut
+            hinge.runAction(swing)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+        showMessage("The door swings open.")
+    }
+
+    /// Eddie, Sept 14 (round 3): "close behind the player." The exact
+    /// reverse of openBathroomDoor's own rotation (bathroomDoorSwingAngle
+    /// negated) so it reads as the same physical hinge swinging back,
+    /// not a redesigned animation. Only ever called from
+    /// closeBathroomDoorIfJustCrossed below, itself only ever fired by
+    /// currentCell's didSet -- i.e. only once the glide has actually,
+    /// visibly carried the player across the doorway, never a timer.
+    private func closeBathroomDoor(at coord: GridCoordinate) {
+        guard openBathroomDoors.contains(coord), let doorDirection = bathroomDoors[coord] else { return }
+        openBathroomDoors.remove(coord)
+        if let hinge = scene?.rootNode.childNode(withName: "bathroomDoor_\(coord.row)_\(coord.col)", recursively: true) {
+            let swing = SCNAction.rotateBy(x: 0, y: -bathroomDoorSwingAngle(for: doorDirection), z: 0, duration: 0.5)
+            swing.timingMode = .easeOut
+            hinge.runAction(swing)
+        }
+    }
+
+    /// currentCell's didSet hands this exactly one single-cell step
+    /// (from -> to, always adjacent -- applyArrival sets currentCell one
+    /// grid step at a time even mid-glide). If that step actually
+    /// crossed an OPEN bathroom doorway -- in EITHER direction, hallway
+    /// side or room side, same as isAdjacentToBathroomDoor above --
+    /// close it behind them. bathroomDoorAnchor already knows how to
+    /// resolve either side of a boundary back to the one coordinate
+    /// bathroomDoors/openBathroomDoors actually key by, so this reuses
+    /// it rather than re-deriving that mapping a second way.
+    private func closeBathroomDoorIfJustCrossed(from: GridCoordinate, to: GridCoordinate) {
+        let dr = to.row - from.row
+        let dc = to.col - from.col
+        guard let direction = Direction.allCases.first(where: { $0.delta.row == dr && $0.delta.col == dc }) else { return }
+        guard let anchor = bathroomDoorAnchor(from: from, direction: direction), openBathroomDoors.contains(anchor) else { return }
+        closeBathroomDoor(at: anchor)
+    }
+
+    /// Same node-name/walk-the-parent-chain resolution as
+    /// bathroomDoorCoordinate, for a Window Room door's own
+    /// "windowRoomDoor_<row>_<col>" hinge name (see HallwayScene's
+    /// windowRooms build loop, which passes that exact
+    /// hingeNamePrefix into makeBathroomDoorPanel).
+    func windowRoomDoorCoordinate(for node: SCNNode) -> GridCoordinate? {
+        var candidate: SCNNode? = node
+        while let current = candidate {
+            if let name = current.name, name.hasPrefix("windowRoomDoor_") {
+                let parts = name.dropFirst("windowRoomDoor_".count).split(separator: "_")
+                if parts.count == 2, let row = Int(parts[0]), let col = Int(parts[1]) {
+                    return GridCoordinate(row: row, col: col)
+                }
+            }
+            candidate = current.parent
+        }
+        return nil
+    }
+
+    /// Same "one source of truth for who can act on this door right
+    /// now, valid from either side" shape as isAdjacentToBathroomDoor
+    /// -- deliberately not a shared helper across the two door kinds
+    /// (Eddie's own instruction was to reuse the bathroom door's
+    /// interaction model, not to build a generalized one), but
+    /// mirrors it exactly so the two can't drift apart in practice.
+    func isAdjacentToWindowRoomDoor(_ coord: GridCoordinate) -> Bool {
+        guard let doorDirection = windowRooms[coord]?.direction else { return false }
+        let neighbor = GridCoordinate(row: coord.row + doorDirection.delta.row, col: coord.col + doorDirection.delta.col)
+        return (currentCell == coord && facing == doorDirection) || (currentCell == neighbor && facing == doorDirection.opposite)
+    }
+
+    /// Tapping the closed Window Room door swings it open -- same
+    /// guard shape, same reused bathroomDoorSwingAngle math (any
+    /// hinged door in this building swings the same analytical way),
+    /// and once open, the same ordinary-grid-navigation walk-through
+    /// (via openDirections' windowRoomDoorAnchor check) as a bathroom
+    /// door -- "reusing the Bathroom Room's proven interaction model
+    /// exactly," per Eddie, Sept 15.
+    func openWindowRoomDoor(at coord: GridCoordinate) {
+        guard canRotate, !openWindowRoomDoors.contains(coord), let doorDirection = windowRooms[coord]?.direction, isAdjacentToWindowRoomDoor(coord) else { return }
+        openWindowRoomDoors.insert(coord)
+        if let hinge = scene?.rootNode.childNode(withName: "windowRoomDoor_\(coord.row)_\(coord.col)", recursively: true) {
+            let swing = SCNAction.rotateBy(x: 0, y: bathroomDoorSwingAngle(for: doorDirection), z: 0, duration: 0.5)
+            swing.timingMode = .easeOut
+            hinge.runAction(swing)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+        showMessage("The door swings open.")
+    }
+
+    /// The exact reverse of openWindowRoomDoor's own rotation, only
+    /// ever called from closeWindowRoomDoorIfJustCrossed below --
+    /// same "close behind the player, never a timer" policy as a
+    /// bathroom door.
+    private func closeWindowRoomDoor(at coord: GridCoordinate) {
+        guard openWindowRoomDoors.contains(coord), let doorDirection = windowRooms[coord]?.direction else { return }
+        openWindowRoomDoors.remove(coord)
+        if let hinge = scene?.rootNode.childNode(withName: "windowRoomDoor_\(coord.row)_\(coord.col)", recursively: true) {
+            let swing = SCNAction.rotateBy(x: 0, y: -bathroomDoorSwingAngle(for: doorDirection), z: 0, duration: 0.5)
+            swing.timingMode = .easeOut
+            hinge.runAction(swing)
+        }
+    }
+
+    /// Same single-step-crossing close-behind-the-player trigger as
+    /// closeBathroomDoorIfJustCrossed, resolved through
+    /// windowRoomDoorAnchor instead.
+    private func closeWindowRoomDoorIfJustCrossed(from: GridCoordinate, to: GridCoordinate) {
+        let dr = to.row - from.row
+        let dc = to.col - from.col
+        guard let direction = Direction.allCases.first(where: { $0.delta.row == dr && $0.delta.col == dc }) else { return }
+        guard let anchor = windowRoomDoorAnchor(from: from, direction: direction), openWindowRoomDoors.contains(anchor) else { return }
+        closeWindowRoomDoor(at: anchor)
+    }
+
     func deliverMail(at coord: GridCoordinate) {
         guard canRotate, coord == currentCell, let door = roomDoors[coord], facing == door.direction else { return }
         let matching = carriedMail.filter { $0.roomNumber == door.roomNumber }
@@ -1450,7 +2904,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func currentFloorMapImage() -> UIImage {
         let missionItemCells = objectKinds.filter { $0.value == missionObjectKind && !collectedCoords.contains($0.key) }.map { $0.key }
         let missionDestinationCells = destinationKinds.filter { $0.value == missionObjectKind }.map { $0.key }
-        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, maxRow: mapMaxRow, maxCol: mapMaxCol, playerAt: currentCell, facing: facing, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, photoBoothCells: Array(photoBoothCoords), roomDoors: roomDoors, itemRooms: itemRooms, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil)
+        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, photoBoothCells: Array(photoBoothCoords), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil)
     }
 
     private var applyingArrival = false
@@ -1509,6 +2963,59 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         if !photoBoothExpressions.isEmpty {
             return completedPhotoBooths == Set(photoBoothExpressions.keys)
         }
+        // Floor 7's aptitude-test terminal -- Eddie, Sept 13: "the
+        // mission completes when the player wins." Same one-branch-
+        // per-mission-type shape as fire/photo booth above; no
+        // parallel progression system, this IS isMissionComplete.
+        if !ticTacToeDirections.isEmpty {
+            return ticTacToeWon
+        }
+        // Floor 8's shell-game station -- Eddie, Sept 13: same
+        // one-branch-per-mission-type shape as the aptitude test
+        // right above; no parallel progression system here either.
+        if !shellGameDirections.isEmpty {
+            return shellGameWon
+        }
+        // Floor 9's Rock Paper Scissors terminal -- same one-branch-
+        // per-mission-type shape as the two mini-games right above.
+        if !rockPaperScissorsDirections.isEmpty {
+            return rockPaperScissorsWon
+        }
+        // Floor 10's Higher/Lower terminal -- same one-branch-per-
+        // mission-type shape as the three mini-games above.
+        if !higherLowerDirections.isEmpty {
+            return higherLowerWon
+        }
+        // Floor 11's Five-Card Draw terminal -- same one-branch-per-
+        // mission-type shape as the four mini-games above.
+        if !fiveCardDrawDirections.isEmpty {
+            return fiveCardDrawWon
+        }
+        // Floor 13's Simon terminal -- same one-branch-per-mission-
+        // type shape as the six mini-games above.
+        if !simonDirections.isEmpty {
+            return simonWon
+        }
+        // Floor 12's Hangman terminal -- same one-branch-per-mission-
+        // type shape as the games above.
+        if !hangmanDirections.isEmpty {
+            return hangmanWon
+        }
+        // Floor 14's Connect Four terminal -- same one-branch-per-
+        // mission-type shape as the games above.
+        if !connectFourDirections.isEmpty {
+            return connectFourWon
+        }
+        // Floor 15's Checkers terminal -- same one-branch-per-
+        // mission-type shape as the games above.
+        if !checkersDirections.isEmpty {
+            return checkersWon
+        }
+        // Floor 16's Woidle terminal -- same one-branch-per-
+        // mission-type shape as the games above.
+        if !woidleDirections.isEmpty {
+            return woidleWon
+        }
         guard let kind = missionObjectKind else { return true }
         if kind == .paintBucket { return hasPaintBucket && paintedCells == cells }
         let requiredCoords = objectKinds.filter { $0.value == kind }.keys
@@ -1554,8 +3061,362 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// that should have walked one legal cell forward instead.
     var elevatorAtCurrentCell: Bool { currentCell == endCell }
 
+    /// True from the moment the elevator doors begin opening
+    /// (openElevator(), below) until this ride's floor actually
+    /// advances (or a hard reset()) -- the same flag canGoForward/
+    /// canRotate already gate on internally. Exposed read-only so
+    /// ContentView's pan-gesture handler can tell "we're mid-ride"
+    /// from ordinary hallway walking without duplicating any state
+    /// here -- see beginElevatorCameraDrag() below and
+    /// handlePanRotate in ContentView.swift.
+    var isElevatorRideInProgress: Bool { elevatorInUse }
+
+    /// Begins player-driven camera look during an active elevator
+    /// ride -- the pan gesture's equivalent of beginDragRotate(), but
+    /// deliberately a SEPARATE function: beginDragRotate/
+    /// updateDragRotate/endDragRotate always commit to one of the 4
+    /// cardinal facings on release (a grid-navigation concept), where
+    /// an elevator interior isn't on the grid at all and the player
+    /// needs to be able to end up looking at an arbitrary in-between
+    /// angle (a corner, the rear wall) and just stay there. Reuses
+    /// the SAME translation/dragRotateDistance math ContentView's
+    /// handlePanRotate already computes for the normal gesture, just
+    /// applied to this separate, unsnapped state instead. No-ops
+    /// outside an active ride.
+    func beginElevatorCameraDrag() {
+        guard elevatorInUse else { return }
+        // Eddie: "the moment intentional player steering begins, the
+        // current automatic camera rotation must yield... do not let
+        // auto-spin fight the player's gesture." Cancels ONLY the
+        // auto-spin action (its own dedicated key, above) if it
+        // happens to be mid-flight right now. Deliberately NOT
+        // removeAllActions() here -- that would also cancel the
+        // ride's forward dolly if the player grabs the screen this
+        // early (a real position action, still possibly in flight),
+        // and with it the completion chain that closes the doors and
+        // schedules the rest of the ride, softlocking it. Cancelling
+        // a keyed action does not fire its completion handler, which
+        // is fine here: arrival no longer depends on the auto-spin's
+        // completion firing at all -- see playElevatorRide's own
+        // comment on the separate, decoupled wait that replaced it.
+        cameraNode.removeAction(forKey: Self.elevatorAutoSpinActionKey)
+        playerHasTakenElevatorCameraControl = true
+        elevatorCameraDragBaseYaw = Double(cameraNode.eulerAngles.y)
+        isDraggingElevatorCamera = true
+    }
+
+    /// Call continuously while the finger moves during an elevator
+    /// ride. Same fraction-to-yaw math as updateDragRotate, but
+    /// deliberately NOT clamped to a quarter turn -- the player needs
+    /// to reach the rear wall (a half turn) and arbitrary in-between
+    /// angles, not just the 4 cardinal facings a hallway limits them
+    /// to.
+    func updateElevatorCameraDrag(fraction: Double) {
+        guard isDraggingElevatorCamera else { return }
+        cameraNode.eulerAngles = SCNVector3(0, Float(elevatorCameraDragBaseYaw + fraction * .pi / 2), 0)
+    }
+
+    /// Ending ride free-look only releases the gesture. Do not start a grid
+    /// animation or snap: the ride owns translation and preserves the chosen yaw.
+    func endElevatorCameraDrag() {
+        guard isDraggingElevatorCamera else { return }
+        isDraggingElevatorCamera = false
+        navLog("endElevatorCameraDrag() preserving yaw=\(cameraNode.eulerAngles.y)")
+    }
+
+    /// Called once by ContentView, immediately after it builds EVERY
+    /// destination floor reached via the elevator -- a passive ride
+    /// and a player-controlled ride alike (see onReachedEnd /
+    /// onElevatorArrivedControlled and NavigationBridge.
+    /// pendingElevatorArrival/pendingArrivalYaw in ContentView.swift),
+    /// never for an ordinary non-elevator floor load. Eddie, Sept 16
+    /// (remove automatic step-out): physical testing rejected the
+    /// idea that arrival should ever automatically move the player
+    /// through the doors, for EITHER kind of ride -- Hallways' own
+    /// control rule is that swipe/turn never causes forward movement,
+    /// and tap/long-press is the only thing allowed to. This puts
+    /// every arrival into ONE canonical state: standing inside the
+    /// destination elevator's cab, offset ElevatorGeometry.entryDistance
+    /// beyond the hallway wall along elevatorMountDirection -- the
+    /// exact same interior position the ride's own forward dolly used
+    /// back on the OLD floor -- with the destination's own real doors
+    /// already open at their correct physical location, and
+    /// elevatorAwaitingEntryDirection set so canGoForward/advance()
+    /// only accept ONE legal forward move from here: walking straight
+    /// back out to the real cell center (performElevatorEntryWalkOut()
+    /// below). preservedYaw nil means a passive ride -- present the
+    /// natural "already facing the doors" orientation
+    /// (elevatorMountDirection.opposite.yaw), the same direction the
+    /// old floor's own automatic spin ends up facing before a normal
+    /// ride's doors open. A non-nil preservedYaw is a controlled
+    /// ride's exact camera orientation at the moment it arrived,
+    /// applied with no snap/animation -- this runs while the arrival
+    /// curtain still fully covers the screen, so nothing here is ever
+    /// visibly snapping into place. `facing` is snapped to the
+    /// nearest cardinal to whichever yaw was used, purely for internal
+    /// bookkeeping (which direction tap/long-press-forward moves) --
+    /// the SAME snap-to-nearest-cardinal every ordinary swipe-to-turn
+    /// already commits to on release (see endDragRotate), just done
+    /// here once, up front, silently. The camera's own visual yaw is
+    /// always left at the exact value used, never snapped.
+    func presentArrivalInsideElevator(preservedYaw: Double?) {
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): logs the camera's
+        // exact model AND presentation transform the instant this
+        // method is entered -- i.e. whatever HallwayScene.build just
+        // spawned it at, before this method touches anything.
+        navLog("[ARRIVALDIAG] presentArrivalInsideElevator START preservedYaw=\(String(describing: preservedYaw)) model.pos=\(cameraNode.position) model.euler=\(cameraNode.eulerAngles) pres.pos=\(cameraNode.presentation.position) pres.euler=\(cameraNode.presentation.eulerAngles) actionKeys=\(cameraNode.actionKeys) hasActions=\(cameraNode.hasActions)")
+
+        guard let direction = elevatorMountDirection,
+              let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
+              let leftClosed = elevatorLeftClosedPosition, let rightClosed = elevatorRightClosedPosition else {
+            navLog("[ARRIVALDIAG] presentArrivalInsideElevator ABORTED -- missing elevator geometry (direction/doors/closed positions nil)")
+            return
+        }
+
+        // Eddie, Sept 16 (atomic arrival presentation): every property
+        // set below is animatable, and SceneKit implicitly animates
+        // ANY change to an animatable property over its own default
+        // duration UNLESS that's explicitly turned off -- with it left
+        // on, this whole method's camera reposition/re-orient (from
+        // whatever HallwayScene.build's own default spawn -- cell
+        // center, facing south -- just set moments earlier) played out
+        // as a real, visible several-frames-long interpolation: a fly
+        // toward the nearest wall, a snap-rotate at the end, ANY
+        // lighting artifact a too-close pass by a surface produced
+        // along the way (physical testing showed exactly this: a
+        // black frame, a zoom into brick, a blown-out white frame,
+        // then a sudden rotate). SCNTransaction.disableActions makes
+        // every assignment in this block instantaneous instead -- no
+        // interpolation, no intermediate frame, ever. Also see
+        // NavigationBridge.arrivalSceneReady in ContentView.swift,
+        // which now keeps the arrival curtain fully closed until AFTER
+        // this method has already run to completion, so even a slow
+        // first-time floor build can never be exposed through it.
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+
+        let yaw = preservedYaw ?? direction.opposite.yaw
+        cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+        facing = Direction.allCases.min { a, b in
+            abs(shortestDelta(from: yaw, to: a.yaw)) < abs(shortestDelta(from: yaw, to: b.yaw))
+        } ?? facing
+
+        let elevatorGeometry = HallwayScene.ElevatorGeometry(cellSize: cellSize)
+        let entryDistance = elevatorGeometry.entryDistance
+        let mountDeltaX = CGFloat(direction.delta.col)
+        let mountDeltaZ = CGFloat(direction.delta.row)
+        arrivedElevatorDoorOpen = true
+        elevatorEntryCellCenterPosition = cameraNode.position
+        cameraNode.position = SCNVector3(
+            cameraNode.position.x + Float(mountDeltaX * entryDistance),
+            cameraNode.position.y,
+            cameraNode.position.z + Float(mountDeltaZ * entryDistance))
+        elevatorAwaitingEntryDirection = direction.opposite
+
+        // Eddie, Sept 16 (spatially-truthful controlled arrival): a
+        // PASSIVE arrival keeps this exact instant-open -- proven
+        // correct, and the camera yaw set above is always dead-on the
+        // real doorway for a passive ride, so there's nothing to look
+        // spatially wrong from. A CONTROLLED arrival leaves the real
+        // doors CLOSED here instead: the camera could be facing
+        // anywhere, so instantly moving doors nobody can currently
+        // verify are even in frame is invisible bookkeeping that
+        // would contradict what's about to be revealed. ContentView's
+        // curtain calls playControlledArrivalDoorOpen() (below) the
+        // instant it starts revealing a controlled arrival, which is
+        // what actually animates these same doors open for real, at
+        // their real 3D location -- see that method's own comment.
+        if preservedYaw == nil {
+            let alongWallX: CGFloat
+            let alongWallZ: CGFloat
+            switch direction {
+            case .north, .south: (alongWallX, alongWallZ) = (1, 0)
+            case .east, .west: (alongWallX, alongWallZ) = (0, 1)
+            }
+            let slide: CGFloat = 0.8
+            leftDoor.position = SCNVector3(
+                leftClosed.x - Float(slide * alongWallX),
+                leftClosed.y,
+                leftClosed.z - Float(slide * alongWallZ))
+            rightDoor.position = SCNVector3(
+                rightClosed.x + Float(slide * alongWallX),
+                rightClosed.y,
+                rightClosed.z + Float(slide * alongWallZ))
+        }
+
+        SCNTransaction.commit()
+
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): logs the camera's
+        // model AND presentation transform right after commit -- if
+        // SCNTransaction.disableActions genuinely made this instant,
+        // model and presentation should already match here. Also opens
+        // the bounded per-frame sampling window (see
+        // arrivalDiagnosticUntil above) so renderer(_:updateAtTime:)
+        // starts logging every subsequent frame where EITHER transform
+        // moves, for arrivalDiagnosticWindowSeconds.
+        navLog("[ARRIVALDIAG] presentArrivalInsideElevator END model.pos=\(cameraNode.position) model.euler=\(cameraNode.eulerAngles) pres.pos=\(cameraNode.presentation.position) pres.euler=\(cameraNode.presentation.eulerAngles) leftDoor.pos=\(leftDoor.position) rightDoor.pos=\(rightDoor.position) actionKeys=\(cameraNode.actionKeys) hasActions=\(cameraNode.hasActions)")
+        arrivalDiagnosticUntil = Date().timeIntervalSince1970 + arrivalDiagnosticWindowSeconds
+        arrivalDiagnosticLastModelPos = nil
+        arrivalDiagnosticLastModelEuler = nil
+        arrivalDiagnosticLastPresPos = nil
+        arrivalDiagnosticLastPresEuler = nil
+    }
+
+    /// Guards playControlledArrivalDoorOpen() below against firing
+    /// twice for the same arrival.
+    private var controlledArrivalDoorsOpened = false
+
+    /// Eddie, Sept 16 (spatially-truthful controlled arrival): called
+    /// once by ContentView's ElevatorCurtainOverlay, the instant it
+    /// starts revealing a CONTROLLED arrival (never for a passive
+    /// one -- see arrivalWasControlled in ContentView.swift). A
+    /// passive arrival's doors were already moved to their open
+    /// position, instantly, inside presentArrivalInsideElevator --
+    /// safe there because that arrival's camera yaw is always dead-on
+    /// the real doorway. A controlled arrival's camera can be facing
+    /// anywhere, so presentArrivalInsideElevator deliberately left
+    /// these same doors CLOSED (see its own comment) -- this is what
+    /// actually opens them, for real, animating the real 3D door
+    /// nodes at their real physical location using the EXACT same
+    /// slide distance/duration/easing openElevator() already uses to
+    /// open boarding doors, so the destination doors open the same
+    /// way any doors in this game ever do. Being real geometry
+    /// instead of a screen-space effect, this reads correctly from
+    /// whatever angle the player's camera actually happens to be at
+    /// -- dead ahead, a partial corner view, or entirely offscreen if
+    /// they're looking the other way -- with no dependency on the
+    /// camera being centered on them at all.
+    func playControlledArrivalDoorOpen() {
+        guard arrivedElevatorDoorOpen, !controlledArrivalDoorsOpened else { return }
+        guard let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
+              let direction = elevatorMountDirection else {
+            navLog("[ARRIVALDIAG] playControlledArrivalDoorOpen ABORTED -- missing elevator geometry")
+            return
+        }
+        controlledArrivalDoorsOpened = true
+
+        let alongWallX: CGFloat
+        let alongWallZ: CGFloat
+        switch direction {
+        case .north, .south: (alongWallX, alongWallZ) = (1, 0)
+        case .east, .west: (alongWallX, alongWallZ) = (0, 1)
+        }
+        // Same constants as openElevator()'s own boarding-door open,
+        // on purpose -- Eddie: "if the current normal Hallways
+        // turn/snap animation can be reused safely, prefer
+        // consistency." Doors should open the same way everywhere.
+        let slide: CGFloat = 0.8
+        let elevatorSlideDuration: TimeInterval = 1.6
+        let openLeft = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
+        let openRight = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
+        openLeft.timingMode = .easeInEaseOut
+        openRight.timingMode = .easeInEaseOut
+        navLog("[ARRIVALDIAG] playControlledArrivalDoorOpen START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraYaw=\(cameraNode.eulerAngles.y)")
+        leftDoor.runAction(openLeft)
+        rightDoor.runAction(openRight)
+    }
+
+    /// The ONE legal forward move while elevatorAwaitingEntryDirection
+    /// is set -- called from advance() once its own canGoForward guard
+    /// has already confirmed facing matches that direction. Animates
+    /// straight back to the real hallway cell center captured in
+    /// presentArrivalInsideElevator (a plain move(to:), not a relative
+    /// offset, so there's no float-drift risk of ending up slightly
+    /// off-center) using normal walking speed and tap/held easing, then clears the awaiting-entry
+    /// state so canGoForward/openDirections govern ordinary movement
+    /// again from here on, exactly like every other floor.
+    private func performElevatorEntryWalkOut() {
+        guard let target = elevatorEntryCellCenterPosition else {
+            elevatorAwaitingEntryDirection = nil
+            return
+        }
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): only ever reached by
+        // an explicit player tap/hold -- listed here for completeness
+        // (this IS an SCNAction added to cameraNode during the arrival
+        // interval, just a player-triggered one), not expected to fire
+        // on an untouched passive ride.
+        navLog("[ARRIVALDIAG] performElevatorEntryWalkOut() START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) model.pos=\(cameraNode.position) target=\(target)")
+        performElevatorThresholdWalk(to: target, entering: false)
+    }
+
+    private func performElevatorThresholdWalk(to target: SCNVector3, entering: Bool) {
+        // Eddie, Sept 16 (unified release-snap / no persistent
+        // mismatch): a controlled arrival can still be sitting at its
+        // raw preserved (non-cardinal) camera yaw right up until the
+        // player's first fresh swipe-release -- see
+        // presentArrivalInsideElevator's own comment and
+        // endElevatorCameraDrag() above. If a tap/hold arrives FIRST,
+        // instead, this is the one place that matters: the instant
+        // before a scripted walk (out through the doorway, or back
+        // in) actually starts moving. Snapping the visual yaw to
+        // `facing`'s exact cardinal here, instantly (no implicit
+        // animation, same SCNTransaction.disableActions technique as
+        // presentArrivalInsideElevator), guarantees the player is
+        // never seen walking a straight cardinal line while visually
+        // facing an arbitrary angle -- "movement = east" and "visual
+        // yaw = east" can never disagree. A no-op for a passive
+        // arrival or anyone who already swiped-and-released, since
+        // the camera's already sitting exactly there.
+        let targetYaw = Float(facing.yaw)
+        if abs(cameraNode.eulerAngles.y - targetYaw) > 0.001 {
+            SCNTransaction.begin()
+            SCNTransaction.disableActions = true
+            cameraNode.eulerAngles = SCNVector3(0, targetYaw, 0)
+            SCNTransaction.commit()
+        }
+        let start = cameraNode.position
+        let distance = hypot(Double(target.x - start.x), Double(target.z - start.z))
+        let heldExit = walkingHeld
+        movementPace = 1
+        SoundEffects.setWalkingPace(1)
+        phase = .scriptedWalkOut
+        isAnimating = true
+        // Same world-space speed and smoothstep as a normal single tap.
+        // Held walking is linear, as in the grid renderer's continuousRun path.
+        let move = SCNAction.move(to: target, duration: distance / travelSpeed)
+        move.timingFunction = { t in heldExit ? t : t * t * (3 - 2 * t) }
+        SoundEffects.startWalking()
+        cameraNode.runAction(move, forKey: "elevatorManualWalkOut") { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                SoundEffects.stopWalking()
+                if heldExit && self.walkingHeld { self.heldDistance += distance }
+                self.elevatorAwaitingEntryDirection = entering ? self.elevatorMountDirection?.opposite : nil
+                self.isAnimating = false
+                self.phase = .translate
+                if !entering { self.closeArrivedElevatorAfterExit() }
+                navLog("performElevatorEntryWalkOut() finished -- ordinary navigation resumes")
+            }
+        }
+    }
+
+    /// Reaching the hallway center completes arrival: retire its temporary
+    /// connection and close behind the player. Subsequent visits use the normal
+    /// mission-gated boarding path, not the arrival-only threshold path.
+    private func closeArrivedElevatorAfterExit() {
+        guard arrivedElevatorDoorOpen,
+              let left = elevatorLeftDoor, let right = elevatorRightDoor,
+              let leftClosed = elevatorLeftClosedPosition,
+              let rightClosed = elevatorRightClosedPosition else { return }
+        arrivedElevatorDoorOpen = false
+        elevatorEntryCellCenterPosition = nil
+        // Controlled arrival may still be opening when a quick exit finishes.
+        // Cancel that motion and close from the current pose to absolute targets.
+        left.removeAllActions()
+        right.removeAllActions()
+        let closeLeft = SCNAction.move(to: leftClosed, duration: 1.6)
+        let closeRight = SCNAction.move(to: rightClosed, duration: 1.6)
+        closeLeft.timingMode = .easeInEaseOut
+        closeRight.timingMode = .easeInEaseOut
+        left.runAction(closeLeft, forKey: "arrivalCloseBehind")
+        right.runAction(closeRight, forKey: "arrivalCloseBehind")
+        navLog("[ARRIVALDIAG] exited cab -- closing doors; next visit uses mission-gated boarding")
+    }
+
     func openElevator() {
-        guard currentCell == endCell, !elevatorInUse, !chuteInUse,
+        guard elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") == nil,
+              elevatorRightDoor?.action(forKey: "arrivalCloseBehind") == nil else { return }
+        guard currentCell == endCell, !elevatorInUse, !chuteInUse, elevatorAwaitingEntryDirection == nil,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
               let direction = elevatorMountDirection else { return }
         guard isMissionComplete else {
@@ -1575,6 +3436,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         elevatorWarningNode?.removeFromParentNode()
         elevatorWarningNode = nil
         elevatorInUse = true
+        // Eddie, Sept 15 (elevator camera control): a fresh ride
+        // starts with auto-spin back in play by default -- only a
+        // beginElevatorCameraDrag() call during THIS ride flips it
+        // back off. Without this reset, a player who took control on
+        // one ride would silently suppress the automatic spin on
+        // every ride after it too.
+        playerHasTakenElevatorCameraControl = false
 
         // Which world axis the 2 panels actually slide along -- must
         // match HallwayScene's own elevatorPanelWidth (0.8) exactly,
@@ -1660,6 +3528,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// the moment the floor actually swaps, so there's no way to keep
     /// animating THIS SAME set of doors reopening across that boundary.
     private func playElevatorRide(leftDoor: SCNNode, rightDoor: SCNNode, alongWallX: CGFloat, alongWallZ: CGFloat, forwardX: CGFloat, forwardZ: CGFloat, slide: CGFloat, elevatorSlideDuration: TimeInterval, targetButton: SCNNode, next: Int) {
+        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
+        navLog("[ARRIVALDIAG] playElevatorRide START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(floorNumber) next=\(next) model.pos=\(cameraNode.position) model.euler=\(cameraNode.eulerAngles)")
         // Eddie, Sept 9: "use elevator-music" -- for the ride itself,
         // not the initial door-open (that's its own one-shot, right
         // above in openElevator()). Stopped explicitly below rather
@@ -1711,26 +3581,37 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if let originalAmbientIntensity { ambientLight?.intensity = originalAmbientIntensity }
         }
 
-        // Eddie, Sept 8: "its still zooming in just as much to
-        // that back wall - and all walls as its turning to the
-        // doors." 1.8 was dead-center of the OLD 0.4-deep shaft --
-        // 1.6 (door plane) + 0.2. HallwayScene's elevatorShaftDepth
-        // is now 1.6 (a roughly square car), so dead-center moves
-        // out to 1.6 + 0.8 = 2.4 -- same 0.2-margin-on-both-sides
-        // rule that avoids the brick-during-pivot bug, just against
-        // the new, deeper shaft. This is what actually backs the
-        // camera off the photo AND the doors (dead-center means the
-        // distance to both is identical) -- resizing the photo
-        // itself didn't touch the zoom because the zoom was always
-        // about how close the camera's fixed resting spot was.
-        let dollyDistance: CGFloat = 2.4
-        // 1.73s instead of the old 1.3s -- same travel speed as before
-        // (distance grew from 1.8 to 2.4 along with the deeper shaft;
-        // duration grows with it so the dolly still feels like the
-        // same motion, not a rushed longer trip).
-        let dolly = SCNAction.move(by: SCNVector3(Float(forwardX * dollyDistance), 0, Float(forwardZ * dollyDistance)), duration: 1.73)
+        // Derive the cab center from the same geometry used to build it.
+        // Scale duration with distance to preserve the existing entry speed/easing.
+        let elevatorGeometry = HallwayScene.ElevatorGeometry(cellSize: cellSize)
+        let dollyDistance = elevatorGeometry.entryDistance
+        let dolly = SCNAction.move(by: SCNVector3(Float(forwardX * dollyDistance), 0, Float(forwardZ * dollyDistance)), duration: elevatorGeometry.entryDuration)
         dolly.timingMode = .easeInEaseOut
-        let rotate = SCNAction.rotateBy(x: 0, y: .pi, z: 0, duration: 2.6)
+        // Eddie, Sept 12: "Slow ONLY that turnaround animation by
+        // approximately 25%... determine the current duration and
+        // increase it by approximately 25%, rather than replacing the
+        // animation." Was 2.6 -- 2.6 * 1.25 = 3.25.
+        // Eddie, Sept 13, follow-up: "Please add 1.5 seconds to the
+        // full rotation duration: 3.25s -> 4.75s. Change only the
+        // rotation duration itself." 3.25 + 1.5 = 4.75. Nothing else
+        // here is keyed to this specific number: closeDoorsNow()
+        // already ran during the fixed 2.0s dwell before this action
+        // even starts, and the floor-transition handoff below waits
+        // on rotate's own completion callback (a fixed 0.3s after
+        // whatever duration this action actually takes -- see that
+        // dwell's own comment below for why it was shortened from the
+        // original 1.0s), so slowing just this one number is enough
+        // -- no other timing to rebalance. Final facing direction is
+        // still the same .pi turn, just slower to get there.
+        // Eddie, Sept 15 (elevator camera control) addendum: "the
+        // floor-transition handoff below waits on rotate's own
+        // completion callback" above is no longer literally true --
+        // it now waits on a plain asyncAfter(rotate.duration + 0.3)
+        // instead, so arrival still fires at that exact same total
+        // offset whether the spin plays in full, gets cut short by
+        // the player taking camera control, or never starts at all.
+        // See playElevatorRide's own comment further down for why.
+        let rotate = SCNAction.rotateBy(x: 0, y: .pi, z: 0, duration: 4.75)
         rotate.timingMode = .easeInEaseOut
 
         func closeDoorsNow() {
@@ -1802,35 +3683,146 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 closeDoorsNow()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                     guard let self else { return }
-                    self.cameraNode.runAction(rotate) { [weak self] in
+                    // Eddie, Sept 15 (elevator camera control): only
+                    // play the automatic 180 spin if the player
+                    // hasn't already grabbed the camera during this
+                    // ride (see beginElevatorCameraDrag()). Runs
+                    // under its own dedicated action key so a LATER
+                    // beginElevatorCameraDrag() call -- the player
+                    // grabbing the screen mid-spin -- can cancel just
+                    // this one action without ever touching the dolly
+                    // above (long since finished; dolly and rotate
+                    // are strictly sequential, never concurrent).
+                    if !self.playerHasTakenElevatorCameraControl {
+                        self.cameraNode.runAction(rotate, forKey: Self.elevatorAutoSpinActionKey)
+                    }
+                    // Eddie, Sept 12, 2nd follow-up: "after the 180-
+                    // degree turn completes, I now sit looking at the
+                    // closed elevator doors for noticeably too long
+                    // before the doors begin opening... shorten that
+                    // dead pause substantially so the sequence feels
+                    // continuous." Was a flat 1.0s of pure dead time
+                    // (nothing on screen changes -- doors already
+                    // closed, camera already still) between the
+                    // pivot's own completion and floorTransitionRequested
+                    // even firing, on top of the curtain's own further
+                    // 0.2s + elevatorDoorOpeningDelay (0.08s) before it
+                    // starts sliding open (see ElevatorCurtainOverlay
+                    // in ContentView.swift) -- 1.28s of dead air in
+                    // total. 0.3s here is just enough of a beat to
+                    // read as an intentional pause ("we've arrived")
+                    // rather than a stall, cutting the dead time to
+                    // 0.58s total without touching that separate
+                    // curtain-side timing at all. Safe with respect
+                    // to the relit-flash fix just below: restoreShaftLighting()
+                    // is still deferred a further 0.1s AFTER
+                    // floorTransitionRequested fires (unchanged), so
+                    // their relative order -- curtain covers the
+                    // screen, THEN the old shaft relights -- holds no
+                    // matter how long this outer dwell is.
+                    //
+                    // Eddie, Sept 15 (elevator camera control): this
+                    // used to be scheduled from INSIDE rotate's own
+                    // SCNAction completion handler (a fixed 0.3s after
+                    // whatever duration that action actually took).
+                    // Combined into one plain wait of rotate.duration
+                    // + 0.3 instead, so arrival fires at the exact
+                    // same total offset from this point whether the
+                    // spin played in full, got cancelled mid-flight by
+                    // the player taking camera control, or never
+                    // started at all -- "player camera control must
+                    // not affect elevator timing."
+                    DispatchQueue.main.asyncAfter(deadline: .now() + rotate.duration + 0.3) { [weak self] in
                         guard let self else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                            guard let self else { return }
-                            navLog("elevator: ride done -- requesting floor transition")
-                            // Eddie, Sept 8: "i guess you need to
-                            // keep tweaking until you nail the same
-                            // exact lighting conditions?" Not
-                            // tweaking -- a real bug. onReachedEnd
-                            // (ContentView's HallwaySceneView) is
-                            // what takes the snapshot the curtain
-                            // shows, but restoreShaftLighting() was
-                            // running BEFORE it, resetting the
-                            // headlamp/ambient back to full
-                            // brightness first -- so the snapshot
-                            // was capturing the doors freshly
-                            // RE-LIT, not the dimmed look the
-                            // player had just been staring at. That
-                            // was the whole difference between the
-                            // 2 screenshots: a real, wrong pixel
-                            // capture, not a lighting mismatch to
-                            // chase down by hand. Snapshot first
-                            // (via onReachedEnd), THEN restore --
-                            // the scene's about to be torn down for
-                            // the next floor regardless, so nothing
-                            // else depends on the old order.
-                            self.floorTransitionRequested = FloorTransitionEvent()
+                        navLog("elevator: ride done -- requesting floor transition")
+                        // Eddie, Sept 8: "i guess you need to
+                        // keep tweaking until you nail the same
+                        // exact lighting conditions?" Not
+                        // tweaking -- a real bug. onReachedEnd
+                        // (ContentView's HallwaySceneView) is
+                        // what takes the snapshot the curtain
+                        // shows, but restoreShaftLighting() was
+                        // running BEFORE it, resetting the
+                        // headlamp/ambient back to full
+                        // brightness first -- so the snapshot
+                        // was capturing the doors freshly
+                        // RE-LIT, not the dimmed look the
+                        // player had just been staring at. That
+                        // was the whole difference between the
+                        // 2 screenshots: a real, wrong pixel
+                        // capture, not a lighting mismatch to
+                        // chase down by hand. Snapshot first
+                        // (via onReachedEnd), THEN restore.
+                        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
+                        navLog("[ARRIVALDIAG] playElevatorRide ARRIVAL t=\(String(format: "%.4f", Date().timeIntervalSince1970)) playerHasTakenElevatorCameraControl=\(self.playerHasTakenElevatorCameraControl) model.pos=\(self.cameraNode.position) model.euler=\(self.cameraNode.eulerAngles) pres.pos=\(self.cameraNode.presentation.position) pres.euler=\(self.cameraNode.presentation.eulerAngles) actionKeys=\(self.cameraNode.actionKeys) hasActions=\(self.cameraNode.hasActions)")
+                        self.floorTransitionRequested = FloorTransitionEvent()
+                        // Eddie, Sept 15 (elevator camera control --
+                        // manual exit): a passive ride still fires
+                        // onReachedEnd here exactly as it always did
+                        // -- unchanged. A ride the player took camera
+                        // control on instead fires
+                        // onElevatorArrivedControlled(yaw:) -- the
+                        // SAME doorSnapshot/floorTransitionRequested/
+                        // controller=nil/advanceToNextMaze() sequence
+                        // onReachedEnd itself performs (arrival sound,
+                        // Muzak-stop, curtain-open, and the real floor
+                        // advance all still happen right here, on
+                        // schedule, exactly like a passive ride), just
+                        // carrying the camera's current preserved yaw
+                        // along so the brand-new destination floor's
+                        // controller can restore it (see
+                        // presentArrivalInsideElevator(preservedYaw:) above) instead
+                        // of spawning at the normal default facing.
+                        if self.playerHasTakenElevatorCameraControl {
+                            self.onElevatorArrivedControlled?(Double(self.cameraNode.eulerAngles.y))
+                        } else {
                             self.onReachedEnd?()
-                            SoundEffects.stopElevatorMusic()
+                        }
+                        // Sept 14 (Eddie): elevator music now keeps
+                        // playing through this whole closed-door pause
+                        // instead of cutting off right here -- the
+                        // stop call moved to the moment the doors
+                        // actually start opening, in ContentView.swift's
+                        // ElevatorCurtainOverlay
+                        // (onChange(of: floorTransitionRequested)),
+                        // right before its
+                        // withAnimation { openFraction = 1 }.
+                        // Eddie, Sept 12: "before the doors begin
+                        // opening, the view changes/glitches" --
+                        // a real second bug in this same spot.
+                        // "the scene's about to be torn down for
+                        // the next floor regardless" (this
+                        // comment's own prior claim, just above)
+                        // turned out to be wrong: onReachedEnd
+                        // only mutates @Published state
+                        // (navBridge.controller = nil,
+                        // mazeStore.advanceToNextMaze(), which
+                        // flips mazeStore.currentMazeID) --
+                        // SwiftUI doesn't actually tear down and
+                        // rebuild HallwaySceneView (via its
+                        // .id(sceneVersion)) until ITS OWN next
+                        // render pass reacts to that, which is
+                        // not instant. This OLD scene's SCNView
+                        // keeps right on rendering, live, for at
+                        // least that long -- so restoreShaftLighting()
+                        // running immediately, right here,
+                        // snapped the STILL-VISIBLE old shaft
+                        // back to full brightness for a frame or
+                        // more before the curtain (a separate
+                        // SwiftUI overlay reacting to
+                        // navBridge.floorTransitionRequested,
+                        // also not necessarily composited the
+                        // instant it's set) actually covered it
+                        // -- a real, briefly-visible relit flash
+                        // of the OLD, about-to-be-replaced shaft,
+                        // not a camera/transform/poster glitch.
+                        // Deferring the restore past that window
+                        // (well under the curtain's own first
+                        // visible beat, so nothing about the
+                        // curtain/arrival timing changes) means
+                        // it only ever happens once the curtain
+                        // is already covering the screen.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             restoreShaftLighting()
                         }
                     }
@@ -1936,6 +3928,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             message = "FIRE EMERGENCY IN PROGRESS.\nPLEASE EXTINGUISH ALL FIRES BEFORE USING ELEVATOR.\n\(fireMissionProgress ?? "")"
         } else if !photoBoothExpressions.isEmpty {
             message = "EMPLOYEE PHOTO COMPLIANCE REQUIRED.\nPLEASE TAKE YOUR EMPLOYEE ID PHOTO BEFORE USING THE ELEVATOR.\n\(photoBoothMissionProgress ?? "")"
+        } else if !ticTacToeDirections.isEmpty {
+            message = "EMPLOYEE APTITUDE TEST REQUIRED.\nFIND THE TERMINAL AND PASS THE TEST BEFORE USING THE ELEVATOR."
+        } else if !shellGameDirections.isEmpty {
+            message = "FIND THE BALL BEFORE USING THE ELEVATOR.\nTHE SHELL GAME IS DOWN THE HALL."
+        } else if !rockPaperScissorsDirections.isEmpty {
+            message = "BEAT THE BUILDING AT ROCK PAPER SCISSORS\nBEFORE USING THE ELEVATOR."
+        } else if !higherLowerDirections.isEmpty {
+            message = "GET 3 CORRECT GUESSES IN A ROW\nBEFORE USING THE ELEVATOR."
+        } else if !fiveCardDrawDirections.isEmpty {
+            message = "MAKE A QUALIFYING POKER HAND\n(PAIR OR BETTER) BEFORE USING THE ELEVATOR."
+        } else if !simonDirections.isEmpty {
+            message = "PASS THE BUILDING'S MEMORY TEST\nBEFORE USING THE ELEVATOR."
+        } else if !hangmanDirections.isEmpty {
+            message = "SOLVE THE WORD\nBEFORE USING THE ELEVATOR."
+        } else if !connectFourDirections.isEmpty {
+            message = "WIN A GAME OF CONNECT FOUR\nBEFORE USING THE ELEVATOR."
+        } else if !checkersDirections.isEmpty {
+            message = "WIN A GAME OF CHECKERS\nBEFORE USING THE ELEVATOR."
+        } else if !woidleDirections.isEmpty {
+            message = "PASS THE WORD ASSESSMENT\nBEFORE USING THE ELEVATOR."
         } else if let kind = missionObjectKind {
             let remaining = objectKinds.filter { $0.value == kind && !collectedCoords.contains($0.key) }.count
             let carried = kind == .envelope ? carriedMail.count : collectedObjects.filter { $0 == kind }.count
@@ -2045,12 +4057,55 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         defer { lastTime = time }
         applyAspectCompensation(renderer)
-        guard !handheldMapVisible else { return }
+
+        // ==== TEMPORARY DIAGNOSTIC (Eddie, Sept 16) -- runs BEFORE the
+        // isAnimating early-return below on purpose: the whole point is
+        // to catch a camera move that happens even when this
+        // controller itself doesn't think anything is animating,
+        // whether that's a stray model-transform write from somewhere
+        // else in the codebase, or the PRESENTATION transform still
+        // catching up to an old target from an action/implicit
+        // animation this controller lost track of. See
+        // arrivalDiagnosticUntil's own declaration above for the full
+        // rationale. Remove this whole block once diagnosed.
+        if let until = arrivalDiagnosticUntil {
+            if Date().timeIntervalSince1970 > until {
+                arrivalDiagnosticUntil = nil
+                navLog("[ARRIVALDIAG] diagnostic window closed")
+            } else {
+                let modelPos = cameraNode.position
+                let modelEuler = cameraNode.eulerAngles
+                let presPos = cameraNode.presentation.position
+                let presEuler = cameraNode.presentation.eulerAngles
+                let modelPosMoved = arrivalDiagnosticLastModelPos.map { arrivalDiagnosticVec3Delta($0, modelPos) > 0.001 } ?? true
+                let modelEulerMoved = arrivalDiagnosticLastModelEuler.map { arrivalDiagnosticVec3Delta($0, modelEuler) > 0.001 } ?? true
+                let presPosMoved = arrivalDiagnosticLastPresPos.map { arrivalDiagnosticVec3Delta($0, presPos) > 0.001 } ?? true
+                let presEulerMoved = arrivalDiagnosticLastPresEuler.map { arrivalDiagnosticVec3Delta($0, presEuler) > 0.001 } ?? true
+                if modelPosMoved || modelEulerMoved || presPosMoved || presEulerMoved {
+                    navLog("[ARRIVALDIAG] t=\(String(format: "%.4f", Date().timeIntervalSince1970)) frameTime=\(String(format: "%.4f", time)) model.pos=\(modelPos) model.euler=\(modelEuler) pres.pos=\(presPos) pres.euler=\(presEuler) modelPosMoved=\(modelPosMoved) modelEulerMoved=\(modelEulerMoved) presPosMoved=\(presPosMoved) presEulerMoved=\(presEulerMoved) isAnimating=\(isAnimating) phase=\(phase) elevatorInUse=\(elevatorInUse) elevatorAwaitingEntryDirection=\(String(describing: elevatorAwaitingEntryDirection)) actionKeys=\(cameraNode.actionKeys) hasActions=\(cameraNode.hasActions)")
+                    arrivalDiagnosticLastModelPos = modelPos
+                    arrivalDiagnosticLastModelEuler = modelEuler
+                    arrivalDiagnosticLastPresPos = presPos
+                    arrivalDiagnosticLastPresEuler = presEuler
+                }
+            }
+        }
+        // ==== END TEMPORARY DIAGNOSTIC ====
+        // Round 7 (Eddie): the handheld map used to pause the whole
+        // scene by returning here -- "the map should behave like a
+        // physical map being held up while the player continues
+        // walking" removes that pause entirely. This callback (and the
+        // HERE-marker refresh inside applyArrival, further down) now
+        // keeps running exactly the same whether or not the map is
+        // visible.
         guard lastTime > 0 else { return }
         let dt = min(time - lastTime, 1.0 / 20.0)
         guard dt > 0, isAnimating else { return }
 
         switch phase {
+        case .awaitingTurnCommit, .scriptedWalkOut:
+            return
+
         case .pivot:
             segmentProgress += dt / pivotDuration
             let t = min(1.0, segmentProgress)
@@ -2064,6 +4119,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if standaloneRotation {
                 // A left/right D-pad tap — done the moment the pivot
                 // finishes, no translate phase follows.
+                // Stop render-side progression before queueing the main-thread
+                // completion. Otherwise another frame can fall through into
+                // .translate and replay the previous walk from segmentStart.
+                phase = .awaitingTurnCommit
                 standaloneRotation = false
                 let newFacing = pendingRotationTarget
                 DispatchQueue.main.async { [weak self] in
@@ -2071,7 +4130,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                         self?.facing = newFacing
                         self?.isAnimating = false
                         self?.updateExitSignHighlight()
-                        if let self { self.activatePhotoBooth(at: self.currentCell) }
+                        if let self {
+                            self.activatePhotoBooth(at: self.currentCell)
+                            self.activateTicTacToeTerminal(at: self.currentCell)
+                            self.activateShellGameTerminal(at: self.currentCell)
+                            self.activateRockPaperScissorsTerminal(at: self.currentCell)
+                            self.activateHigherLowerTerminal(at: self.currentCell)
+                            self.activateFiveCardDrawTerminal(at: self.currentCell)
+                            self.activateSimonTerminal(at: self.currentCell)
+                            self.activateHangmanTerminal(at: self.currentCell)
+                            self.activateConnectFourTerminal(at: self.currentCell)
+                            self.activateCheckersTerminal(at: self.currentCell)
+                            self.activateWoidleTerminal(at: self.currentCell)
+                            self.logNavSync("TURN COMPLETE")
+                        }
                         navLog("rotate complete -- now facing \(newFacing)")
                     }
                 }
@@ -2129,6 +4201,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                             self.applyArrival(cell: newCell, heading: newFacing)
                             self.markFloorMapViewedIfPresent(at: newCell)
                             self.markMissionSignViewedIfPresent(at: newCell)
+                            self.logNavSync("MID-RUN ARRIVAL")
                             navLog("arrived at \(newCell) facing \(newFacing) -- mid-run")
                         }
                     }
@@ -2145,6 +4218,17 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                             self.markFloorMapViewedIfPresent(at: newCell)
                             self.markMissionSignViewedIfPresent(at: newCell)
                             self.activatePhotoBooth(at: newCell)
+                            self.activateTicTacToeTerminal(at: newCell)
+                            self.activateShellGameTerminal(at: newCell)
+                            self.activateRockPaperScissorsTerminal(at: newCell)
+                            self.activateHigherLowerTerminal(at: newCell)
+                            self.activateFiveCardDrawTerminal(at: newCell)
+                            self.activateSimonTerminal(at: newCell)
+                            self.activateHangmanTerminal(at: newCell)
+                            self.activateConnectFourTerminal(at: newCell)
+                            self.activateCheckersTerminal(at: newCell)
+                            self.activateWoidleTerminal(at: newCell)
+                            self.logNavSync("WALK FINISHED — outcome=\(outcome)")
                             navLog("walk finished at \(newCell) facing \(newFacing), outcome=\(outcome)")
                             // Eddie, Sept 6: wanted a cue the moment the
                             // walk locks into an intersection (a real fork

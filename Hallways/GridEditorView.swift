@@ -113,20 +113,23 @@ struct GridEditorView: View {
 
     private let openColor = Color(red: 0.55, green: 0.62, blue: 0.7)
 
-    /// Fixed at 15 columns by 20 rows — Eddie's own ask, replacing the
-    /// old grid that silently grew (and shrank every cell) whenever you
-    /// painted near its current edge. Being a plain, non-@State
-    /// constant is what actually eliminates that whole class of bug: the
-    /// old code recomputed columns/rows from the maze's own painted
-    /// bounds on every mazeStore mutation, including mid-drag, so
-    /// painting a cell near the edge could resize the grid underneath
-    /// the very finger stroke that caused it — a still-unmoved finger
-    /// would suddenly land on a totally different cell once the grid
-    /// reflowed. With a fixed size there's nothing left to recompute:
-    /// cellSize below still adapts to whatever screen space is actually
-    /// available, but columns/rows themselves never move again.
+    /// Fixed at 15 columns by 15 rows -- Eddie's building-wide reset
+    /// (round 2): the master coordinate space is now a square 15x15,
+    /// down from the original 15x20. Being a plain, non-@State
+    /// constant is what actually eliminates a whole class of bug: the
+    /// old, pre-fixed-grid code recomputed columns/rows from the
+    /// maze's own painted bounds on every mazeStore mutation, including
+    /// mid-drag, so painting a cell near the edge could resize the grid
+    /// underneath the very finger stroke that caused it — a
+    /// still-unmoved finger would suddenly land on a totally different
+    /// cell once the grid reflowed. With a fixed size there's nothing
+    /// left to recompute: cellSize below still adapts to whatever
+    /// screen space is actually available, but columns/rows themselves
+    /// never move again. Valid coordinates are rows 0-14, cols 0-14 --
+    /// the building's fixed elevatorCoordinate (10,7) sits well inside
+    /// that on every floor.
     private let columns = 15
-    private let rows = 20
+    private let rows = 15
 
     // The first cell touched in a drag decides whether the whole stroke
     // paints or erases; every cell the finger crosses afterward follows
@@ -180,6 +183,12 @@ struct GridEditorView: View {
     @State private var pictureDirectionToPlace: Direction? = nil
     @State private var mirrorDirectionToPlace: Direction? = nil
     @State private var doorDirectionToPlace: Direction? = nil
+    /// Which wall a NEW Window Room door will be placed on next tap
+    /// -- same shape as doorDirectionToPlace (a whole extra
+    /// generalized Room abstraction wasn't warranted for one new
+    /// fixture, so this is its own small parallel tool, mirroring
+    /// the door tool's own UI/state pattern instead).
+    @State private var windowRoomDirectionToPlace: Direction? = nil
     @State private var mailRoomToPlace: Int? = nil
     /// Same idea once more, for placing a ceiling spotlight -- mutually
     /// exclusive with all 4 other placement modes and with wall
@@ -570,6 +579,11 @@ struct GridEditorView: View {
                mazeStore.floorMaps[coord] == nil, mazeStore.pictures[coord] == nil, mazeStore.mirrors[coord] == nil, mazeStore.destinations[coord] == nil {
                 Rectangle().stroke(Color.brown, lineWidth: 3)
             }
+        } else if let direction = windowRoomDirectionToPlace, mazeStore.isOpen(coord) {
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            if mazeStore.isOpen(neighbor), mazeStore.windowExteriorDirection(for: neighbor) != nil, coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate {
+                Rectangle().stroke(Color.blue, lineWidth: 3)
+            }
         }
     }
 
@@ -606,6 +620,10 @@ struct GridEditorView: View {
                     }
                 }
             }
+
+            #if DEBUG
+            devFloorJumpRow
+            #endif
 
             HStack(spacing: 12) {
                 Button {
@@ -666,7 +684,7 @@ struct GridEditorView: View {
                 // active.
                 Button {
                     objectKindToPlace = (objectKindToPlace == .trashCan) ? nil : .trashCan
-                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     // Was green -- Eddie, Sept 5, twice now: "extremely
                     // difficult to see" against this same
@@ -689,7 +707,7 @@ struct GridEditorView: View {
                 // model needed.
                 Button {
                     objectKindToPlace = (objectKindToPlace == .cash100) ? nil : .cash100
-                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: objectKindToPlace == .cash100 ? "dollarsign.circle.fill" : "dollarsign.circle")
                         .font(.system(size: 18, weight: .semibold))
@@ -705,7 +723,7 @@ struct GridEditorView: View {
                 // add there at all).
                 Button {
                     objectKindToPlace = (objectKindToPlace == .envelope) ? nil : .envelope
-                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: objectKindToPlace == .envelope ? "envelope.fill" : "envelope")
                         .font(.system(size: 18, weight: .semibold))
@@ -725,7 +743,7 @@ struct GridEditorView: View {
                 Button {
                     objectKindToPlace = objectKindToPlace == .paintBucket ? nil : .paintBucket
                     if objectKindToPlace != nil {
-                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil
+                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil
                         destinationKindToPlace = nil; exitDirectionToPlace = nil
                         floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
                     }
@@ -737,7 +755,7 @@ struct GridEditorView: View {
                 Button {
                     objectKindToPlace = objectKindToPlace == .key ? nil : .key
                     if objectKindToPlace != nil {
-                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil
+                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil
                         floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
                     }
                 } label: {
@@ -753,7 +771,7 @@ struct GridEditorView: View {
                     .foregroundStyle(.black.opacity(0.6))
                 Button {
                     destinationKindToPlace = (destinationKindToPlace == .trashCan) ? nil : .trashCan
-                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: destinationKindToPlace == .trashCan ? "arrow.down.square.fill" : "arrow.down.square")
                         .font(.system(size: 18, weight: .semibold))
@@ -763,7 +781,7 @@ struct GridEditorView: View {
                 }
                 Button {
                     destinationKindToPlace = (destinationKindToPlace == .envelope) ? nil : .envelope
-                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                 } label: {
                     Image(systemName: destinationKindToPlace == .envelope ? "envelope.fill" : "envelope")
                         .font(.system(size: 18, weight: .semibold))
@@ -786,7 +804,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         exitDirectionToPlace = (exitDirectionToPlace == direction) ? nil : direction
-                        if exitDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                        if exitDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "location.north.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -812,7 +830,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         floorMapDirectionToPlace = (floorMapDirectionToPlace == direction) ? nil : direction
-                        if floorMapDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                        if floorMapDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "map.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -841,7 +859,7 @@ struct GridEditorView: View {
                 ForEach(Direction.allCases, id: \.self) { direction in
                     Button {
                         pictureDirectionToPlace = (pictureDirectionToPlace == direction) ? nil : direction
-                        if pictureDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
+                        if pictureDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
                     } label: {
                         Image(systemName: "photo.fill")
                             .font(.system(size: 14, weight: .semibold))
@@ -878,7 +896,7 @@ struct GridEditorView: View {
                     Button {
                         doorDirectionToPlace = doorDirectionToPlace == direction ? nil : direction
                         if doorDirectionToPlace != nil {
-                            mirrorDirectionToPlace = nil
+                            mirrorDirectionToPlace = nil; windowRoomDirectionToPlace = nil
                             objectKindToPlace = nil; destinationKindToPlace = nil
                             exitDirectionToPlace = nil; floorMapDirectionToPlace = nil
                             pictureDirectionToPlace = nil; placingSpotlight = false
@@ -903,6 +921,39 @@ struct GridEditorView: View {
                 }
             }
 
+            // Window Room door placement (Eddie, Sept 15) -- same
+            // per-direction toggle-button shape as the Door row just
+            // above (deliberately: a Window Room door is the same
+            // physical fixture as a bathroom/office door, just
+            // leading somewhere different), reusing MazeStore's own
+            // perimeter validation (placeWindowRoom silently no-ops
+            // on an interior cell -- the preview outline above is
+            // what actually surfaces that rejection to the person
+            // painting, same as every other placement mode here).
+            HStack(spacing: 8) {
+                Text("Window Room:")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+                ForEach(Direction.allCases, id: \.self) { direction in
+                    Button {
+                        windowRoomDirectionToPlace = windowRoomDirectionToPlace == direction ? nil : direction
+                        if windowRoomDirectionToPlace != nil {
+                            mirrorDirectionToPlace = nil; doorDirectionToPlace = nil
+                            objectKindToPlace = nil; destinationKindToPlace = nil
+                            exitDirectionToPlace = nil; floorMapDirectionToPlace = nil
+                            pictureDirectionToPlace = nil; placingSpotlight = false
+                        }
+                    } label: {
+                        Image(systemName: "macwindow")
+                            .foregroundStyle(windowRoomDirectionToPlace == direction ? Color.blue : .black)
+                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                            .frame(width: 28, height: 28)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .accessibilityLabel("Place Window Room door facing \(direction.rawValue)")
+                }
+            }
+
             // Ceiling spotlight placement (Eddie, Sept 6). Plain on/off
             // toggle, same shape as the Chute row above -- no direction
             // to pick since this hangs dead-center in the ceiling, not
@@ -913,7 +964,7 @@ struct GridEditorView: View {
                     .foregroundStyle(.black.opacity(0.6))
                 Button {
                     placingSpotlight.toggle()
-                    if placingSpotlight { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil }
+                    if placingSpotlight { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil }
                 } label: {
                     Image(systemName: placingSpotlight ? "lightbulb.fill" : "lightbulb")
                         .font(.system(size: 18, weight: .semibold))
@@ -954,6 +1005,59 @@ struct GridEditorView: View {
         .background(Color(white: 0.93))
     }
 
+    #if DEBUG
+    /// Dev-only floor-jump tool (Eddie, Sept 13): jump straight to any
+    /// defined floor instead of tapping the chevrons N times or waiting
+    /// through a heavy floor's intro. Compiled out of Release builds --
+    /// this entire property (and its call site above) only exists in
+    /// #if DEBUG, so it can never reach production/App-Store users even
+    /// though GridEditorView itself is the same screen real players use
+    /// as their in-game map.
+    ///
+    /// The action is exactly two calls: mazeStore.devJump(to:), which
+    /// itself just wraps the canonical switchTo(id:) used by the chevrons
+    /// and advanceToNextMaze() (so this floor lands in precisely the same
+    /// fresh state a normal floor change would -- correct start/elevator
+    /// position via startCoordinate, brand-new TapNavigationController so
+    /// mission "Won" flags start false, all via ContentView's existing
+    /// .onChange(of: mazeStore.currentMazeID)/.id(sceneVersion) rebuild --
+    /// nothing new was built for any of that); then dismiss(), so the map
+    /// screen closes and the 3D scene is what's on screen right after.
+    private var devFloorJumpRow: some View {
+        HStack(spacing: 10) {
+            Menu {
+                ForEach(1...mazeStore.floorCount, id: \.self) { floor in
+                    Button("Floor \(floor)") {
+                        mazeStore.devJump(to: floor)
+                        dismiss()
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "hammer.fill")
+                    Text("Jump to Floor")
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.orange, in: RoundedRectangle(cornerRadius: 6))
+            }
+
+            Toggle(isOn: Binding(
+                get: { UserDefaults.standard.bool(forKey: MazeStore.devStartOnLastFloorKey) },
+                set: { UserDefaults.standard.set($0, forKey: MazeStore.devStartOnLastFloorKey) }
+            )) {
+                Text("Start on last dev floor")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+            }
+            .toggleStyle(.switch)
+        }
+        .padding(.horizontal, 4)
+    }
+    #endif
+
     private var mirrorControls: some View {
         HStack(spacing: 8) {
             Text("Mirror:")
@@ -963,7 +1067,7 @@ struct GridEditorView: View {
                 Button {
                     mirrorDirectionToPlace = mirrorDirectionToPlace == direction ? nil : direction
                     if mirrorDirectionToPlace != nil {
-                        doorDirectionToPlace = nil; pictureDirectionToPlace = nil
+                        doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; pictureDirectionToPlace = nil
                         objectKindToPlace = nil; destinationKindToPlace = nil
                         exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false
                     }
@@ -1043,6 +1147,17 @@ struct GridEditorView: View {
                 if mazeStore.roomDoors[coord]?.direction != direction { mazeStore.placeRoomDoor(direction, at: coord) }
             } else {
                 mazeStore.removeRoomDoor(at: coord)
+            }
+            return
+        }
+
+        if let direction = windowRoomDirectionToPlace {
+            guard mazeStore.isOpen(coord) else { return }
+            if isStart { paintMode = mazeStore.windowRooms[coord]?.direction != direction }
+            if paintMode {
+                if mazeStore.windowRooms[coord]?.direction != direction { mazeStore.placeWindowRoom(direction, at: coord) }
+            } else {
+                mazeStore.removeWindowRoom(at: coord)
             }
             return
         }
@@ -1288,10 +1403,10 @@ struct FloorMapOverlayView: View {
     var onDismiss: () -> Void
 
     private let openColor = Color(red: 0.55, green: 0.62, blue: 0.7)
-    // Same fixed 15x20 shape as GridEditorView -- this is a picture of
-    // the SAME maze, not an independently-sized view.
+    // Same fixed 15x15 shape as GridEditorView (round 2: was 15x20) --
+    // this is a picture of the SAME maze, not an independently-sized view.
     private let columns = 15
-    private let rows = 20
+    private let rows = 15
 
     var body: some View {
         GeometryReader { geo in

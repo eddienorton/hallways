@@ -26,8 +26,9 @@ enum SoundEffects {
             { walkingPlayer }, { elevatorArrivalPlayer }, { elevatorMusicPlayer },
             { cashPickupPlayer }, { intersectionLockPlayer }, { alarmPlayer },
             { trashPickup1Player }, { trashPickup2Player }, { trashChuteOpenPlayer }, { trashChuteClosePlayer },
-            { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer },
-            { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer }
+            { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer }, { extinguisherGrabPlayer },
+            { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer },
+            { ticTacToeXPlayer }, { ticTacToeOPlayer }, { ticTacToeWinPlayer }, { ticTacToeLosePlayer }
         ]
         for load in loaders {
             try? await Task.sleep(for: .milliseconds(10))
@@ -242,6 +243,21 @@ enum SoundEffects {
     private static let fireExtinguishedPlayer = loadPlayer("fire-extinguished.mp3")
     private static let cameraClickPlayer = loadPlayer("iphone-camera-click.mp3")
 
+    /// Eddie, Sept 12: "Grabbing the fire extinguisher currently has
+    /// no sound... Add it to the existing Audio resources using the
+    /// same safe/preloaded audio architecture already used by the
+    /// game." Distinct from extinguisherSprayPlayer above (that one
+    /// is the put-out-a-fire spray, playExtinguisherSpray()) -- this
+    /// is the one-shot pickup cue, called once from
+    /// collectExtinguisherIfPresent's completed-pickup branch only
+    /// (never from a mere tap/visibility check).
+    private static let extinguisherGrabPlayer = loadPlayer("extinguisher-grab.mp3")
+
+    @discardableResult
+    static func playExtinguisherGrab() -> Bool {
+        playMailSound(extinguisherGrabPlayer)
+    }
+
     static func playCameraClick() {
         _ = playMailSound(cameraClickPlayer)
     }
@@ -271,5 +287,33 @@ enum SoundEffects {
         player.currentTime = 0
         return player.play()
     }
+
+    /// Eddie, Sept 13: four sounds for Floor 7's Tic-Tac-Toe aptitude
+    /// test, supplied after confirming the game itself is "FUCKING
+    /// PERFECT" on-device -- wired to the four obvious events only,
+    /// reusing the same preloaded-AVAudioPlayer/playMailSound
+    /// architecture as everything else in this file rather than a
+    /// second audio system. Each is called from exactly one place in
+    /// TicTacToeOverlay.swift so it fires once per event:
+    /// ticTacToeXPlayer/ticTacToeOPlayer right after a mark lands on
+    /// the board, ticTacToeWinPlayer the instant the player completes
+    /// a winning line, ticTacToeLosePlayer on either the computer's
+    /// winning line or a full-board draw.
+    private static let ticTacToeXPlayer = loadPlayer("game-ttt-x.mp3")
+    private static let ticTacToeOPlayer = loadPlayer("game-ttt-o.mp3")
+    private static let ticTacToeWinPlayer = loadPlayer("game-ttt-win.mp3")
+    private static let ticTacToeLosePlayer = loadPlayer("game-ttt-lose.mp3")
+
+    @discardableResult
+    static func playTicTacToeX() -> Bool { playMailSound(ticTacToeXPlayer) }
+
+    @discardableResult
+    static func playTicTacToeO() -> Bool { playMailSound(ticTacToeOPlayer) }
+
+    @discardableResult
+    static func playTicTacToeWin() -> Bool { playMailSound(ticTacToeWinPlayer) }
+
+    @discardableResult
+    static func playTicTacToeLose() -> Bool { playMailSound(ticTacToeLosePlayer) }
 
 }

@@ -63,11 +63,50 @@ final class MirrorCamera {
     private var active = false
     private var requestedPermission = false
     private var worker: MirrorCaptureWorker?
+    private var rotationObserver: NSObjectProtocol?
+    private let expressionAnalyzer: MirrorGestureAnalyzer?
 
-    init(materials: [SCNMaterial]) { self.materials = materials }
+    init(materials: [SCNMaterial], comments: MirrorCommentState? = nil) {
+        self.materials = materials
+        expressionAnalyzer = comments.map { state in
+            MirrorGestureAnalyzer { [weak state] signals, time in state?.receive(signals, time: time) }
+        }
+        // Eddie, Sept 12, item 6: "View the mirror while the iPhone
+        // is in PORTRAIT. Rotate the phone to LANDSCAPE. My camera
+        // image/face in the mirror rotates incorrectly and appears
+        // SIDEWAYS." Root cause: updateOrientation() below was only
+        // ever called from setActive() -- i.e. when the mirror is
+        // freshly (re)activated (ContentView's makeUIView/updateUIView/
+        // dismantleUIView) -- nothing anywhere re-invoked it while the
+        // player is already looking into an already-active mirror and
+        // simply rotates the phone in place, so the capture
+        // connection's videoOrientation stayed stuck at whatever it
+        // was the moment the mirror last turned on.
+        //
+        // This observer is the missing trigger -- it doesn't read the
+        // device orientation itself (that stays updateOrientation()'s
+        // job, via the more reliable interfaceOrientation, which
+        // already ignores face-up/face-down and respects any rotation
+        // lock); it just re-runs that same existing check whenever ANY
+        // device-rotation notification fires, including spurious/flat
+        // ones (harmless -- MirrorCaptureWorker.setOrientation already
+        // no-ops unless the value actually changed). No other mirror/
+        // camera behavior changes: this only re-applies the same
+        // orientation logic that already ran at activation time.
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        rotationObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.active else { return }
+            self.updateOrientation()
+        }
+    }
+
+    func setExpressionAnalysisEnabled(_ enabled: Bool) { expressionAnalyzer?.setEnabled(enabled) }
 
     func setActive(_ enabled: Bool) {
         if !enabled {
+            expressionAnalyzer?.setEnabled(false)
             if active {
                 active = false
                 worker?.stop()
@@ -101,7 +140,7 @@ final class MirrorCamera {
 
     private func start() {
         if worker == nil {
-            worker = MirrorCaptureWorker { [weak self] image in
+            worker = MirrorCaptureWorker(analyzer: expressionAnalyzer) { [weak self] image in
                 guard let self, self.active else { return }
                 for material in self.materials { material.diffuse.contents = image }
             } unavailable: { [weak self] in
@@ -123,7 +162,11 @@ final class MirrorCamera {
         for material in materials { material.diffuse.contents = image }
     }
 
-    deinit { worker?.stop() }
+    deinit {
+        expressionAnalyzer?.setEnabled(false)
+        worker?.stop()
+        if let rotationObserver { NotificationCenter.default.removeObserver(rotationObserver) }
+    }
 }
 
 /// All session and frame state is confined to queue, including delegate callbacks.
@@ -137,9 +180,11 @@ nonisolated private final class MirrorCaptureWorker: NSObject, AVCaptureVideoDat
     private var orientationRawValue = 1
     private let onFrame: @MainActor @Sendable (UIImage) -> Void
     private let unavailable: @MainActor @Sendable () -> Void
+    private let analyzer: MirrorGestureAnalyzer?
 
-    init(onFrame: @escaping @MainActor @Sendable (UIImage) -> Void,
+    init(analyzer: MirrorGestureAnalyzer? = nil, onFrame: @escaping @MainActor @Sendable (UIImage) -> Void,
          unavailable: @escaping @MainActor @Sendable () -> Void) {
+        self.analyzer = analyzer
         self.onFrame = onFrame
         self.unavailable = unavailable
     }
@@ -211,5 +256,6 @@ nonisolated private final class MirrorCaptureWorker: NSObject, AVCaptureVideoDat
         guard let cgImage = context.createCGImage(image, from: crop) else { return }
         let preview = UIImage(cgImage: cgImage)
         DispatchQueue.main.async { self.onFrame(preview) }
+        analyzer?.submit(cgImage, time: time)
     }
 }

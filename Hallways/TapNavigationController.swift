@@ -3262,6 +3262,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         arrivalDiagnosticLastPresEuler = nil
     }
 
+    /// Visual-only response to the existing arrival-opening presentation.
+    /// The action belongs to the destination light, never the camera or doors.
+    func playArrivalLightWash(openingDuration: TimeInterval) {
+        guard arrivedElevatorDoorOpen,
+              let node = scene?.rootNode.childNode(withName: "elevatorExteriorWarmWash", recursively: true),
+              let light = node.light else { return }
+        func ramp(from start: CGFloat, to end: CGFloat, duration: TimeInterval) -> SCNAction {
+            SCNAction.customAction(duration: duration) { node, elapsed in
+                let t = min(1, elapsed / CGFloat(duration))
+                let eased = t * t * (3 - 2 * t)
+                node.light?.intensity = start + (end - start) * eased
+            }
+        }
+        node.runAction(.sequence([
+            ramp(from: light.intensity, to: 70, duration: openingDuration),
+            ramp(from: 70, to: 26, duration: 1.5),
+            .run { $0.light?.intensity = 26 }
+        ]), forKey: "elevatorArrivalLightWash")
+    }
+
     /// Guards playControlledArrivalDoorOpen() below against firing
     /// twice for the same arrival.
     private var controlledArrivalDoorsOpened = false

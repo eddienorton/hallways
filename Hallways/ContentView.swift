@@ -922,6 +922,7 @@ private struct ElevatorCurtainOverlay: View {
                         // apart, right after the existing arrival ding-dong
                         // above; that ding-dong's own timing is untouched.
                         SoundEffects.stopElevatorMusic()
+                        navBridge.controller?.playArrivalLightWash(openingDuration: navBridge.arrivalWasControlled ? 1.6 : 1.0)
                         // Eddie, Sept 16 (spatially-truthful controlled
                         // arrival): the instant this fade starts
                         // revealing a controlled arrival, tell the

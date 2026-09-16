@@ -1713,7 +1713,7 @@ enum HallwayScene {
         // opening instead of a full cell) fill in everything AROUND
         // the door, so the cubby becomes a small hole in a
         // normal-looking wall again, not the entire wall itself.
-        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil) {
+        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0) {
             let thick: CGFloat = 0.1
             let doorTop = doorCenterY + doorHeight / 2
             let doorBottom = doorCenterY - doorHeight / 2
@@ -1760,16 +1760,18 @@ enum HallwayScene {
 
             func strip(alongLength: CGFloat, verticalHeight: CGFloat, alongOffset: CGFloat, verticalCenter: CGFloat) {
                 guard verticalHeight > 0, alongLength > 0 else { return }
+                let isTop = verticalCenter > doorTop
+                let stripThickness = thick + (isTop ? topFrontExtension : 0)
                 let geo: SCNBox
                 let x: CGFloat
                 let z: CGFloat
                 switch direction {
                 case .north, .south:
-                    geo = SCNBox(width: alongLength, height: verticalHeight, length: thick, chamferRadius: 0)
+                    geo = SCNBox(width: alongLength, height: verticalHeight, length: stripThickness, chamferRadius: 0)
                     x = wallCenterX + alongOffset
                     z = wallCenterZ
                 case .east, .west:
-                    geo = SCNBox(width: thick, height: verticalHeight, length: alongLength, chamferRadius: 0)
+                    geo = SCNBox(width: stripThickness, height: verticalHeight, length: alongLength, chamferRadius: 0)
                     x = wallCenterX
                     z = wallCenterZ + alongOffset
                 }
@@ -1795,6 +1797,12 @@ enum HallwayScene {
                                            col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
                 node.name = WallPainter.nodeName(owner)
                 node.position = SCNVector3(Float(x), Float(verticalCenter), Float(z))
+                if isTop {
+                    // Cover the projecting cab-ceiling edge from the hallway;
+                    // keep the cab-facing wall surface and ceiling unchanged.
+                    node.position.x -= Float(direction.delta.col) * Float(topFrontExtension / 2)
+                    node.position.z -= Float(direction.delta.row) * Float(topFrontExtension / 2)
+                }
                 root.addChildNode(node)
             }
 
@@ -1948,19 +1956,12 @@ enum HallwayScene {
         let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial()
         let elevatorGeometry = ElevatorGeometry(cellSize: cellSize)
         let elevatorDoorWidth = elevatorGeometry.doorWidth
-        // Eddie, Sept 8, once the brick frame around the doorway
-        // was filled in (see addDoorFrame call below): "the
-        // elevator is even lower... instead of black the back wall
-        // is brick." The void-vs-brick bug is fixed, but that also
-        // made the real proportions plain to see -- 2.2 out of a
-        // 3.0 wallHeight left a 0.8 header, ~27% of the wall,
-        // noticeably more overhead brick than a real elevator door
-        // (which runs nearly to the ceiling). 2.6 leaves a 0.4
-        // header instead, ~13%, reading as a proper door frame
-        // rather than a low, small door in a tall wall.
-        let elevatorDoorHeight: CGFloat = 2.6 // bottom-aligned to the floor, real-door height
+        // Shorter exterior opening; the cab envelope and all its contents stay put.
+        let elevatorDoorHeight: CGFloat = 2.05
+        let elevatorCabHeight: CGFloat = 2.6
         let elevatorDoorThickness: CGFloat = 0.05
         let elevatorCenterY: CGFloat = elevatorDoorHeight / 2
+        let elevatorCabCenterY: CGFloat = elevatorCabHeight / 2
         let elevatorShaftDepth = elevatorGeometry.cabDepth
         let elevatorPanelThickness: CGFloat = 0.03
         let elevatorDoorInset: CGFloat = 0.08 // cabward of wall center; panels sit in the pocket
@@ -1976,7 +1977,7 @@ enum HallwayScene {
 
         func addElevatorDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, floorNumber: Int, totalFloors: Int) -> (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode) {
             let halfW = Float(elevatorGeometry.cabWidth / 2)
-            let halfH = Float(elevatorDoorHeight / 2)
+            let halfH = Float(elevatorCabHeight / 2)
             let depth = Float(elevatorShaftDepth)
             let thick = Float(elevatorPanelThickness)
 
@@ -1987,7 +1988,7 @@ enum HallwayScene {
             }
 
             let shaft = SCNNode()
-            shaft.position = SCNVector3(Float(wallCenterX), Float(elevatorCenterY), Float(wallCenterZ))
+            shaft.position = SCNVector3(Float(wallCenterX), Float(elevatorCabCenterY), Float(wallCenterZ))
             let back = panel(width: CGFloat(halfW * 2), height: CGFloat(halfH * 2), length: CGFloat(thick))
             back.position = SCNVector3(0, 0, -depth)
             let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
@@ -2007,17 +2008,17 @@ enum HallwayScene {
             // 0.055...0.105; this liner starts at 0.125, enclosing the pocket.
             let linerWidth = (elevatorGeometry.cabWidth - elevatorDoorWidth) / 2
             for sign: CGFloat in [-1, 1] {
-                let liner = panel(width: linerWidth, height: elevatorDoorHeight, length: 0.03)
+                let liner = panel(width: linerWidth, height: elevatorCabHeight, length: 0.03)
                 liner.name = "elevatorPocketLiner"
                 liner.position = SCNVector3(Float(sign * (elevatorDoorWidth + linerWidth) / 2),
                                            0, -Float(elevatorGeometry.shaftOffset + 0.14))
                 shaft.addChildNode(liner)
             }
-            let headerHeight = wallHeight - elevatorDoorHeight
+            let headerHeight = wallHeight - elevatorCabHeight
             if headerHeight > 0 {
                 let header = panel(width: elevatorGeometry.cabWidth, height: headerHeight, length: 0.03)
                 header.name = "elevatorPocketHeader"
-                header.position = SCNVector3(0, Float(elevatorDoorHeight / 2 + headerHeight / 2),
+                header.position = SCNVector3(0, Float(elevatorCabHeight / 2 + headerHeight / 2),
                                             -Float(elevatorGeometry.shaftOffset + 0.14))
                 shaft.addChildNode(header)
             }
@@ -2253,12 +2254,18 @@ enum HallwayScene {
             }
 
             let leftDoorGeo = SCNBox(width: elevatorPanelWidth, height: elevatorDoorHeight, length: elevatorDoorThickness, chamferRadius: 0.01)
-            leftDoorGeo.materials = [elevatorDoorMaterial]
+            let exteriorDoorMaterial = elevatorDoorMaterial.copy() as! SCNMaterial
+            exteriorDoorMaterial.metalness.contents = 0.35
+            exteriorDoorMaterial.roughness.contents = 0.48
+            // +Z faces the hallway after the existing mounting rotation.
+            // Preserve the original cab-facing material.
+            leftDoorGeo.materials = [exteriorDoorMaterial, elevatorDoorMaterial, elevatorDoorMaterial,
+                                     elevatorDoorMaterial, elevatorDoorMaterial, elevatorDoorMaterial]
             let leftDoor = SCNNode(geometry: leftDoorGeo)
             leftDoor.position = SCNVector3(Float(wallCenterX - elevatorSplitOffset * alongWallX), Float(elevatorCenterY), Float(wallCenterZ - elevatorSplitOffset * alongWallZ))
 
             let rightDoorGeo = SCNBox(width: elevatorPanelWidth, height: elevatorDoorHeight, length: elevatorDoorThickness, chamferRadius: 0.01)
-            rightDoorGeo.materials = [elevatorDoorMaterial]
+            rightDoorGeo.materials = leftDoorGeo.materials
             let rightDoor = SCNNode(geometry: rightDoorGeo)
             rightDoor.position = SCNVector3(Float(wallCenterX + elevatorSplitOffset * alongWallX), Float(elevatorCenterY), Float(wallCenterZ + elevatorSplitOffset * alongWallZ))
 
@@ -2304,7 +2311,127 @@ enum HallwayScene {
             // that look like they don't reach the ceiling. Same 4
             // brick-textured strips the destination doors and
             // floor maps already get, sized to this doorway.
-            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: elevatorDoorWidth, doorHeight: elevatorDoorHeight, doorCenterY: elevatorCenterY, interiorMaterial: elevatorShaftInteriorMaterial)
+            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: elevatorDoorWidth, doorHeight: elevatorDoorHeight, doorCenterY: elevatorCenterY, interiorMaterial: elevatorShaftInteriorMaterial, topFrontExtension: 0.04)
+
+            // Fixed hallway-facing frame, independent of moving doors and cab.
+            let entrance = SCNNode()
+            entrance.name = "elevatorExteriorFrame"
+            entrance.eulerAngles = shaft.eulerAngles
+            entrance.position = SCNVector3(Float(wallCenterX) - Float(direction.delta.col) * 0.10,
+                                          0, Float(wallCenterZ) - Float(direction.delta.row) * 0.10)
+            let darkMetal = SCNMaterial()
+            darkMetal.diffuse.contents = UIColor(white: 0.085, alpha: 1)
+            darkMetal.metalness.contents = 0.65
+            darkMetal.roughness.contents = 0.42
+            darkMetal.lightingModel = .physicallyBased
+            func exteriorBox(_ name: String, width: CGFloat, height: CGFloat, x: Float, y: Float) -> SCNNode {
+                let node = SCNNode(geometry: SCNBox(width: width, height: height, length: 0.04, chamferRadius: 0.003))
+                node.name = name
+                node.geometry?.materials = [darkMetal]
+                node.position = SCNVector3(x, y, 0)
+                entrance.addChildNode(node)
+                return node
+            }
+            for sign: Float in [-1, 1] {
+                _ = exteriorBox("elevatorExteriorJamb", width: 0.06, height: elevatorDoorHeight,
+                                x: sign * Float(elevatorDoorWidth / 2 + 0.03), y: Float(elevatorCenterY))
+            }
+            let header = exteriorBox("elevatorExteriorHeader", width: elevatorDoorWidth + 0.12, height: 0.24,
+                                     x: 0, y: Float(elevatorDoorHeight + 0.12))
+            let display = SCNNode(geometry: SCNPlane(width: 0.40, height: 0.18))
+            display.name = "elevatorExteriorDisplay"
+            display.geometry?.firstMaterial?.diffuse.contents = UIColor.black
+            display.geometry?.firstMaterial?.lightingModel = .constant
+            display.position.z = 0.023
+            header.addChildNode(display)
+            let digit = SCNText(string: String(floorNumber), extrusionDepth: 0)
+            digit.font = UIFont.monospacedDigitSystemFont(ofSize: 32, weight: .medium)
+            digit.flatness = 0.1
+            let amber = SCNMaterial()
+            amber.diffuse.contents = UIColor(red: 1, green: 0.63, blue: 0.12, alpha: 1)
+            amber.emission.contents = amber.diffuse.contents
+            amber.lightingModel = .constant
+            digit.materials = [amber]
+            let readout = SCNNode(geometry: digit)
+            readout.name = "elevatorExteriorFloorNumber"
+            let (lo, hi) = digit.boundingBox
+            let scale = min(0.13 / max(hi.y - lo.y, 1), 0.34 / max(hi.x - lo.x, 1))
+            readout.scale = SCNVector3(scale, scale, scale)
+            readout.position = SCNVector3(-(lo.x + hi.x) * scale / 2, -(lo.y + hi.y) * scale / 2, 0.001)
+            display.addChildNode(readout)
+            func arrow(up: Bool, size: CGFloat, material: SCNMaterial) -> SCNNode {
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: -size / 2, y: up ? -size / 2 : size / 2))
+                path.addLine(to: CGPoint(x: size / 2, y: up ? -size / 2 : size / 2))
+                path.addLine(to: CGPoint(x: 0, y: up ? size / 2 : -size / 2))
+                path.close()
+                let shape = SCNShape(path: path, extrusionDepth: 0.002)
+                shape.materials = [material]
+                return SCNNode(geometry: shape)
+            }
+            for (x, up) in [(Float(-0.34), true), (Float(0.34), false)] {
+                let indicator = arrow(up: up, size: 0.095, material: amber)
+                indicator.name = up ? "elevatorExteriorUpArrow" : "elevatorExteriorDownArrow"
+                indicator.position = SCNVector3(x, 0, 0.024)
+                header.addChildNode(indicator)
+            }
+            // Dark returns bridge the shallow trim to the pocket, without
+            // narrowing the opening or touching the moving panels behind it.
+            for sign: Float in [-1, 1] {
+                let reveal = SCNNode(geometry: SCNBox(width: 0.06, height: elevatorDoorHeight,
+                                                     length: 0.15, chamferRadius: 0))
+                reveal.name = "elevatorExteriorReveal"
+                reveal.geometry?.materials = [darkMetal]
+                reveal.position = SCNVector3(sign * Float(elevatorDoorWidth / 2 + 0.03), Float(elevatorCenterY), -0.075)
+                entrance.addChildNode(reveal)
+            }
+            let brass = exteriorDoorMaterial.copy() as! SCNMaterial
+            brass.roughness.contents = 0.38
+            let callPanel = exteriorBox("elevatorExteriorCallPanel", width: 0.20, height: 0.54,
+                                        x: Float(elevatorDoorWidth / 2 + 0.23), y: 1.28)
+            callPanel.geometry?.materials = [brass]
+            let inset = SCNNode(geometry: SCNBox(width: 0.18, height: 0.52, length: 0.012, chamferRadius: 0.003))
+            inset.geometry?.materials = [darkMetal]
+            inset.position.z = 0.025
+            callPanel.addChildNode(inset)
+            for (y, up) in [(Float(0.11), true), (Float(-0.11), false)] {
+                let rim = SCNNode(geometry: SCNCylinder(radius: 0.058, height: 0.014))
+                rim.geometry?.materials = [brass]
+                rim.eulerAngles.x = .pi / 2
+                rim.position = SCNVector3(0, y, 0.045)
+                callPanel.addChildNode(rim)
+                let button = SCNNode(geometry: SCNCylinder(radius: 0.046, height: 0.012))
+                button.name = up ? "elevatorExteriorUpButton" : "elevatorExteriorDownButton"
+                button.geometry?.materials = [darkMetal]
+                button.eulerAngles.x = .pi / 2
+                button.position = SCNVector3(0, y, 0.056)
+                callPanel.addChildNode(button)
+                let symbol = arrow(up: up, size: 0.044, material: brass)
+                symbol.position = SCNVector3(0, y, 0.065)
+                callPanel.addChildNode(symbol)
+            }
+            // This light affects only the entrance hardware, not hallway/cab.
+            let hardwareMask = 1 << 8
+            entrance.enumerateHierarchy { node, _ in node.categoryBitMask |= hardwareMask }
+            leftDoor.categoryBitMask |= hardwareMask
+            rightDoor.categoryBitMask |= hardwareMask
+            let wash = SCNNode()
+            wash.name = "elevatorExteriorWarmWash"
+            let light = SCNLight()
+            light.type = .spot
+            light.color = UIColor(red: 1, green: 0.82, blue: 0.58, alpha: 1)
+            light.intensity = 26
+            light.spotInnerAngle = 35
+            light.spotOuterAngle = 75
+            light.attenuationStartDistance = 0.25
+            light.attenuationEndDistance = 2.8
+            light.attenuationFalloffExponent = 2
+            light.categoryBitMask = hardwareMask
+            wash.light = light
+            wash.position = SCNVector3(0, 2.48, 0.65)
+            wash.eulerAngles.x = -0.75
+            entrance.addChildNode(wash)
+            root.addChildNode(entrance)
 
             // Eddie, Sept 7, after watching the ride play out: the old
             // console (a centered arrow + big digit + a full row of
@@ -2341,7 +2468,7 @@ enum HallwayScene {
                 let w = maxBound.x - minBound.x
                 let h = maxBound.y - minBound.y
                 node.pivot = SCNMatrix4MakeTranslation(minBound.x + w / 2, minBound.y + h / 2, 0)
-                let scale = h > 0 ? Float(elevatorDoorHeight * sizeFactor) / h : 1
+                let scale = h > 0 ? Float(elevatorCabHeight * sizeFactor) / h : 1
                 node.scale = SCNVector3(scale, scale, scale)
                 let billboard = SCNBillboardConstraint()
                 billboard.freeAxes = .Y

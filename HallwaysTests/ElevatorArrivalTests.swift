@@ -14,6 +14,35 @@ struct ElevatorArrivalTests {
             elevatorMountDirection: .north, floorNumber: 2)
     }
 
+    @Test func arrivalLightReturnsToRestWithoutMovingCamera() async {
+        let cell = GridCoordinate(row: 0, col: 0)
+        let scene = SCNScene(), camera = SCNNode(), wash = SCNNode()
+        wash.name = "elevatorExteriorWarmWash"
+        wash.light = SCNLight()
+        wash.light?.intensity = 26
+        scene.rootNode.addChildNode(wash)
+        scene.rootNode.addChildNode(camera)
+        let controller = TapNavigationController(cameraNode: camera, scene: scene, cells: [cell],
+            cellSize: 3.2, startCell: cell, startFacing: .south, endCell: cell,
+            elevatorLeftDoor: SCNNode(), elevatorRightDoor: SCNNode(), elevatorMountDirection: .north)
+        controller.playArrivalLightWash(openingDuration: 1.6)
+        #expect(!wash.hasActions) // Ordinary hallway/boarding is not an arrival.
+        controller.presentArrivalInsideElevator(preservedYaw: nil)
+        let parked = camera.position
+        controller.playArrivalLightWash(openingDuration: 1.6)
+        let renderer = SCNRenderer(device: nil, options: nil)
+        renderer.scene = scene
+        var peak: CGFloat = 0
+        for i in 0...160 {
+            renderer.update(atTime: 1 + Double(i) * 0.025)
+            await Task.yield()
+            peak = max(peak, wash.light?.intensity ?? 0)
+        }
+        #expect(peak > 69 && peak <= 70)
+        #expect(wash.light?.intensity == 26)
+        #expect(SCNVector3EqualToVector3(camera.position, parked))
+    }
+
     @Test func rideLookReleasePreservesCameraAndGeometry() {
         let controller = arrival()
         controller.openElevator() // Establish an active ride without running its timers.

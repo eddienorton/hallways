@@ -54,61 +54,20 @@ extension HallwayScene {
         }
         return root
     }
-
-    // Eddie, Sept 16 (Floor 1 lobby mirror aspect-fill correction): the
-    // lobby mirror is built from this same makeMirrorNode() surface plane,
-    // but its ROOT node is later given a non-uniform scale (mirror.scale.y
-    // = 2) to make it tall and narrow. That scale stretches whatever
-    // texture is already applied to the plane right along with the
-    // geometry -- the live camera feed was never wrong, the surface it was
-    // being painted onto was ancestor-scaled after the fact. This measures
-    // the surface's ACTUAL rendered (world-space) width/height ratio,
-    // walking through any ancestor scale/rotation rather than assuming the
-    // plane's own local 0.75x1.05 size, so MirrorCamera can crop the feed
-    // to match instead of letting SceneKit stretch it.
-    static func mirrorSurfaceAspect(of node: SCNNode) -> CGFloat {
-        guard let plane = node.geometry as? SCNPlane else { return 0.75 / 1.05 }
-        let halfWidth = Float(plane.width / 2)
-        let halfHeight = Float(plane.height / 2)
-        let left = node.convertPosition(SCNVector3(-halfWidth, 0, 0), to: nil)
-        let right = node.convertPosition(SCNVector3(halfWidth, 0, 0), to: nil)
-        let bottom = node.convertPosition(SCNVector3(0, -halfHeight, 0), to: nil)
-        let top = node.convertPosition(SCNVector3(0, halfHeight, 0), to: nil)
-        let worldWidth = mirrorWorldDistance(left, right)
-        let worldHeight = mirrorWorldDistance(bottom, top)
-        guard worldHeight > 0 else { return plane.width / plane.height }
-        return worldWidth / worldHeight
-    }
-}
-
-private func mirrorWorldDistance(_ a: SCNVector3, _ b: SCNVector3) -> CGFloat {
-    let dx = CGFloat(a.x - b.x)
-    let dy = CGFloat(a.y - b.y)
-    let dz = CGFloat(a.z - b.z)
-    return (dx * dx + dy * dy + dz * dz).squareRoot()
-}
-
-/// A mirror surface's material paired with its actual rendered aspect ratio
-/// (width / height in world space, from HallwayScene.mirrorSurfaceAspect),
-/// so MirrorCamera can center-crop the live feed to match that surface's
-/// true on-screen shape instead of letting SceneKit stretch it.
-struct MirrorSurfaceTarget {
-    let material: SCNMaterial
-    let aspect: CGFloat
 }
 
 /// Owns only a live preview: no microphone input, still capture, or recording output.
 @MainActor
 final class MirrorCamera {
-    private let surfaces: [MirrorSurfaceTarget]
+    private let materials: [SCNMaterial]
     private var active = false
     private var requestedPermission = false
     private var worker: MirrorCaptureWorker?
     private var rotationObserver: NSObjectProtocol?
     private let expressionAnalyzer: MirrorGestureAnalyzer?
 
-    init(surfaces: [MirrorSurfaceTarget], comments: MirrorCommentState? = nil) {
-        self.surfaces = surfaces
+    init(materials: [SCNMaterial], comments: MirrorCommentState? = nil) {
+        self.materials = materials
         expressionAnalyzer = comments.map { state in
             MirrorGestureAnalyzer { [weak state] signals, time in state?.receive(signals, time: time) }
         }
@@ -145,17 +104,6 @@ final class MirrorCamera {
 
     func setExpressionAnalysisEnabled(_ enabled: Bool) { expressionAnalyzer?.setEnabled(enabled) }
 
-    // Eddie, Sept 17: reverted to its original form -- routing the
-    // startup permission gate through here (an onPermissionResolved
-    // completion) raced updateUIView's own, unconditional
-    // setActive(cameraEnabled) call, which runs right after this one
-    // and (with cameraEnabled still false pre-tap) flipped `active`
-    // back off before the async requestAccess completion could see
-    // `guard self.active` succeed -- so the completion silently never
-    // fired. See MirrorCamera.resolveAuthorization below: a completely
-    // separate, non-reentrant permission check that doesn't touch
-    // `active`/`worker`/the placeholder text at all, so nothing can
-    // race it.
     func setActive(_ enabled: Bool) {
         if !enabled {
             expressionAnalyzer?.setEnabled(false)
@@ -190,33 +138,11 @@ final class MirrorCamera {
         }
     }
 
-    // Eddie, Sept 17 (startup permission gate v2): a standalone
-    // authorization check/request, deliberately independent of any
-    // MirrorCamera instance and its active/inactive toggle above --
-    // reuses the exact same AVCaptureDevice APIs setActive's
-    // .notDetermined branch already calls, just without touching
-    // `active`, `worker`, or the placeholder text, so updateUIView's
-    // repeated setActive(cameraEnabled) calls can never race it. Not a
-    // second camera-permission mechanism -- the only mechanism, called
-    // from two different moments.
-    static func resolveAuthorization(completion: @escaping () -> Void) {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { _ in
-                DispatchQueue.main.async { completion() }
-            }
-        default:
-            completion()
-        }
-    }
-
     private func start() {
         if worker == nil {
             worker = MirrorCaptureWorker(analyzer: expressionAnalyzer) { [weak self] image in
                 guard let self, self.active else { return }
-                for surface in self.surfaces {
-                    surface.material.diffuse.contents = Self.coverCropped(image, toAspect: surface.aspect)
-                }
+                for material in self.materials { material.diffuse.contents = image }
             } unavailable: { [weak self] in
                 guard let self, self.active else { return }
                 self.show("Live mirror\nrequires a front camera")
@@ -233,38 +159,7 @@ final class MirrorCamera {
 
     private func show(_ message: String) {
         let image = HallwayScene.mirrorPlaceholder(message)
-        for surface in surfaces {
-            surface.material.diffuse.contents = Self.coverCropped(image, toAspect: surface.aspect)
-        }
-    }
-
-    // Eddie, Sept 16 (Floor 1 lobby mirror aspect-fill correction):
-    // center-crop -- CSS `object-fit: cover` -- rather than stretch, so a
-    // surface whose rendered shape differs from the source image's aspect
-    // (e.g. a mirror made taller via ancestor node scale) gets a correctly
-    // proportioned image instead of a distorted one. A no-op (returns the
-    // same image) whenever the aspects already match to within a hundredth,
-    // which is true today for every ordinary, unscaled mirror -- this only
-    // does real cropping work for a surface like the Floor 1 lobby mirror.
-    private static func coverCropped(_ image: UIImage, toAspect aspect: CGFloat) -> UIImage {
-        guard aspect > 0, let cgImage = image.cgImage else { return image }
-        let sourceWidth = CGFloat(cgImage.width)
-        let sourceHeight = CGFloat(cgImage.height)
-        guard sourceWidth > 0, sourceHeight > 0 else { return image }
-        let sourceAspect = sourceWidth / sourceHeight
-        guard abs(sourceAspect - aspect) > 0.01 else { return image }
-        let width: CGFloat
-        let height: CGFloat
-        if aspect < sourceAspect {
-            height = sourceHeight
-            width = height * aspect
-        } else {
-            width = sourceWidth
-            height = width / aspect
-        }
-        let cropRect = CGRect(x: (sourceWidth - width) / 2, y: (sourceHeight - height) / 2, width: width, height: height)
-        guard let cropped = cgImage.cropping(to: cropRect) else { return image }
-        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
+        for material in materials { material.diffuse.contents = image }
     }
 
     deinit {

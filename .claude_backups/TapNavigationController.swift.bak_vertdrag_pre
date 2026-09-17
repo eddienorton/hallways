@@ -117,25 +117,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// point isAnimating takes over for that short settle animation).
     @Published private(set) var isDragRotating = false
     private var dragBaseYaw: Double = 0
-    /// Positional counterpart of isDragRotating/dragBaseYaw above --
-    /// see beginDragMove()'s own comment for the full design. Kept as
-    /// entirely separate state (never reuses isDragRotating/dragBaseYaw)
-    /// so the two drag modes can never be conflated, and so canGoForward/
-    /// canRotate can gate on either independently.
-    @Published private(set) var isDragMoving = false
-    private var dragMoveFacing: Direction = .north
-    private var dragBaseCell = GridCoordinate(row: 0, col: 0)
-    private var dragBasePosition = SCNVector3Zero
-    // How many consecutive open cells lie ahead/behind dragBaseCell
-    // along dragMoveFacing/.opposite -- computed ONCE at beginDragMove(),
-    // not just a single adjacent-cell boolean, so a single finger-down
-    // gesture can scrub continuously across multiple connected cells
-    // (Eddie: "drag forward 3.5 cells, reverse... one continuous
-    // positional scrub") instead of stopping dead at the first cell
-    // boundary. Real topology (walls/doors) is still the only thing
-    // that bounds these -- see openRunLength(from:direction:).
-    private var dragMoveMaxForwardCells = 0
-    private var dragMoveMaxBackwardCells = 0
 
     private let startCell: GridCoordinate
     private let startFacing: Direction
@@ -413,13 +394,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // IntroScreenView onEnter closure) -- requestReturnToOpening's
     // reset() reuses this SAME controller instance rather than
     // reconstructing it, so an init-only constant would stay stale at
-    // its original value for the rest of this instance's life.
-    //
-    // Eddie, Sept 17: the ceremonial walk is no longer one-time, so
-    // this no longer gates anything below (see isCeremonialEntrance) --
-    // still set from ContentView for the same reasons above, just no
-    // longer read for that purpose. Kept rather than removed; a
-    // separate future task covers real resume/persistence state.
+    // its original value for the rest of this instance's life. Seeded
+    // from ContentView's persisted @AppStorage flag at construction so
+    // a genuinely rebuilt controller (grid edits, app relaunch after
+    // completion) still starts correct.
     var hasCompletedInitialEntrance: Bool
     /// Each door panel's shut position, captured once at init -- same
     /// idea as destinationClosedPositions above, so reset() can snap
@@ -564,31 +542,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         return nil
     }
 
-    /// How many consecutive cells, starting at `from` and walking one
-    /// step at a time in `direction`, are legally open -- the exact
-    /// same per-step legality openDirections checks (maze-cell
-    /// membership plus bathroom/window-room door state), just
-    /// generalized to an arbitrary starting cell and repeated in a
-    /// straight line instead of stopping after one step. Used by
-    /// beginDragMove() to compute the full scrub range up front, so a
-    /// vertical drag can move continuously across several open cells
-    /// without inventing a second legality/collision representation.
-    /// `limit` is only a sanity bound against a pathological maze; no
-    /// real hallway is anywhere near that long in one straight run.
-    private func openRunLength(from: GridCoordinate, direction: Direction, limit: Int = 64) -> Int {
-        var count = 0
-        var cell = from
-        while count < limit {
-            let n = GridCoordinate(row: cell.row + direction.delta.row, col: cell.col + direction.delta.col)
-            guard cells.contains(n) else { break }
-            if let anchor = bathroomDoorAnchor(from: cell, direction: direction), !openBathroomDoors.contains(anchor) { break }
-            if let anchor = windowRoomDoorAnchor(from: cell, direction: direction), !openWindowRoomDoors.contains(anchor) { break }
-            count += 1
-            cell = n
-        }
-        return count
-    }
-
     /// A true dead end — only one way in or out of this cell at all —
     /// vs. just "can't go forward from here right now" (which can also
     /// happen mid-turn at an intersection you haven't rotated through
@@ -614,8 +567,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // elevator all day... feel free"). !elevatorInUse is the real
     // remaining concern -- don't let the player walk off mid-slide
     // while the doors are actually open/animating.
-    var canGoForward: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && forwardConnectionIsOpen }
-    var canRotate: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
+    var canGoForward: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && forwardConnectionIsOpen }
+    var canRotate: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
 
     private enum SegmentPhase {
         case pivot      // rotating in place, position unchanged
@@ -631,14 +584,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private var segmentStart = SCNVector3Zero
     private var segmentTarget = SCNVector3Zero
     private var segmentProgress: Double = 0
-    // One-shot .translate duration multiplier -- 1.0 for every normal
-    // glide (advance()'s walks, stepBackward()). endDragMove() sets
-    // this to 0.6 right before starting its release/settle glide (Eddie,
-    // Sept 17: "speed up ONLY that final vertical-drag release snap...
-    // about 60% of its current duration"), and the .translate case's
-    // own final-step completion resets it back to 1.0 immediately after,
-    // so the speedup can never leak into a later, unrelated glide.
-    private var translateDurationScale: Double = 1.0
     private var pivotStartYaw: Double = 0
     private var pivotTargetYaw: Double = 0
     private let pivotDuration: Double = 0.18
@@ -763,7 +708,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // A two-finger interaction may open the map during a drag. Preserve
         // the camera position and settle back to the committed heading on close.
         if isDragRotating { endDragRotate(fraction: 0) }
-        if isDragMoving { endDragMove(fraction: 0) }
         // Sept 14 (Eddie, round 2): the slide-up transition on
         // HandheldMapOverlay's card wasn't actually animating on-device --
         // a transition on a conditional view only animates if the state
@@ -1937,201 +1881,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         isAnimating = true
     }
 
-    /// Silently cancels an in-flight horizontal drag-rotate that a
-    /// vertical drag is about to take over, WITHOUT going through
-    /// endDragRotate()'s normal commit/pivot-settle path. That matters
-    /// because endDragRotate() always sets isAnimating = true (even
-    /// when nothing commits, so it can glide the last bit of visual yaw
-    /// back to a resting facing) -- exactly right for a real finger-up
-    /// release, but wrong for an axis handoff mid-gesture: canRotate
-    /// requires !isAnimating, so beginDragMove() called right after
-    /// endDragRotate() would refuse to start every single time,
-    /// deterministically, before the pivot-settle animation even had a
-    /// chance to finish. (This is the bug behind "vertical drag does
-    /// nothing" -- see handlePanRotate's axis-lock branch in
-    /// ContentView.swift, which now calls this instead of
-    /// endDragRotate(fraction: 0).) Axis-lock fires this early in a
-    /// gesture, so the drag has barely nudged the yaw at all -- there's
-    /// nothing worth animating back, just snap it.
-    func cancelDragRotateForAxisHandoff() {
-        guard isDragRotating else { return }
-        isDragRotating = false
-        cameraNode.eulerAngles = SCNVector3(0, Float(dragBaseYaw), 0)
-        navLog("cancelDragRotateForAxisHandoff() -- yaw snapped back to dragBaseYaw for vertical handoff")
-    }
-
-    /// Positional counterpart of beginDragRotate() -- a vertical drag
-    /// scrubs the player's POSITION along whatever direction they're
-    /// currently facing, instead of scrubbing their orientation. Facing
-    /// itself is frozen for the whole gesture (captured here, never
-    /// re-read from `facing` again until the drag ends) so the player
-    /// can never be spun by a vertical drag, matching Eddie's spec:
-    /// "Preserve the player's facing direction throughout vertical
-    /// movement and snapping."
-    ///
-    /// The full scrub range (how many open cells lie ahead/behind) is
-    /// computed ONCE here via openRunLength -- the exact same
-    /// maze-cell/door topology openDirections uses, just walked
-    /// repeatedly in a straight line -- rather than only checking the
-    /// single adjacent cell. That's what lets a single finger-down drag
-    /// scrub continuously across several connected cells: Eddie, Sept
-    /// 17 ("drag forward 3.5 cells, reverse while still holding, drag
-    /// backward 2 cells -- that should be one continuous positional
-    /// scrub"). Refuses under the same conditions as beginDragRotate
-    /// (canRotate), plus elevatorAwaitingEntryDirection: that state is a
-    /// narrow, controller-owned camera offset mid elevator-entry-walk,
-    /// not a real grid cell, so dragging through it isn't meaningful --
-    /// rotation is unaffected by it (canRotate alone), but a manual
-    /// position drag is refused entirely until it clears.
-    func beginDragMove() {
-        if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
-        if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
-        if activeShellGameTerminal != nil { cancelShellGameTerminal() }
-        if activeRockPaperScissorsTerminal != nil { cancelRockPaperScissorsTerminal() }
-        if activeHigherLowerTerminal != nil { cancelHigherLowerTerminal() }
-        if activeFiveCardDrawTerminal != nil { cancelFiveCardDrawTerminal() }
-        if activeSimonTerminal != nil { cancelSimonTerminal() }
-        if activeHangmanTerminal != nil { cancelHangmanTerminal() }
-        if activeConnectFourTerminal != nil { cancelConnectFourTerminal() }
-        if activeCheckersTerminal != nil { cancelCheckersTerminal() }
-        if activeWoidleTerminal != nil { cancelWoidleTerminal() }
-        guard canRotate, elevatorAwaitingEntryDirection == nil else {
-            navLog("beginDragMove() ignored -- canRotate=\(canRotate) elevatorAwaitingEntryDirection=\(String(describing: elevatorAwaitingEntryDirection))")
-            return
-        }
-        dragMoveFacing = facing
-        dragBaseCell = currentCell
-        dragBasePosition = cameraNode.position
-        dragMoveMaxForwardCells = openRunLength(from: dragBaseCell, direction: dragMoveFacing)
-        dragMoveMaxBackwardCells = openRunLength(from: dragBaseCell, direction: dragMoveFacing.opposite)
-        isDragMoving = true
-        logNavSync("DRAG MOVE BEGIN")
-        navLog("beginDragMove() started facing=\(dragMoveFacing) maxForwardCells=\(dragMoveMaxForwardCells) maxBackwardCells=\(dragMoveMaxBackwardCells)")
-    }
-
-    /// Call continuously while the finger moves. `fraction` is how far
-    /// through one full cell the drag currently represents -- positive
-    /// = forward (the direction dragMoveFacing points), matching
-    /// Eddie's spec ("drag DOWN = move FORWARD"), and NOT clamped to
-    /// +/-1 the way it was originally: it's clamped to
-    /// -dragMoveMaxBackwardCells...dragMoveMaxForwardCells, so the
-    /// camera can glide continuously across every open cell in the
-    /// pre-computed run, only stopping at a genuine wall/door/dead-end
-    /// boundary -- never at an ordinary cell boundary in between. This
-    /// is deliberately NOT a sequence of discrete one-cell animations:
-    /// it's one direct, continuous position write per frame, exactly
-    /// like updateDragRotate's continuous yaw write, just summed over
-    /// however many cells of travel the drag currently represents.
-    func updateDragMove(fraction: Double) {
-        guard isDragMoving else { return }
-        let maxForward = Double(dragMoveMaxForwardCells)
-        let maxBackward = Double(dragMoveMaxBackwardCells)
-        let clamped = max(-maxBackward, min(maxForward, fraction))
-        let delta = dragMoveFacing.delta
-        // Same row/col -> world X/Z convention worldPosition(for:) uses
-        // (col -> X, row -> Z) -- reused directly rather than
-        // reinventing the axis mapping.
-        cameraNode.position = SCNVector3(
-            dragBasePosition.x + Float(clamped) * Float(delta.col) * Float(cellSize),
-            dragBasePosition.y,
-            dragBasePosition.z + Float(clamped) * Float(delta.row) * Float(cellSize)
-        )
-    }
-
-    // Named separately from turnCommitFraction/turnFlickProjectionSeconds/
-    // turnMinimumSignFraction above so positional-drag feel can be tuned
-    // independently of turn feel, even though "same interaction
-    // philosophy" (Eddie's spec) means they start out at matching values.
-    private let moveCommitFraction: Double = 0.30
-    private let moveFlickProjectionSeconds: Double = 0.12
-    private let moveMinimumSignFraction: Double = 0.03
-
-    /// Call when the finger lifts. Same commit/projection logic as
-    /// endDragRotate (a short, fast flick can commit further than the
-    /// finger physically dragged), generalized from "one cell or none"
-    /// to "however many whole cells the (position + flick-projected)
-    /// distance represents, plus one more if the leftover fraction past
-    /// the last whole cell clears moveCommitFraction" -- the same
-    /// 30%-of-a-cell threshold as before, now applied only to that
-    /// final partial cell, since every FULLY crossed cell during the
-    /// drag itself is already unambiguous. Always clamped to the same
-    /// -dragMoveMaxBackwardCells...dragMoveMaxForwardCells range
-    /// beginDragMove() computed, so release can never land somewhere
-    /// openRunLength didn't already verify was open -- the player is
-    /// never left between legal positions, and never ends up past a
-    /// real wall/door boundary.
-    ///
-    /// Reuses the exact same .translate glide advance()/stepBackward()
-    /// already use (animationSteps/segmentStart/segmentTarget/phase) --
-    /// just with a full multi-cell animationSteps chain when the
-    /// release lands more than one cell away, instead of always a
-    /// single step -- so arrival handling (currentCell/facing update,
-    /// floor map/mission sign viewing per intermediate cell, terminal
-    /// activation at the final cell) is the real, single navigation
-    /// completion path already used everywhere else, not a second one
-    /// invented for drags. Note: unlike a normal advance() run, this
-    /// does not truncate early on an uncollected object/unopened chute/
-    /// unviewed floor map the way walkToNextDecision-driven walks do --
-    /// same scope as stepBackward(), which doesn't either.
-    func endDragMove(fraction: Double, velocityFraction: Double = 0) {
-        guard isDragMoving else { return }
-        isDragMoving = false
-        let maxForward = Double(dragMoveMaxForwardCells)
-        let maxBackward = Double(dragMoveMaxBackwardCells)
-        let clamped = max(-maxBackward, min(maxForward, fraction))
-        let projected = clamped + velocityFraction * moveFlickProjectionSeconds
-        let projectedClamped = max(-maxBackward, min(maxForward, projected))
-
-        let wholeCells = Int(projectedClamped.rounded(.towardZero))
-        let remainder = abs(projectedClamped) - Double(abs(wholeCells))
-        var steps = wholeCells
-        if remainder >= moveCommitFraction {
-            steps += projectedClamped >= 0 ? 1 : -1
-        }
-        steps = max(-dragMoveMaxBackwardCells, min(dragMoveMaxForwardCells, steps))
-
-        var targetCell = dragBaseCell
-        var steppedPath: [NavigationStep] = []
-        if steps != 0 {
-            let stepDirection = steps > 0 ? dragMoveFacing : dragMoveFacing.opposite
-            var cell = dragBaseCell
-            for _ in 0..<abs(steps) {
-                cell = GridCoordinate(row: cell.row + stepDirection.delta.row, col: cell.col + stepDirection.delta.col)
-                steppedPath.append(NavigationStep(cell: cell, heading: dragMoveFacing))
-            }
-            targetCell = cell
-        }
-
-        let outcome: NavigationOutcome
-        if targetCell == endCell {
-            outcome = .reachedEnd
-        } else if steps > 0 {
-            outcome = .steppedForward
-        } else {
-            // steps < 0, or steps == 0 (settled back to dragBaseCell) --
-            // steppedBackward already covers "not a real decision
-            // point" for the zero-movement case, same as it always has.
-            outcome = .steppedBackward
-        }
-        logNavSync("DRAG MOVE RELEASE — target=\(targetCell) steps=\(steps)")
-        navLog("endDragMove(fraction: \(String(format: "%.2f", fraction)), velocityFraction: \(String(format: "%.2f", velocityFraction)), projected: \(String(format: "%.2f", projectedClamped))) steps=\(steps) target=\(targetCell) outcome=\(outcome)")
-
-        animationSteps = steppedPath.isEmpty ? [NavigationStep(cell: dragBaseCell, heading: dragMoveFacing)] : steppedPath
-        animationIndex = 0
-        pendingOutcome = outcome
-        segmentStart = cameraNode.position
-        segmentTarget = worldPosition(for: targetCell)
-        segmentProgress = 0
-        // Eddie, Sept 17: speed up ONLY this release/settle glide, to
-        // about 60% of its normal duration -- see translateDurationScale's
-        // own comment. Reset back to 1.0 automatically once this glide's
-        // final step completes, so no other .translate glide is affected.
-        translateDurationScale = 0.6
-        phase = .translate
-        isAnimating = true
-        if targetCell != dragBaseCell { SoundEffects.startWalking() }
-    }
-
     /// One tick of held walking. Use the existing pivot/glide animations;
     /// never queue a walk after the pivot, so releasing cancels continuation.
     private var walkingHeld = false
@@ -2270,18 +2019,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // identifies the ONE call that performs the automatic
         // front-door-to-elevator opening walk, not "any northbound
         // walk before the flag flips." ContentView marks that single
-        // call with source: "CEREMONIAL".
-        //
-        // Eddie, Sept 17: dropped the "&& !hasCompletedInitialEntrance"
-        // belt-and-suspenders clause that used to sit here -- the
-        // ceremonial walk (and its suppression of the picture/mirror
-        // stops below) is no longer one-time, and that clause would
-        // now silently defeat suppression on every entrance after the
-        // first, since hasCompletedInitialEntrance is set true right
-        // after that first walk and never reset. source == "CEREMONIAL"
-        // alone already identifies the single call this needs to catch
-        // (see the comment above), so it's the whole condition now.
-        let isCeremonialEntrance = source == "CEREMONIAL"
+        // call with source: "CEREMONIAL"; the hasCompletedInitialEntrance
+        // check is kept alongside it purely as a belt-and-suspenders
+        // guard so suppression can never re-fire once the flag is true,
+        // even if something else ever passed this source string again.
+        let isCeremonialEntrance = source == "CEREMONIAL" && !hasCompletedInitialEntrance
         var runSteps = steps
         var runOutcome = outcome
         if let stopIndex = steps.firstIndex(where: { step in
@@ -4293,75 +4035,27 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         } else {
             return
         }
-        // Sept 17 (Eddie): the "ELEVATOR LOCKED" collection-mission
-        // status is its own compact elevator-status-panel treatment --
-        // dark charcoal field, thin red accent border + small red
-        // status dot instead of the big maroon billboard, "LOCKED" as
-        // the primary line in the elevator's own amber, and the
-        // collect/drop-off counts as smaller secondary lines below.
-        // Every other message this same function can show (fire,
-        // photo compliance, the terminal games, etc.) is untouched --
-        // it still renders through the original large maroon panel
-        // below, unchanged.
-        let isElevatorLocked = message.hasPrefix("ELEVATOR LOCKED")
-        let size = isElevatorLocked ? CGSize(width: 640, height: 210) : CGSize(width: 900, height: 360)
+        let size = CGSize(width: 900, height: 360)
         let texture = UIGraphicsImageRenderer(size: size).image { context in
-            if isElevatorLocked {
-                UIColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1).setFill()
-                context.fill(CGRect(origin: .zero, size: size))
-                UIColor.systemRed.setStroke()
-                let border = UIBezierPath(rect: CGRect(x: 3, y: 3, width: size.width - 6, height: size.height - 6))
-                border.lineWidth = 3
-                border.stroke()
-
-                let lines = message.components(separatedBy: "\n")
-                let headline = lines.first == "ELEVATOR LOCKED" ? "LOCKED" : (lines.first ?? "LOCKED")
-                let amber = UIColor(red: 1, green: 0.63, blue: 0.12, alpha: 1)
-                let headlineFont = UIFont.boldSystemFont(ofSize: 58)
-                let headlineAttrs: [NSAttributedString.Key: Any] = [.font: headlineFont, .foregroundColor: amber]
-                let headlineSize = (headline as NSString).size(withAttributes: headlineAttrs)
-                let dotDiameter: CGFloat = 12
-                let dotSpacing: CGFloat = 10
-                let headlineGroupWidth = dotDiameter + dotSpacing + headlineSize.width
-                let headlineY: CGFloat = 22
-                let dotRect = CGRect(x: (size.width - headlineGroupWidth) / 2,
-                                      y: headlineY + (headlineSize.height - dotDiameter) / 2,
-                                      width: dotDiameter, height: dotDiameter)
-                UIColor.systemRed.setFill()
-                UIBezierPath(ovalIn: dotRect).fill()
-                (headline as NSString).draw(at: CGPoint(x: dotRect.maxX + dotSpacing, y: headlineY), withAttributes: headlineAttrs)
-
-                let detailParagraph = NSMutableParagraphStyle()
-                detailParagraph.alignment = .center
-                detailParagraph.lineSpacing = 6
-                let detailText = lines.dropFirst().joined(separator: "\n")
-                let detailTop = headlineY + headlineSize.height + 10
-                (detailText as NSString).draw(in: CGRect(x: 16, y: detailTop, width: size.width - 32, height: size.height - detailTop - 12), withAttributes: [
-                    .font: UIFont.systemFont(ofSize: 34, weight: .semibold),
-                    .foregroundColor: UIColor.white,
-                    .paragraphStyle: detailParagraph
-                ])
-            } else {
-                UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()
-                context.fill(CGRect(origin: .zero, size: size))
-                UIColor.systemRed.setStroke()
-                let border = UIBezierPath(rect: CGRect(x: 8, y: 8, width: 884, height: 344))
-                border.lineWidth = 12
-                border.stroke()
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.alignment = .center
-                paragraph.lineSpacing = 14
-                (message as NSString).draw(in: CGRect(x: 28, y: 42, width: 844, height: 290), withAttributes: [
-                    .font: UIFont.boldSystemFont(ofSize: 56),
-                    .foregroundColor: UIColor.white,
-                    .paragraphStyle: paragraph
-                ])
-            }
+            UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemRed.setStroke()
+            let border = UIBezierPath(rect: CGRect(x: 8, y: 8, width: 884, height: 344))
+            border.lineWidth = 12
+            border.stroke()
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineSpacing = 14
+            (message as NSString).draw(in: CGRect(x: 28, y: 42, width: 844, height: 290), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 56),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph
+            ])
         }
         let material = SCNMaterial()
         material.diffuse.contents = texture
         material.lightingModel = .constant
-        let plane = isElevatorLocked ? SCNPlane(width: 0.78, height: 0.26) : SCNPlane(width: 1.35, height: 0.54)
+        let plane = SCNPlane(width: 1.35, height: 0.54)
         plane.materials = [material]
         let notice = SCNNode(geometry: plane)
         notice.position = SCNVector3((left.position.x + right.position.x) / 2 - Float(direction.delta.col) * 0.1,
@@ -4544,7 +4238,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // slows down at the true start/end of the run instead of
             // resetting to a standstill at every cell boundary along
             // the way. Eddie: "smooth the whole way," Sept 5.
-            let segmentDuration = Double(cellSize) * Double(animationSteps.count) / travelSpeed * translateDurationScale
+            let segmentDuration = Double(cellSize) * Double(animationSteps.count) / travelSpeed
             let targetPace = walkingHeld && heldDistance >= 2 * Double(cellSize) ? 1.6 : 1.0
             movementPace += (targetPace - movementPace) * (1 - exp(-dt / 0.3))
             SoundEffects.setWalkingPace(Float(movementPace))
@@ -4595,7 +4289,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                         self?.applyNavigationUpdate { [weak self] in
                             guard let self else { return }
                             self.isAnimating = false
-                            self.translateDurationScale = 1.0
                             SoundEffects.stopWalking()
                             // facing before currentCell -- see round-9 note
                             // above setExitSignNeon's relative-label logic.

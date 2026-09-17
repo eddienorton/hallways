@@ -4293,75 +4293,27 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         } else {
             return
         }
-        // Sept 17 (Eddie): the "ELEVATOR LOCKED" collection-mission
-        // status is its own compact elevator-status-panel treatment --
-        // dark charcoal field, thin red accent border + small red
-        // status dot instead of the big maroon billboard, "LOCKED" as
-        // the primary line in the elevator's own amber, and the
-        // collect/drop-off counts as smaller secondary lines below.
-        // Every other message this same function can show (fire,
-        // photo compliance, the terminal games, etc.) is untouched --
-        // it still renders through the original large maroon panel
-        // below, unchanged.
-        let isElevatorLocked = message.hasPrefix("ELEVATOR LOCKED")
-        let size = isElevatorLocked ? CGSize(width: 640, height: 210) : CGSize(width: 900, height: 360)
+        let size = CGSize(width: 900, height: 360)
         let texture = UIGraphicsImageRenderer(size: size).image { context in
-            if isElevatorLocked {
-                UIColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1).setFill()
-                context.fill(CGRect(origin: .zero, size: size))
-                UIColor.systemRed.setStroke()
-                let border = UIBezierPath(rect: CGRect(x: 3, y: 3, width: size.width - 6, height: size.height - 6))
-                border.lineWidth = 3
-                border.stroke()
-
-                let lines = message.components(separatedBy: "\n")
-                let headline = lines.first == "ELEVATOR LOCKED" ? "LOCKED" : (lines.first ?? "LOCKED")
-                let amber = UIColor(red: 1, green: 0.63, blue: 0.12, alpha: 1)
-                let headlineFont = UIFont.boldSystemFont(ofSize: 58)
-                let headlineAttrs: [NSAttributedString.Key: Any] = [.font: headlineFont, .foregroundColor: amber]
-                let headlineSize = (headline as NSString).size(withAttributes: headlineAttrs)
-                let dotDiameter: CGFloat = 12
-                let dotSpacing: CGFloat = 10
-                let headlineGroupWidth = dotDiameter + dotSpacing + headlineSize.width
-                let headlineY: CGFloat = 22
-                let dotRect = CGRect(x: (size.width - headlineGroupWidth) / 2,
-                                      y: headlineY + (headlineSize.height - dotDiameter) / 2,
-                                      width: dotDiameter, height: dotDiameter)
-                UIColor.systemRed.setFill()
-                UIBezierPath(ovalIn: dotRect).fill()
-                (headline as NSString).draw(at: CGPoint(x: dotRect.maxX + dotSpacing, y: headlineY), withAttributes: headlineAttrs)
-
-                let detailParagraph = NSMutableParagraphStyle()
-                detailParagraph.alignment = .center
-                detailParagraph.lineSpacing = 6
-                let detailText = lines.dropFirst().joined(separator: "\n")
-                let detailTop = headlineY + headlineSize.height + 10
-                (detailText as NSString).draw(in: CGRect(x: 16, y: detailTop, width: size.width - 32, height: size.height - detailTop - 12), withAttributes: [
-                    .font: UIFont.systemFont(ofSize: 34, weight: .semibold),
-                    .foregroundColor: UIColor.white,
-                    .paragraphStyle: detailParagraph
-                ])
-            } else {
-                UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()
-                context.fill(CGRect(origin: .zero, size: size))
-                UIColor.systemRed.setStroke()
-                let border = UIBezierPath(rect: CGRect(x: 8, y: 8, width: 884, height: 344))
-                border.lineWidth = 12
-                border.stroke()
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.alignment = .center
-                paragraph.lineSpacing = 14
-                (message as NSString).draw(in: CGRect(x: 28, y: 42, width: 844, height: 290), withAttributes: [
-                    .font: UIFont.boldSystemFont(ofSize: 56),
-                    .foregroundColor: UIColor.white,
-                    .paragraphStyle: paragraph
-                ])
-            }
+            UIColor(red: 0.22, green: 0.015, blue: 0.01, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.systemRed.setStroke()
+            let border = UIBezierPath(rect: CGRect(x: 8, y: 8, width: 884, height: 344))
+            border.lineWidth = 12
+            border.stroke()
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.lineSpacing = 14
+            (message as NSString).draw(in: CGRect(x: 28, y: 42, width: 844, height: 290), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 56),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph
+            ])
         }
         let material = SCNMaterial()
         material.diffuse.contents = texture
         material.lightingModel = .constant
-        let plane = isElevatorLocked ? SCNPlane(width: 0.78, height: 0.26) : SCNPlane(width: 1.35, height: 0.54)
+        let plane = SCNPlane(width: 1.35, height: 0.54)
         plane.materials = [material]
         let notice = SCNNode(geometry: plane)
         notice.position = SCNVector3((left.position.x + right.position.x) / 2 - Float(direction.delta.col) * 0.1,

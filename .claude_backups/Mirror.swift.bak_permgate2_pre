@@ -145,18 +145,13 @@ final class MirrorCamera {
 
     func setExpressionAnalysisEnabled(_ enabled: Bool) { expressionAnalyzer?.setEnabled(enabled) }
 
-    // Eddie, Sept 17: reverted to its original form -- routing the
-    // startup permission gate through here (an onPermissionResolved
-    // completion) raced updateUIView's own, unconditional
-    // setActive(cameraEnabled) call, which runs right after this one
-    // and (with cameraEnabled still false pre-tap) flipped `active`
-    // back off before the async requestAccess completion could see
-    // `guard self.active` succeed -- so the completion silently never
-    // fired. See MirrorCamera.resolveAuthorization below: a completely
-    // separate, non-reentrant permission check that doesn't touch
-    // `active`/`worker`/the placeholder text at all, so nothing can
-    // race it.
-    func setActive(_ enabled: Bool) {
+    // Eddie, Sept 17 (startup permission gate): onPermissionResolved is
+    // additive -- every existing caller keeps passing nothing (default
+    // nil) and sees zero behavior change. It exists so ContentView can
+    // trigger this SAME permission check/request early, during the
+    // intro screen, and learn exactly when the decision is made,
+    // instead of building a second camera-permission code path.
+    func setActive(_ enabled: Bool, onPermissionResolved: (() -> Void)? = nil) {
         if !enabled {
             expressionAnalyzer?.setEnabled(false)
             if active {
@@ -168,11 +163,14 @@ final class MirrorCamera {
         }
         if active {
             updateOrientation()
+            onPermissionResolved?()
             return
         }
         active = true
         switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized: start()
+        case .authorized:
+            start()
+            onPermissionResolved?()
         case .notDetermined:
             show("Allow camera access\nto see your reflection")
             guard !requestedPermission else { return }
@@ -184,29 +182,12 @@ final class MirrorCamera {
                     guard self.active else { return }
                     if allowed { self.start() }
                     else { self.show("Enable camera access\nin Settings to use\nthis mirror") }
+                    onPermissionResolved?()
                 }
             }
-        default: show("Enable camera access\nin Settings to use\nthis mirror")
-        }
-    }
-
-    // Eddie, Sept 17 (startup permission gate v2): a standalone
-    // authorization check/request, deliberately independent of any
-    // MirrorCamera instance and its active/inactive toggle above --
-    // reuses the exact same AVCaptureDevice APIs setActive's
-    // .notDetermined branch already calls, just without touching
-    // `active`, `worker`, or the placeholder text, so updateUIView's
-    // repeated setActive(cameraEnabled) calls can never race it. Not a
-    // second camera-permission mechanism -- the only mechanism, called
-    // from two different moments.
-    static func resolveAuthorization(completion: @escaping () -> Void) {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { _ in
-                DispatchQueue.main.async { completion() }
-            }
         default:
-            completion()
+            show("Enable camera access\nin Settings to use\nthis mirror")
+            onPermissionResolved?()
         }
     }
 

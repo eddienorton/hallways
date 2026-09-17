@@ -50,6 +50,18 @@
   {
     "cells": [
       {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
         "row": 4,
         "col": 7
       },
@@ -70,18 +82,6 @@
         "col": 7
       },
       {
-        "row": 5,
-        "col": 7
-      },
-      {
-        "row": 6,
-        "col": 7
-      },
-      {
-        "row": 7,
-        "col": 7
-      },
-      {
         "row": 8,
         "col": 7
       },
@@ -94,70 +94,66 @@
         "col": 7
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 8
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 9
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 10
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 11
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 12
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 13
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 14
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 6
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 5
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 4
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 3
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 2
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 1
       },
       {
-        "row": 4,
+        "row": 7,
         "col": 0
-      },
-      {
-        "row": 10,
-        "col": 6
       }
     ],
     "destinations": [
       {
         "coord": {
-          "row": 4,
+          "row": 7,
           "col": 14
         },
         "kind": "trashCan"
@@ -168,9 +164,9 @@
       {
         "coord": {
           "row": 10,
-          "col": 6
+          "col": 7
         },
-        "direction": "north"
+        "direction": "east"
       }
     ],
     "id": 2,
@@ -181,7 +177,7 @@
     "missionSigns": [
       {
         "coord": {
-          "row": 10,
+          "row": 9,
           "col": 7
         },
         "direction": "east"
@@ -191,22 +187,29 @@
     "objects": [
       {
         "coord": {
-          "row": 1,
+          "row": 3,
           "col": 7
         },
         "kind": "trashCan"
       },
       {
         "coord": {
-          "row": 4,
-          "col": 3
+          "row": 8,
+          "col": 7
         },
         "kind": "trashCan"
       },
       {
         "coord": {
-          "row": 4,
-          "col": 10
+          "row": 7,
+          "col": 12
+        },
+        "kind": "trashCan"
+      },
+      {
+        "coord": {
+          "row": 7,
+          "col": 4
         },
         "kind": "trashCan"
       }

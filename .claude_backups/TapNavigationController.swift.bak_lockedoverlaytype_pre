@@ -4304,7 +4304,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // it still renders through the original large maroon panel
         // below, unchanged.
         let isElevatorLocked = message.hasPrefix("ELEVATOR LOCKED")
-        let size = isElevatorLocked ? CGSize(width: 640, height: 210) : CGSize(width: 900, height: 360)
+        let size = isElevatorLocked ? CGSize(width: 640, height: 180) : CGSize(width: 900, height: 360)
         let texture = UIGraphicsImageRenderer(size: size).image { context in
             if isElevatorLocked {
                 UIColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1).setFill()
@@ -4317,7 +4317,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 let lines = message.components(separatedBy: "\n")
                 let headline = lines.first == "ELEVATOR LOCKED" ? "LOCKED" : (lines.first ?? "LOCKED")
                 let amber = UIColor(red: 1, green: 0.63, blue: 0.12, alpha: 1)
-                let headlineFont = UIFont.boldSystemFont(ofSize: 58)
+                let headlineFont = UIFont.boldSystemFont(ofSize: 34)
                 let headlineAttrs: [NSAttributedString.Key: Any] = [.font: headlineFont, .foregroundColor: amber]
                 let headlineSize = (headline as NSString).size(withAttributes: headlineAttrs)
                 let dotDiameter: CGFloat = 12
@@ -4337,7 +4337,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 let detailText = lines.dropFirst().joined(separator: "\n")
                 let detailTop = headlineY + headlineSize.height + 10
                 (detailText as NSString).draw(in: CGRect(x: 16, y: detailTop, width: size.width - 32, height: size.height - detailTop - 12), withAttributes: [
-                    .font: UIFont.systemFont(ofSize: 34, weight: .semibold),
+                    .font: UIFont.systemFont(ofSize: 19, weight: .semibold),
                     .foregroundColor: UIColor.white,
                     .paragraphStyle: detailParagraph
                 ])
@@ -4361,7 +4361,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let material = SCNMaterial()
         material.diffuse.contents = texture
         material.lightingModel = .constant
-        let plane = isElevatorLocked ? SCNPlane(width: 0.78, height: 0.26) : SCNPlane(width: 1.35, height: 0.54)
+        let plane = isElevatorLocked ? SCNPlane(width: 0.78, height: 0.22) : SCNPlane(width: 1.35, height: 0.54)
         plane.materials = [material]
         let notice = SCNNode(geometry: plane)
         notice.position = SCNVector3((left.position.x + right.position.x) / 2 - Float(direction.delta.col) * 0.1,

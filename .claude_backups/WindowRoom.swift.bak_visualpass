@@ -1,0 +1,199 @@
+import SceneKit
+import UIKit
+
+/// A Window Room's own placement data -- same coord+direction shape as
+/// every other door/fixture placement here (see PicturePlacement,
+/// RoomDoorPlacement), plus the two facts unique to this fixture: which
+/// wall of the room BEYOND the door is the exterior window wall, and
+/// which view image it shows.
+///
+/// `coord`/`direction` describe the DOOR exactly the way bathroomDoors
+/// does -- `coord` is the hallway-side cell the door is mounted in,
+/// `direction` is which of its walls the door sits on (the room is
+/// `coord` shifted one cell in `direction`). `windowDirection` is a
+/// SEPARATE direction -- which wall of that ROOM cell is the building's
+/// own exterior wall -- since a room's door wall and its window wall
+/// are two different walls of two different cells; conflating them was
+/// the one shape mistake worth calling out up front. `viewAssetID`
+/// identifies the view image (HallwayScene.windowViewTexture(for:)
+/// resolves it); "nycPlaceholder" is the only asset that exists today
+/// -- see nycPlaceholderViewTexture's own doc comment.
+struct WindowRoomPlacement: Codable, Equatable {
+    var coord: GridCoordinate
+    var direction: Direction
+    var windowDirection: Direction
+    var viewAssetID: String
+}
+
+extension HallwayScene {
+    /// Eddie, Sept 15: "one static curated NYC-style image... if no
+    /// suitable asset exists in the project, build with a
+    /// clearly-labeled neutral placeholder... do not invent procedural
+    /// art or use an unrelated image." A project-wide asset search
+    /// (Assets.xcassets, every bundled image) found no NYC/skyline/
+    /// cityscape art anywhere, so this is that placeholder: a flat,
+    /// neutral sky/ground gradient with NO invented skyline, silhouette,
+    /// or building shapes drawn on it (that would be exactly the
+    /// "procedural art" pretending to be the real view this was told
+    /// not to do) -- just a plainly labeled placeholder card, same
+    /// UIGraphicsImageRenderer technique restroomSignTexture uses for
+    /// its own generated texture. 1600x1200 (4:3) -- see
+    /// windowOpeningWidth/windowOpeningHeight below for why 4:3 is the
+    /// window's own exact aspect ratio; swap this `static let` for a
+    /// bundled image at the same "nycPlaceholder" viewAssetID (or add a
+    /// new viewAssetID case to windowViewTexture(for:) below) once a
+    /// real curated image exists, no other code needs to change.
+    static let nycPlaceholderViewTexture: UIImage = {
+        let size = CGSize(width: 1600, height: 1200)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            let cg = context.cgContext
+            let sky = UIColor(red: 0.63, green: 0.72, blue: 0.8, alpha: 1)
+            let ground = UIColor(red: 0.55, green: 0.56, blue: 0.58, alpha: 1)
+            let horizon = size.height * 0.62
+            sky.setFill()
+            cg.fill(CGRect(x: 0, y: 0, width: size.width, height: horizon))
+            ground.setFill()
+            cg.fill(CGRect(x: 0, y: horizon, width: size.width, height: size.height - horizon))
+            UIColor.white.withAlphaComponent(0.9).setFill()
+            cg.fill(CGRect(x: 0, y: horizon - 3, width: size.width, height: 6))
+
+            let style = NSMutableParagraphStyle()
+            style.alignment = .center
+            ("WINDOW VIEW -- PLACEHOLDER" as NSString).draw(
+                in: CGRect(x: 40, y: size.height * 0.34, width: size.width - 80, height: 90),
+                withAttributes: [
+                    .font: UIFont.boldSystemFont(ofSize: 62), .foregroundColor: UIColor.white,
+                    .paragraphStyle: style, .kern: 1.0
+                ])
+            ("Replace with a curated 4:3 exterior image" as NSString).draw(
+                in: CGRect(x: 40, y: size.height * 0.34 + 100, width: size.width - 80, height: 50),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 34), .foregroundColor: UIColor.white.withAlphaComponent(0.92),
+                    .paragraphStyle: style
+                ])
+            ("Recommended: 1600\u{00d7}1200px (4:3), or any 4:3 image" as NSString).draw(
+                in: CGRect(x: 40, y: size.height * 0.34 + 150, width: size.width - 80, height: 44),
+                withAttributes: [
+                    .font: UIFont.systemFont(ofSize: 28), .foregroundColor: UIColor.white.withAlphaComponent(0.8),
+                    .paragraphStyle: style
+                ])
+        }
+    }()
+
+    /// The one indirection point for turning a WindowRoomPlacement's
+    /// `viewAssetID` into an actual texture -- everywhere else in
+    /// HallwayScene.build(fromMaze:) just calls this rather than
+    /// referencing nycPlaceholderViewTexture directly, so adding a real
+    /// second view later is a new `case` here, not a hunt through the
+    /// build function.
+    static func windowViewTexture(for viewAssetID: String) -> UIImage {
+        switch viewAssetID {
+        default: return nycPlaceholderViewTexture
+        }
+    }
+
+    /// The window opening's own physical size, cut into the room's
+    /// exterior wall -- narrower and set well off the floor compared to
+    /// a doorway (a window, not another door), and deliberately exactly
+    /// 4:3 so the placeholder/replacement image is never stretched.
+    static let windowOpeningWidth: CGFloat = 1.2
+    static let windowOpeningHeight: CGFloat = 0.9
+    static let windowSillY: CGFloat = 1.0
+    static let windowCenterY: CGFloat = windowSillY + windowOpeningHeight / 2
+
+    /// The window itself: a wall-mounted frame with real depth (a
+    /// shallow box, not a flat decal) holding a glass pane textured
+    /// with the curated/placeholder view, plus a small sill ledge --
+    /// same "root positioned/rotated per direction, children built in
+    /// pre-rotation local coordinates" idiom as makeMirrorNode, and the
+    /// same restrained-fixture spirit (no curtains, blinds, reflections,
+    /// or animated content -- Eddie, Sept 15, was explicit that this
+    /// should read as architectural, not become a diorama). Called from
+    /// the windowRooms loop in build(fromMaze:) immediately after that
+    /// same loop's addDoorFrame call has already cut this exact opening
+    /// into the wall -- wallCenterX/wallCenterZ here MUST be the same
+    /// values passed to that addDoorFrame call, or the frame won't sit
+    /// in the hole it cut.
+    static func makeWindowNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, viewTexture: UIImage) -> SCNNode {
+        let root = SCNNode()
+        root.name = "windowRoomWindow"
+
+        let frameMaterial = SCNMaterial()
+        frameMaterial.diffuse.contents = UIColor(white: 0.93, alpha: 1)
+        frameMaterial.lightingModel = .physicallyBased
+        frameMaterial.roughness.contents = 0.6
+
+        let frameBorder: CGFloat = 0.07
+        let frameDepth: CGFloat = 0.14
+        let frameWidth = windowOpeningWidth + frameBorder * 2
+        let frameHeight = windowOpeningHeight + frameBorder * 2
+
+        // Which way is INTO the room from this wall -- the mirror image
+        // of addDoorFrame's own wallCenterX/Z offset (north's wall sits
+        // at doorZ - half, i.e. the room is toward +Z from the wall;
+        // south/east/west follow the same logic in the other 3
+        // directions). Used to keep the glass and sill both on the
+        // room-facing side, never poking out through the exterior face.
+        let inward: (x: Float, z: Float)
+        switch direction {
+        case .north: inward = (0, 1)
+        case .south: inward = (0, -1)
+        case .east: inward = (-1, 0)
+        case .west: inward = (1, 0)
+        }
+
+        let frameGeo: SCNBox
+        switch direction {
+        case .north, .south:
+            frameGeo = SCNBox(width: frameWidth, height: frameHeight, length: frameDepth, chamferRadius: 0.01)
+        case .east, .west:
+            frameGeo = SCNBox(width: frameDepth, height: frameHeight, length: frameWidth, chamferRadius: 0.01)
+        }
+        frameGeo.materials = [frameMaterial]
+        root.addChildNode(SCNNode(geometry: frameGeo))
+
+        let glassMaterial = SCNMaterial()
+        glassMaterial.lightingModel = .constant
+        glassMaterial.diffuse.contents = viewTexture
+        let glassGeo = SCNPlane(width: windowOpeningWidth, height: windowOpeningHeight)
+        glassGeo.materials = [glassMaterial]
+        let glass = SCNNode(geometry: glassGeo)
+        glass.name = "windowRoomView"
+        let glassInset = Float(frameDepth) * 0.3
+        glass.position = SCNVector3(inward.x * glassInset, 0, inward.z * glassInset)
+        switch direction {
+        case .north: break
+        case .south: glass.eulerAngles.y = .pi
+        case .east: glass.eulerAngles.y = -.pi / 2
+        case .west: glass.eulerAngles.y = .pi / 2
+        }
+        root.addChildNode(glass)
+
+        // A small sill ledge, protruding only into the room -- Eddie,
+        // Sept 15: "enough depth/frame/glass to read as architectural,
+        // not a flat picture, while staying restrained" -- this is the
+        // one 3D detail beyond the frame itself, deliberately thin and
+        // short rather than a window-seat bench.
+        let sillMaterial = SCNMaterial()
+        sillMaterial.diffuse.contents = UIColor(white: 0.87, alpha: 1)
+        sillMaterial.lightingModel = .physicallyBased
+        sillMaterial.roughness.contents = 0.5
+        let sillDepth: CGFloat = 0.1
+        let sillThickness: CGFloat = 0.04
+        let sillGeo: SCNBox
+        switch direction {
+        case .north, .south:
+            sillGeo = SCNBox(width: frameWidth, height: sillThickness, length: sillDepth, chamferRadius: 0.005)
+        case .east, .west:
+            sillGeo = SCNBox(width: sillDepth, height: sillThickness, length: frameWidth, chamferRadius: 0.005)
+        }
+        sillGeo.materials = [sillMaterial]
+        let sill = SCNNode(geometry: sillGeo)
+        let sillOffset = Float(sillDepth / 2 + frameDepth / 2)
+        sill.position = SCNVector3(inward.x * sillOffset, -Float(windowOpeningHeight / 2 + sillThickness / 2), inward.z * sillOffset)
+        root.addChildNode(sill)
+
+        root.position = SCNVector3(Float(wallCenterX), Float(windowCenterY), Float(wallCenterZ))
+        return root
+    }
+}

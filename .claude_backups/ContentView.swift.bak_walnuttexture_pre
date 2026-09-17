@@ -2234,7 +2234,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // HallwayScene.build(fromMaze:)'s own case 2 -- wood-oak.jpg
             // instead of the earlier procedural plaster, so a theme-
             // cycle tap while on Floor 2 doesn't clobber it back.
-            case 2: effectiveWallImageName = "wood-walnut"
+            case 2: effectiveWallImageName = "wood-oak"
             default: effectiveWallImageName = theme.wallImageName
             }
             for material in wallMaterials {

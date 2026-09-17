@@ -8,18 +8,6 @@ final class PhotoRollProvider {
     private init() {}
     private var recentIdentifiers: [String] = []
 
-    // Eddie, Sept 17 (startup permission gate): a standalone
-    // authorization check/request, reusing the exact same
-    // PHPhotoLibrary.requestAuthorization call every randomImages()
-    // request already makes below -- just without fetching or
-    // delivering any images. Lets ContentView's startup gate learn
-    // the Photos decision is made without a second permission system.
-    static func resolveAuthorization(completion: @escaping () -> Void) {
-        PHPhotoLibrary.requestAuthorization(for: .readWrite) { _ in
-            DispatchQueue.main.async { completion() }
-        }
-    }
-
     static func sampleIndices(total: Int, count: Int, avoiding: Set<Int> = []) -> [Int] {
         guard total > 0, count > 0 else { return [] }
         let shuffled = Array(0..<total).shuffled()

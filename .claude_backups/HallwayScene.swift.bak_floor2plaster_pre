@@ -1567,7 +1567,7 @@ enum HallwayScene {
         // existing floor/maze identifier. Floors 2-19 are completely
         // unaffected -- they still resolve theme.floorImageName exactly
         // as before.
-        let floorMaterial = makeFloorMaterial(imageName: floorNumber == 1 ? "floor1" : (floorNumber == 2 ? "floor-carpet1" : theme.floorImageName))
+        let floorMaterial = makeFloorMaterial(imageName: floorNumber == 1 ? "floor1" : theme.floorImageName)
         if floorNumber == 1 {
             // floor1.png's own diamond grid is denser than the plain
             // 2x2 tiling makeSurfaceMaterial gives every other floor
@@ -1609,24 +1609,8 @@ enum HallwayScene {
         // everywhere a "wall" surface is built. Floors 2-16 are
         // unaffected -- they still resolve theme.wallImageName /
         // theme.ceilingImageName exactly as before.
-        let effectiveWallImageName: String?
-        switch floorNumber {
-        case 1:
-            effectiveWallImageName = "lobby-wall"
-        case 2:
-            // Eddie, Sept 17 (Floor 2 visual pass v2): replaces the
-            // earlier procedural plaster experiment with a real bundled
-            // photo, wood-oak.jpg -- same per-floor override shape as
-            // Floor 1's lobby-wall just above. floor2PlasterWallImageName/
-            // makeFloor2PlasterWallImage() are left in the file, just no
-            // longer referenced here, in case this gets revisited.
-            // Floors 3-16 unaffected -- they still fall to
-            // theme.wallImageName exactly as before.
-            effectiveWallImageName = "wood-walnut"
-        default:
-            effectiveWallImageName = theme.wallImageName
-        }
-        let effectiveCeilingImageName = floorNumber == 1 ? "lobby-ceiling" : (floorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName)
+        let effectiveWallImageName = floorNumber == 1 ? "lobby-wall" : theme.wallImageName
+        let effectiveCeilingImageName = floorNumber == 1 ? "lobby-ceiling" : theme.ceilingImageName
         let ceilingMaterial = makeCeilingMaterial(imageName: effectiveCeilingImageName)
         var wallMaterials: [SCNMaterial] = []
 
@@ -1969,13 +1953,11 @@ enum HallwayScene {
         // (maybe diff color metal)... and of course the 2 vertical
         // sliding doors that open and close."
         let elevatorDoorMaterial = makeElevatorDoorMaterial()
-        let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial(imageName: "elevator-wall")
-        let elevatorShaftCeilingMaterial = makeElevatorShaftMaterial(imageName: "elevator-ceiling")
-        let elevatorShaftFloorMaterial = makeElevatorShaftMaterial(imageName: "elevator-floor")
+        let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial()
         let elevatorGeometry = ElevatorGeometry(cellSize: cellSize)
         let elevatorDoorWidth = elevatorGeometry.doorWidth
         // Shorter exterior opening; the cab envelope and all its contents stay put.
-        let elevatorDoorHeight: CGFloat = 2.5
+        let elevatorDoorHeight: CGFloat = 2.05
         let elevatorCabHeight: CGFloat = 2.6
         let elevatorDoorThickness: CGFloat = 0.05
         let elevatorCenterY: CGFloat = elevatorDoorHeight / 2
@@ -1999,9 +1981,9 @@ enum HallwayScene {
             let depth = Float(elevatorShaftDepth)
             let thick = Float(elevatorPanelThickness)
 
-            func panel(width: CGFloat, height: CGFloat, length: CGFloat, material: SCNMaterial = elevatorShaftInteriorMaterial) -> SCNNode {
+            func panel(width: CGFloat, height: CGFloat, length: CGFloat) -> SCNNode {
                 let geo = SCNBox(width: width, height: height, length: length, chamferRadius: 0)
-                geo.materials = [material]
+                geo.materials = [elevatorShaftInteriorMaterial]
                 return SCNNode(geometry: geo)
             }
 
@@ -2009,9 +1991,9 @@ enum HallwayScene {
             shaft.position = SCNVector3(Float(wallCenterX), Float(elevatorCabCenterY), Float(wallCenterZ))
             let back = panel(width: CGFloat(halfW * 2), height: CGFloat(halfH * 2), length: CGFloat(thick))
             back.position = SCNVector3(0, 0, -depth)
-            let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth), material: elevatorShaftCeilingMaterial)
+            let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             top.position = SCNVector3(0, halfH, -depth / 2)
-            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth), material: elevatorShaftFloorMaterial)
+            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             bottom.position = SCNVector3(0, -halfH, -depth / 2)
             let left = panel(width: CGFloat(thick), height: CGFloat(halfH * 2), length: CGFloat(depth))
             left.position = SCNVector3(-halfW, 0, -depth / 2)
@@ -2685,14 +2667,7 @@ enum HallwayScene {
             // render the inside of the chute container") -- addWall was
             // skipped for this cell's ENTIRE wall face via
             // missionDirection above, not just the sign's own small
-            // footprint. Eddie, Sept 18: reverted the Sept 17/18 Floor-2
-            // open-side special cases (a relaxed guard plus a fabricated
-            // backing plate) -- a mission sign is a WALL-MOUNTED object,
-            // same category as a picture, mirror, or floor map, and
-            // every one of those requires a genuinely solid wall to
-            // mount on; none of them get a special exception. This is
-            // unconditional again, exactly like addPictureNode's own
-            // addDoorFrame call just below.
+            // footprint.
             addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.12, doorHeight: panelHeight + 0.12, doorCenterY: wallHeight * 0.55)
 
             frame.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55), Float(wallCenterZ))
@@ -3263,11 +3238,6 @@ enum HallwayScene {
             let missionTexture = makeMissionSignTexture(heading: missionHeading, body: missionBody)
             for (coord, direction) in missionSigns {
                 guard cells.contains(coord) else { continue }
-                // Eddie, Sept 18: back to the same solid-wall-required
-                // rule pictures/mirrors/floor maps all use, with no
-                // floor-2 exception -- see addMissionSignNode's own
-                // comment for why the Sept 17/18 open-side special case
-                // was reverted.
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
                 let signX = worldX(coord.col)
                 let signZ = worldZ(coord.row)
@@ -3960,19 +3930,6 @@ enum HallwayScene {
     static let officeWallGradientName = "__officeWallGradient"
     static let officeCeilingGradientName = "__officeCeilingGradient"
 
-    // Eddie, Sept 16 (Floor 2 visual pass -- walls only, experiment):
-    // "warm neutral beige/greige painted plaster... boring and
-    // office-like on purpose... NOT brick... NOT perfectly flat
-    // color... very subtle plaster/stucco-like texture." Same
-    // "sentinel string instead of a bundled file" shape as the two
-    // above -- there's nothing to photograph, so resolveThemeImage
-    // generates it (see makeFloor2PlasterWallImage). Deliberately left
-    // OUT of isProceduralGradientImage just below: unlike the office
-    // gradient (one smooth fade, must run once top-to-bottom), this
-    // texture has no directionality and is meant to tile normally like
-    // any bundled photo.
-    static let floor2PlasterWallImageName = "__floor2PlasterWall"
-
     /// True for the two sentinel names above -- callers that tile
     /// photos 2x2 (see makeSurfaceMaterial) need to know NOT to tile a
     /// gradient that way, or the smooth fade would visibly repeat/seam
@@ -4101,8 +4058,6 @@ enum HallwayScene {
             )
         case officeCeilingGradientName:
             return makeGradientImage(top: UIColor(white: 0.93, alpha: 1), bottom: UIColor(white: 0.85, alpha: 1))
-        case floor2PlasterWallImageName:
-            return makeFloor2PlasterWallImage()
         default:
             // Sept 14 (Eddie): Floor 1's marble texture ships as a
             // .png (floor1.png) rather than the .jpg every other
@@ -4140,78 +4095,6 @@ enum HallwayScene {
                 options: []
             )
         }
-    }
-
-    // Eddie, Sept 16 (Floor 2 visual pass): a plain painted-plaster
-    // wall, procedurally generated rather than shot as a photo --
-    // see floor2PlasterWallImageName just above for the full brief.
-    // Two low-amplitude noise layers over a flat greige base, both
-    // kept subtle on purpose ("low contrast... read as a beige wall,
-    // not an obvious texture pattern"):
-    //   - "mottling": a handful of soft, irregular blobs (low
-    //     frequency, +/-3.5% luminance, smooth center-to-edge falloff)
-    //     for the gentle unevenness a painted plaster wall actually
-    //     has. Distances wrap toroidally so the tile repeats (2x2 per
-    //     wall panel, same as every bundled photo texture) with no
-    //     visible seam.
-    //   - "grain": independent per-pixel noise (+/-2% luminance) for
-    //     the fine stucco-like texture -- inherently seamless since
-    //     it carries no spatial structure across a tile edge.
-    // Both layers move all three channels together (never tinting
-    // individual channels), so the result only ever gets lighter or
-    // darker greige, never shifts toward yellow/orange -- Hallways'
-    // own warm lighting supplies that warmth on its own.
-    private static func makeFloor2PlasterWallImage() -> UIImage {
-        let size = 256
-        let base = (r: 0.80, g: 0.76, b: 0.70) // warm-neutral greige, deliberately not golden/orange
-        let fallback = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
-            UIColor(red: CGFloat(base.r), green: CGFloat(base.g), blue: CGFloat(base.b), alpha: 1).setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
-        }
-
-        struct Blob { let x, y, radius, delta: Double }
-        let blobs: [Blob] = (0..<12).map { _ in
-            Blob(x: Double.random(in: 0..<1), y: Double.random(in: 0..<1),
-                 radius: Double.random(in: 0.12...0.32), delta: Double.random(in: -0.035...0.035))
-        }
-        func wrappedDelta(_ a: Double, _ b: Double) -> Double {
-            var d = a - b
-            if d > 0.5 { d -= 1 }
-            if d < -0.5 { d += 1 }
-            return d
-        }
-        func clampUnit(_ v: Double) -> Double { min(max(v, 0), 1) }
-
-        guard let context = CGContext(
-            data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ), let buffer = context.data else {
-            return fallback
-        }
-        let pixels = buffer.bindMemory(to: UInt8.self, capacity: size * size * 4)
-        for py in 0..<size {
-            let ny = Double(py) / Double(size)
-            for px in 0..<size {
-                let nx = Double(px) / Double(size)
-                var mottle = 0.0
-                for blob in blobs {
-                    let dx = wrappedDelta(nx, blob.x)
-                    let dy = wrappedDelta(ny, blob.y)
-                    let dist = (dx * dx + dy * dy).squareRoot()
-                    guard dist < blob.radius else { continue }
-                    mottle += blob.delta * (0.5 + 0.5 * cos(.pi * dist / blob.radius))
-                }
-                let grain = Double.random(in: -0.02...0.02)
-                let luminance = mottle + grain
-                let offset = (py * size + px) * 4
-                pixels[offset]     = UInt8(clampUnit(base.r + luminance) * 255)
-                pixels[offset + 1] = UInt8(clampUnit(base.g + luminance) * 255)
-                pixels[offset + 2] = UInt8(clampUnit(base.b + luminance) * 255)
-                pixels[offset + 3] = 255
-            }
-        }
-        guard let cgImage = context.makeImage() else { return fallback }
-        return UIImage(cgImage: cgImage)
     }
 
     /// Shared by walls/floor/ceiling: an optional real photo (or the
@@ -4395,7 +4278,7 @@ enum HallwayScene {
     /// blue-grey emissive tint instead of that one's warm ember, so a
     /// glimpse through open elevator doors never gets mistaken for a
     /// destination cubby.
-    private static func makeElevatorShaftMaterial(imageName: String? = nil) -> SCNMaterial {
+    private static func makeElevatorShaftMaterial() -> SCNMaterial {
         // Eddie, Sept 8: "back wall... turns black for some reason."
         // This panel was always counting on getting hit near
         // point-blank by the FULL headlamp to read as dark charcoal
@@ -4417,19 +4300,7 @@ enum HallwayScene {
         // surface form under the existing lights instead of losing
         // definition to near-black. Purely a material change -- no
         // light intensity/position/color touched.
-        // Sept 17 (Eddie): optional bundled photo for the cab's own
-        // wall/ceiling/floor surfaces -- same flat dark-charcoal
-        // fallback as before when no image is supplied or found, so
-        // every other existing caller (and the addDoorFrame reveal,
-        // which still calls this with no imageName) is unaffected.
-        if let imageName, let image = resolveThemeImage(imageName) {
-            m.diffuse.contents = image
-            m.diffuse.wrapS = .repeat
-            m.diffuse.wrapT = .repeat
-            m.diffuse.contentsTransform = SCNMatrix4MakeScale(2, 2, 1)
-        } else {
-            m.diffuse.contents = UIColor(white: 0.32, alpha: 1)
-        }
+        m.diffuse.contents = UIColor(white: 0.32, alpha: 1)
         m.lightingModel = .physicallyBased
         m.metalness.contents = 0.0
         m.roughness.contents = 0.9
@@ -4593,22 +4464,6 @@ enum HallwayScene {
 
             let playerRect = CGRect(x: margin + CGFloat(playerAt.col) * cellPx, y: margin + CGFloat(playerAt.row) * cellPx, width: cellPx, height: cellPx)
             let center = CGPoint(x: playerRect.midX, y: playerRect.midY)
-
-            // A ring around the current cell so "which cell am I in"
-            // reads at a glance, distinct from the arrow's own "which
-            // way am I facing" job just below. Eddie: diameter about
-            // the size of the cell (very slightly larger so it hugs
-            // the square), clearly thicker than the plain grid
-            // grout (1.5pt, stroked above), unfilled, same blue as
-            // the existing player arrow. Drawn before the arrow so
-            // the arrow stays fully visible on top, though as a mere
-            // outline it wouldn't occlude it either way.
-            let hereRingDiameter = cellPx * 1.08
-            let hereRingRect = CGRect(x: center.x - hereRingDiameter / 2, y: center.y - hereRingDiameter / 2, width: hereRingDiameter, height: hereRingDiameter)
-            UIColor(red: 0.08, green: 0.12, blue: 0.85, alpha: 1).setStroke()
-            cg.setLineWidth(4)
-            cg.strokeEllipse(in: hereRingRect)
-
             let angle: CGFloat
             switch facing {
             case .north: angle = 0

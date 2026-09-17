@@ -198,15 +198,11 @@ struct ContentView: View {
     // itself once. After that, it assumes the player has learned the
     // lobby and trusts them to navigate it normally." Same @AppStorage
     // (persists across launches) shape as hasSeenNavGestureHint just
-    // above.
-    //
-    // Eddie, Sept 17: no longer a one-time gate -- the ceremonial
-    // front-door-to-elevator walk now happens on EVERY front-door
-    // entrance, not just the first ever. This flag is still written
-    // (see the IntroScreenView onEnter closure below) but nothing
-    // reads it to decide whether the walk happens anymore. Left in
-    // place rather than removed -- persisted first-run/resume state
-    // is a separate future task, not part of this change.
+    // above. Gates the automatic entrance-to-elevator walk below --
+    // true the moment that walk is dispatched, never reset by the
+    // entrance-door tap-to-reopen flow (NavigationBridge.
+    // requestReturnToOpening), so re-entering later is ordinary,
+    // tap-driven Floor 1 navigation like any other floor.
     @AppStorage("hasCompletedInitialEntrance") private var hasCompletedInitialEntrance = false
 
     // The cash "earth-shattering graphic" -- Eddie, Sept 6: grabbing
@@ -471,21 +467,14 @@ struct ContentView: View {
                     withAnimation(.easeOut(duration: 0.5)) {
                         showIntroScreen = false
                     }
-                    if mazeStore.currentMazeID == 1 {
-                        // The special uninterrupted intro walk -- Eddie,
-                        // Sept 17: no longer first-entrance-only. EVERY
-                        // front-door entrance (this IntroScreenView
-                        // closing while on floor 1 -- cold launch,
-                        // walking out the front doors and back in via
-                        // NavigationBridge.requestReturnToOpening, or
-                        // the dev Reset button) performs this same
-                        // ceremonial walk, every time. Elevator arrivals
-                        // never show this intro screen at all, so they
-                        // stay completely untouched by this. The two
-                        // hasCompletedInitialEntrance writes below no
-                        // longer gate anything (see its declaration
-                        // above) -- kept as-is since that persisted flag
-                        // is a separate future resume/persistence task.
+                    if mazeStore.currentMazeID == 1 && !hasCompletedInitialEntrance {
+                        // The special uninterrupted intro walk -- first
+                        // entrance only. Every later entrance (including
+                        // walking back out the front doors and back in)
+                        // leaves the player standing at the spawn cell
+                        // instead, same as arriving on any other floor:
+                        // a normal tap starts normal tap-to-walk
+                        // navigation from there.
                         navBridge.controller?.advance(source: "CEREMONIAL")
                         hasCompletedInitialEntrance = true
                         navBridge.controller?.hasCompletedInitialEntrance = true
@@ -2234,7 +2223,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // HallwayScene.build(fromMaze:)'s own case 2 -- wood-oak.jpg
             // instead of the earlier procedural plaster, so a theme-
             // cycle tap while on Floor 2 doesn't clobber it back.
-            case 2: effectiveWallImageName = "wood-walnut"
+            case 2: effectiveWallImageName = "wood-oak"
             default: effectiveWallImageName = theme.wallImageName
             }
             for material in wallMaterials {

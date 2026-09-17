@@ -570,15 +570,6 @@ final class MazeStore: ObservableObject {
 
     static let elevatorCoordinate = GridCoordinate(row: 10, col: 7)
 
-    /// Floor 2 ONLY, Sept 17 (Eddie): the elevator physically moved one
-    /// block west of the building's normal fixed elevatorCoordinate, so
-    /// this floor's own entrance nook can put the elevator on that new
-    /// cell's west wall (facing east) with the mission sign directly
-    /// opposite it on the east wall -- see startCoordinate/endCoordinate
-    /// below, the only two places this is read. Every OTHER floor keeps
-    /// using elevatorCoordinate itself, completely untouched.
-    static let floor2ElevatorCoordinate = GridCoordinate(row: elevatorCoordinate.row, col: elevatorCoordinate.col - 1)
-
     /// The one other cell every floor always has, no matter what --
     /// one step south of the elevator. startingFacing(at:cells:) checks
     /// south first, so walking off the elevator always faces this cell,
@@ -890,8 +881,7 @@ final class MazeStore: ObservableObject {
     /// here, whether or not that floor's hallway happens to reach it.
     var startCoordinate: GridCoordinate? {
         guard !cells.isEmpty else { return nil }
-        if currentMazeID == 1 { return floorOneEntryCoordinate }
-        return currentMazeID == 2 ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate
+        return currentMazeID == 1 ? floorOneEntryCoordinate : Self.elevatorCoordinate
     }
 
     /// You get off the elevator, and you're standing right where you
@@ -904,7 +894,7 @@ final class MazeStore: ObservableObject {
     /// ride it up from there, it's only where you START floor 1
     /// that's different.
     var endCoordinate: GridCoordinate? {
-        cells.isEmpty ? nil : (currentMazeID == 2 ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate)
+        cells.isEmpty ? nil : Self.elevatorCoordinate
     }
 
     /// Floor 1 only: the far end of its straight entry hallway --
@@ -1380,13 +1370,7 @@ final class MazeStore: ObservableObject {
     /// way, just triggered from two different places.
     func switchTo(id: Int) {
         guard id != currentMazeID else { return }
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): save() is a
-        // synchronous disk write -- timed here in case it's adding
-        // real latency between arrival and the scene actually
-        // swapping.
-        let arrivalDiagSaveStart = Date().timeIntervalSince1970
         save()
-        navLog("[ARRIVALDIAG] switchTo(id:) save() took \(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagSaveStart))s")
         currentMazeID = id
         if let record = library[id] {
             cells = Set(record.cells)
@@ -1478,14 +1462,8 @@ final class MazeStore: ObservableObject {
     /// floor authored without a next-floor link just quietly stays on
     /// the existing "You made it!" screen instead of going anywhere.
     func advanceToNextMaze() {
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator arrival
-        // visual-transition audit). Remove alongside every other
-        // [ARRIVALDIAG]-tagged line in ContentView.swift and
-        // TapNavigationController.swift once diagnosed.
-        navLog("[ARRIVALDIAG] advanceToNextMaze() START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(currentMazeID) nextMazeID=\(String(describing: nextMazeID))")
         guard let next = nextMazeID else { return }
         switchTo(id: next)
-        navLog("[ARRIVALDIAG] advanceToNextMaze() END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(currentMazeID)")
     }
 
     // MARK: - Undo / Clear

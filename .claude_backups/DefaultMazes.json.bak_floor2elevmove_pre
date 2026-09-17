@@ -148,10 +148,6 @@
       {
         "row": 4,
         "col": 0
-      },
-      {
-        "row": 10,
-        "col": 6
       }
     ],
     "destinations": [
@@ -168,9 +164,9 @@
       {
         "coord": {
           "row": 10,
-          "col": 6
+          "col": 7
         },
-        "direction": "north"
+        "direction": "east"
       }
     ],
     "id": 2,
@@ -181,7 +177,7 @@
     "missionSigns": [
       {
         "coord": {
-          "row": 10,
+          "row": 9,
           "col": 7
         },
         "direction": "east"

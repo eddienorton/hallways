@@ -1969,9 +1969,7 @@ enum HallwayScene {
         // (maybe diff color metal)... and of course the 2 vertical
         // sliding doors that open and close."
         let elevatorDoorMaterial = makeElevatorDoorMaterial()
-        let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial(imageName: "elevator-wall")
-        let elevatorShaftCeilingMaterial = makeElevatorShaftMaterial(imageName: "elevator-ceiling")
-        let elevatorShaftFloorMaterial = makeElevatorShaftMaterial(imageName: "elevator-floor")
+        let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial()
         let elevatorGeometry = ElevatorGeometry(cellSize: cellSize)
         let elevatorDoorWidth = elevatorGeometry.doorWidth
         // Shorter exterior opening; the cab envelope and all its contents stay put.
@@ -1999,9 +1997,9 @@ enum HallwayScene {
             let depth = Float(elevatorShaftDepth)
             let thick = Float(elevatorPanelThickness)
 
-            func panel(width: CGFloat, height: CGFloat, length: CGFloat, material: SCNMaterial = elevatorShaftInteriorMaterial) -> SCNNode {
+            func panel(width: CGFloat, height: CGFloat, length: CGFloat) -> SCNNode {
                 let geo = SCNBox(width: width, height: height, length: length, chamferRadius: 0)
-                geo.materials = [material]
+                geo.materials = [elevatorShaftInteriorMaterial]
                 return SCNNode(geometry: geo)
             }
 
@@ -2009,9 +2007,9 @@ enum HallwayScene {
             shaft.position = SCNVector3(Float(wallCenterX), Float(elevatorCabCenterY), Float(wallCenterZ))
             let back = panel(width: CGFloat(halfW * 2), height: CGFloat(halfH * 2), length: CGFloat(thick))
             back.position = SCNVector3(0, 0, -depth)
-            let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth), material: elevatorShaftCeilingMaterial)
+            let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             top.position = SCNVector3(0, halfH, -depth / 2)
-            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth), material: elevatorShaftFloorMaterial)
+            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             bottom.position = SCNVector3(0, -halfH, -depth / 2)
             let left = panel(width: CGFloat(thick), height: CGFloat(halfH * 2), length: CGFloat(depth))
             left.position = SCNVector3(-halfW, 0, -depth / 2)
@@ -4395,7 +4393,7 @@ enum HallwayScene {
     /// blue-grey emissive tint instead of that one's warm ember, so a
     /// glimpse through open elevator doors never gets mistaken for a
     /// destination cubby.
-    private static func makeElevatorShaftMaterial(imageName: String? = nil) -> SCNMaterial {
+    private static func makeElevatorShaftMaterial() -> SCNMaterial {
         // Eddie, Sept 8: "back wall... turns black for some reason."
         // This panel was always counting on getting hit near
         // point-blank by the FULL headlamp to read as dark charcoal
@@ -4417,19 +4415,7 @@ enum HallwayScene {
         // surface form under the existing lights instead of losing
         // definition to near-black. Purely a material change -- no
         // light intensity/position/color touched.
-        // Sept 17 (Eddie): optional bundled photo for the cab's own
-        // wall/ceiling/floor surfaces -- same flat dark-charcoal
-        // fallback as before when no image is supplied or found, so
-        // every other existing caller (and the addDoorFrame reveal,
-        // which still calls this with no imageName) is unaffected.
-        if let imageName, let image = resolveThemeImage(imageName) {
-            m.diffuse.contents = image
-            m.diffuse.wrapS = .repeat
-            m.diffuse.wrapT = .repeat
-            m.diffuse.contentsTransform = SCNMatrix4MakeScale(2, 2, 1)
-        } else {
-            m.diffuse.contents = UIColor(white: 0.32, alpha: 1)
-        }
+        m.diffuse.contents = UIColor(white: 0.32, alpha: 1)
         m.lightingModel = .physicallyBased
         m.metalness.contents = 0.0
         m.roughness.contents = 0.9

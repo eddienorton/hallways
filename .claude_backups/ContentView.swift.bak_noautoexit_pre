@@ -57,75 +57,20 @@ final class NavigationBridge: ObservableObject {
     // -- a real snapshot of exactly what was on screen at that
     // instant, dimmed lighting and all.
     @Published var doorSnapshot: UIImage?
-    var pendingElevatorArtwork: [String: Any] = [:]
 
-    // Eddie, Sept 16 (remove automatic step-out): true from the
-    // instant EITHER kind of elevator ride arrives (set by onReachedEnd
-    // for a passive ride, or onElevatorArrivedControlled for a
-    // player-controlled one) until the very next HallwaySceneView
-    // build -- the brand-new destination floor -- consumes and clears
-    // it, once, by calling TapNavigationController.
-    // presentArrivalInsideElevator(preservedYaw:). This is what tells
-    // that build "this floor was just reached by elevator, present the
-    // player standing inside it with the doors open" instead of the
-    // normal default spawn. The one persistent object that survives
-    // the full scene teardown/rebuild a floor change triggers, so it's
-    // the only place this kind of one-shot, cross-rebuild handoff can
-    // live.
-    @Published var pendingElevatorArrival = false
-
-    // Eddie, Sept 16 (tap the inside of the Floor 1 entrance doors to
-    // return to the opening screen): set true by Coordinator.handleTap
-    // when it hit-tests floorOneEntranceBack; consumed once by
-    // ContentView's own onChange below, which does exactly what the
-    // existing Reset button already does (switch to floor 1, request a
-    // navigation reset, fade the intro screen back in) -- reusing that
-    // same opening/exterior state and transition rather than building a
-    // second one.
-    @Published var requestReturnToOpening = false
-
-    // Eddie, Sept 16 (atomic arrival presentation): true only once the
-    // destination floor's own makeUIView build has fully run --
-    // HallwayScene.build, TapNavigationController construction, AND
-    // presentArrivalInsideElevator -- so its camera/doors are sitting
-    // in the exact canonical arrival state, not still holding the raw
-    // default spawn (cell center, facing south) that HallwayScene.build
-    // always produces first. ElevatorCurtainOverlay's own open-the-
-    // curtain trigger below now waits on this instead of firing on a
-    // blind fixed delay -- see that onChange handler's own comment for
-    // why a fixed delay alone let the curtain start sliding open, and
-    // expose the not-yet-repositioned scene through its widening gap,
-    // whenever SwiftUI's own async rebuild of the destination floor
-    // hadn't caught up yet. Reset to false the instant a NEW arrival
-    // begins (onReachedEnd / onElevatorArrivedControlled, alongside
-    // pendingElevatorArrival), so a stale `true` left over from the
-    // PREVIOUS floor's arrival can never let a later curtain skip the
-    // wait.
-    @Published var arrivalSceneReady = false
-
-    // The camera's exact yaw (radians) at the instant a PLAYER-
-    // CONTROLLED ride arrived -- nil for a passive ride, meaning
-    // presentArrivalInsideElevator falls back to the natural "facing
-    // the doors" default orientation instead. Consumed and cleared
-    // alongside pendingElevatorArrival above, same one-shot handoff.
+    // Eddie, Sept 16 (manual elevator exit, 2nd pass): the camera's
+    // exact yaw (radians) at the instant a PLAYER-CONTROLLED ride
+    // arrived, stashed here -- the one persistent object that survives
+    // the full scene teardown/rebuild a floor change triggers -- so
+    // the brand-new destination floor's own makeUIView build can
+    // consume it once (see TapNavigationController.
+    // presentControlledArrival(yaw:)) and restore that exact
+    // orientation instead of the normal default spawn facing. Set by
+    // onElevatorArrivedControlled, consumed and cleared the moment the
+    // very next HallwaySceneView build reads it, so it can never leak
+    // into a later, unrelated floor load (a normal walk-in arrival, or
+    // even a later passive ride).
     @Published var pendingArrivalYaw: Double?
-
-    // Eddie, Sept 16 (spatially-truthful controlled arrival): set
-    // alongside pendingElevatorArrival by BOTH onReachedEnd (false)
-    // and onElevatorArrivedControlled (true), and read afterward by
-    // ElevatorCurtainOverlay to decide how to present this specific
-    // arrival -- a passive one keeps the proven door-shaped
-    // curtain/snapshot presentation (the camera's always dead-on the
-    // real doorway for that path), while a controlled one uses a
-    // plain, non-door-shaped fade instead and calls
-    // TapNavigationController.playControlledArrivalDoorOpen() once it
-    // starts revealing, so the real 3D doors animate open at their
-    // real location instead of a screen-centered effect pretending to
-    // be them. Not simply inferred from doorSnapshot == nil (which
-    // happens to always be true for a controlled ride today) because
-    // that's an incidental side effect of a DIFFERENT feature, not a
-    // documented contract -- this is explicit.
-    @Published var arrivalWasControlled = false
 }
 
 /// Captures moneyHUD's actual on-screen frame (see moneyHUD's own
@@ -193,21 +138,6 @@ struct ContentView: View {
     // around just so newcomers can find the controls.
     @AppStorage("hasSeenNavGestureHint") private var hasSeenNavGestureHint = false
     @State private var showNavGestureHint = false
-
-    // Eddie, Sept 16 (Floor 1 intro walk, once): "Hallways introduces
-    // itself once. After that, it assumes the player has learned the
-    // lobby and trusts them to navigate it normally." Same @AppStorage
-    // (persists across launches) shape as hasSeenNavGestureHint just
-    // above.
-    //
-    // Eddie, Sept 17: no longer a one-time gate -- the ceremonial
-    // front-door-to-elevator walk now happens on EVERY front-door
-    // entrance, not just the first ever. This flag is still written
-    // (see the IntroScreenView onEnter closure below) but nothing
-    // reads it to decide whether the walk happens anymore. Left in
-    // place rather than removed -- persisted first-run/resume state
-    // is a separate future task, not part of this change.
-    @AppStorage("hasCompletedInitialEntrance") private var hasCompletedInitialEntrance = false
 
     // The cash "earth-shattering graphic" -- Eddie, Sept 6: grabbing
     // money should ring up with a dazzling animation and a ka-ching
@@ -383,27 +313,9 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            HallwaySceneView(tuning: tuning, runtime: runtime, mazeStore: mazeStore, navBridge: navBridge, themeStore: themeStore, devPatternStore: devPatternStore, mirrorComments: mirrorComments, cameraEnabled: scenePhase == .active && !showGridEditor && !showIntroScreen, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            HallwaySceneView(tuning: tuning, runtime: runtime, mazeStore: mazeStore, navBridge: navBridge, themeStore: themeStore, devPatternStore: devPatternStore, mirrorComments: mirrorComments, cameraEnabled: scenePhase == .active && !showGridEditor && !showIntroScreen)
                 .id(sceneVersion)
                 .ignoresSafeArea()
-                // Eddie, Sept 16 (entrance-door tap -> opening screen):
-                // same 3 actions the existing Reset button already
-                // performs below (switch to floor 1 -- a no-op here
-                // since we're already there --, request a navigation
-                // reset, fade the intro screen back in), just triggered
-                // by NavigationBridge's one-shot flag instead of a
-                // button tap. No new opening/exterior state or
-                // transition -- this reuses exactly what's already
-                // there.
-                .onChange(of: navBridge.requestReturnToOpening) { _, value in
-                    guard value else { return }
-                    navBridge.requestReturnToOpening = false
-                    mazeStore.switchTo(id: 1)
-                    runtime.requestReset()
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        showIntroScreen = true
-                    }
-                }
 
             if let navController = navBridge.controller {
                 NavigationOverlay(controller: navController)
@@ -472,23 +384,7 @@ struct ContentView: View {
                         showIntroScreen = false
                     }
                     if mazeStore.currentMazeID == 1 {
-                        // The special uninterrupted intro walk -- Eddie,
-                        // Sept 17: no longer first-entrance-only. EVERY
-                        // front-door entrance (this IntroScreenView
-                        // closing while on floor 1 -- cold launch,
-                        // walking out the front doors and back in via
-                        // NavigationBridge.requestReturnToOpening, or
-                        // the dev Reset button) performs this same
-                        // ceremonial walk, every time. Elevator arrivals
-                        // never show this intro screen at all, so they
-                        // stay completely untouched by this. The two
-                        // hasCompletedInitialEntrance writes below no
-                        // longer gate anything (see its declaration
-                        // above) -- kept as-is since that persisted flag
-                        // is a separate future resume/persistence task.
-                        navBridge.controller?.advance(source: "CEREMONIAL")
-                        hasCompletedInitialEntrance = true
-                        navBridge.controller?.hasCompletedInitialEntrance = true
+                        navBridge.controller?.advance()
                     }
                 }
                 .transition(.opacity)
@@ -886,25 +782,13 @@ private struct ElevatorCurtainOverlay: View {
     var body: some View {
         GeometryReader { geo in
             if visible {
-                if navBridge.arrivalWasControlled {
-                    // Hold the actual outgoing view across scene construction.
-                    // Never substitute door-colored artwork for a wall the player chose.
-                    if let snapshot = navBridge.doorSnapshot {
-                        Image(uiImage: snapshot)
-                            .resizable()
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .opacity(1 - openFraction)
-                            .allowsHitTesting(false)
-                    }
-                } else {
-                    HStack(spacing: 0) {
-                        doorPanel(fullWidth: geo.size.width, halfWidth: geo.size.width / 2, height: geo.size.height, snapshot: navBridge.doorSnapshot, cropAlignment: .leading, seamAtTrailingEdge: true)
-                            .offset(x: -geo.size.width / 2 * openFraction)
-                        doorPanel(fullWidth: geo.size.width, halfWidth: geo.size.width / 2, height: geo.size.height, snapshot: navBridge.doorSnapshot, cropAlignment: .trailing, seamAtTrailingEdge: false)
-                            .offset(x: geo.size.width / 2 * openFraction)
-                    }
-                    .allowsHitTesting(false)
+                HStack(spacing: 0) {
+                    doorPanel(fullWidth: geo.size.width, halfWidth: geo.size.width / 2, height: geo.size.height, snapshot: navBridge.doorSnapshot, cropAlignment: .leading, seamAtTrailingEdge: true)
+                        .offset(x: -geo.size.width / 2 * openFraction)
+                    doorPanel(fullWidth: geo.size.width, halfWidth: geo.size.width / 2, height: geo.size.height, snapshot: navBridge.doorSnapshot, cropAlignment: .trailing, seamAtTrailingEdge: false)
+                        .offset(x: geo.size.width / 2 * openFraction)
                 }
+                .allowsHitTesting(false)
             }
         }
         // Measure the same full-screen bounds as the SceneKit snapshot.
@@ -915,8 +799,6 @@ private struct ElevatorCurtainOverlay: View {
             guard event != nil else { return }
             openFraction = 0
             visible = true
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
-            navLog("[ARRIVALDIAG] curtain floorTransitionRequested received t=\(String(format: "%.4f", Date().timeIntervalSince1970)) -- curtain now FULLY CLOSED (openFraction=0, visible=true)")
             // A brief beat so mazeStore.advanceToNextMaze() (called by
             // the controller right alongside this same event) actually
             // swaps in and settles behind this fully-closed curtain
@@ -925,84 +807,22 @@ private struct ElevatorCurtainOverlay: View {
             // floor for an instant.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 SoundEffects.playElevatorArrival()
-                navLog("[ARRIVALDIAG] arrival sound played t=\(String(format: "%.4f", Date().timeIntervalSince1970))")
                 DispatchQueue.main.asyncAfter(deadline: .now() + SoundEffects.elevatorDoorOpeningDelay) {
-                    // Eddie, Sept 16 (atomic arrival presentation):
-                    // this fixed 0.2s + elevatorDoorOpeningDelay beat
-                    // was always just a GUESS at how long
-                    // mazeStore.advanceToNextMaze() takes to actually
-                    // swap in and settle -- true almost all the time,
-                    // but physical testing caught the real exception:
-                    // a first-time-built floor (uncompiled shaders/
-                    // textures) can still be mid-construction when
-                    // this fires, so the curtain started sliding open
-                    // over a scene that hadn't reached its canonical
-                    // arrival state yet -- a raw default camera pose,
-                    // then whatever implicit animation carried it from
-                    // there to the real one, visibly, through the
-                    // widening gap. openWhenSceneReady() below still
-                    // fires the arrival ding-dong and starts checking
-                    // at this exact same instant (unchanged timing for
-                    // the overwhelmingly common case where the
-                    // destination floor was already ready), but no
-                    // longer just assumes readiness -- it polls
-                    // navBridge.arrivalSceneReady (set the instant
-                    // presentArrivalInsideElevator actually finishes,
-                    // see NavigationBridge.arrivalSceneReady) and only
-                    // stops the music / starts the open animation once
-                    // that's true, checking again on a short interval
-                    // otherwise. The curtain stays fully closed for
-                    // however much longer that takes -- nothing behind
-                    // it is visible either way.
-                    // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): counts
-                    // how many 0.03s polls it actually took, so the
-                    // console shows whether the destination floor was
-                    // already ready (pollCount stays 0) or the wait
-                    // genuinely engaged (pollCount > 0).
-                    var arrivalDiagPollCount = 0
-                    func openWhenSceneReady() {
-                        guard navBridge.arrivalSceneReady else {
-                            if arrivalDiagPollCount == 0 {
-                                navLog("[ARRIVALDIAG] curtain open gate NOT READY yet t=\(String(format: "%.4f", Date().timeIntervalSince1970)) -- polling")
-                            }
-                            arrivalDiagPollCount += 1
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-                                openWhenSceneReady()
-                            }
-                            return
-                        }
-                        navLog("[ARRIVALDIAG] curtain open gate READY t=\(String(format: "%.4f", Date().timeIntervalSince1970)) pollCount=\(arrivalDiagPollCount) -- stopping music, starting open animation")
-                        // Sept 14 (Eddie): "keep the elevator music playing
-                        // continuously while the doors remain closed... stop
-                        // it at the moment the doors START to open." Moved
-                        // here from TapNavigationController.playElevatorRide
-                        // (previously stopped right after the 180 pivot) --
-                        // this is the exact instant the doors begin sliding
-                        // apart, right after the existing arrival ding-dong
-                        // above; that ding-dong's own timing is untouched.
-                        SoundEffects.stopElevatorMusic()
-                        navBridge.controller?.playArrivalLightWash(openingDuration: navBridge.arrivalWasControlled ? 1.6 : 1.0)
-                        // Eddie, Sept 16 (spatially-truthful controlled
-                        // arrival): the instant this fade starts
-                        // revealing a controlled arrival, tell the
-                        // (brand new, already-built) destination
-                        // controller to actually animate its real 3D
-                        // doors open -- see playControlledArrivalDoorOpen()'s
-                        // own comment. No-op for a passive arrival,
-                        // whose doors were already opened, instantly,
-                        // back in presentArrivalInsideElevator.
-                        if navBridge.arrivalWasControlled {
-                            navBridge.controller?.playControlledArrivalDoorOpen()
-                        }
-                        withAnimation(.easeInOut(duration: 1.0)) {
-                            openFraction = 1
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-                            visible = false
-                            navLog("[ARRIVALDIAG] curtain visible = false t=\(String(format: "%.4f", Date().timeIntervalSince1970)) -- transition presentation complete")
-                        }
+                    // Sept 14 (Eddie): "keep the elevator music playing
+                    // continuously while the doors remain closed... stop
+                    // it at the moment the doors START to open." Moved
+                    // here from TapNavigationController.playElevatorRide
+                    // (previously stopped right after the 180 pivot) --
+                    // this is the exact instant the doors begin sliding
+                    // apart, right after the existing arrival ding-dong
+                    // above; that ding-dong's own timing is untouched.
+                    SoundEffects.stopElevatorMusic()
+                    withAnimation(.easeInOut(duration: 1.0)) {
+                        openFraction = 1
                     }
-                    openWhenSceneReady()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                        visible = false
+                    }
                 }
             }
         }
@@ -1047,20 +867,8 @@ private struct FloorMapOverlayHost: View {
 private struct IntroScreenView: View {
     let sceneReady: Bool
     @State private var audioReady = false
-    // Eddie, Sept 17 (startup permission gate v2): both resolved
-    // locally, in sequence, by the .task below -- Photos first, then
-    // Camera chained off its completion (PhotoRollProvider.
-    // resolveAuthorization / MirrorCamera.resolveAuthorization).
-    // "Resolved" means the user answered (or the OS already knew the
-    // answer from a prior run); it does not mean granted.
-    @State private var photosReady = false
-    @State private var cameraReady = false
     @State private var entryRequested = false
-    // Eddie, Sept 17: a second, independent guard used only by the tap
-    // handler below -- see its comment for why this is deliberately
-    // NOT folded into the same queue/auto-enter behavior `ready` gets.
-    private var permissionsPreflightComplete: Bool { photosReady && cameraReady }
-    private var ready: Bool { sceneReady && audioReady && permissionsPreflightComplete }
+    private var ready: Bool { sceneReady && audioReady }
     let onEnter: () -> Void
 
     private var buildingImage: UIImage? {
@@ -1180,32 +988,10 @@ private struct IntroScreenView: View {
             TrashPickupArtwork.prepareForGameplay()
             audioReady = true
         }
-        // Eddie, Sept 17 (startup permission gate v2): Photos, then
-        // Camera chained off ITS completion -- not simultaneous, not
-        // triggered by the tap. Each resolveAuthorization call is a
-        // no-op passthrough straight to its completion when the OS
-        // already knows the answer from an earlier run (no prompt), so
-        // an already-determined pair resolves near-instantly here.
-        .task {
-            PhotoRollProvider.resolveAuthorization {
-                photosReady = true
-                MirrorCamera.resolveAuthorization {
-                    cameraReady = true
-                }
-            }
-        }
         .onChange(of: ready) { _, value in
             if value && entryRequested { onEnter() }
         }
         .onTapGesture {
-            // Eddie, Sept 17: independent of `ready` above on purpose --
-            // a tap while either permission is still unresolved is
-            // ignored outright, not queued. entryRequested only ever
-            // gets set once both permissions are already known, so
-            // onChange(of: ready) above can never auto-enter as a side
-            // effect of a permission resolving late; the player has to
-            // tap again once the preflight is actually done.
-            guard permissionsPreflightComplete else { return }
             if ready { onEnter() } else { entryRequested = true }
         }
     }
@@ -1223,7 +1009,6 @@ struct HallwaySceneView: UIViewRepresentable {
 
     @ObservedObject var mirrorComments: MirrorCommentState
     var cameraEnabled: Bool = true
-    var hasCompletedInitialEntrance: Bool = false
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -1432,12 +1217,6 @@ struct HallwaySceneView: UIViewRepresentable {
         } else {
             // A maze is drawn — tap-to-advance between intersections,
             // no hold-and-steer at all.
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator arrival
-            // visual-transition audit). Remove this whole block (every
-            // line tagged [ARRIVALDIAG] in this file and
-            // TapNavigationController.swift) once diagnosed.
-            let arrivalDiagBuildStart = Date().timeIntervalSince1970
-            navLog("[ARRIVALDIAG] makeUIView START t=\(String(format: "%.4f", arrivalDiagBuildStart)) buildingFloor=\(mazeStore.currentMazeID) pendingElevatorArrival=\(navBridge.pendingElevatorArrival) pendingArrivalYaw=\(String(describing: navBridge.pendingArrivalYaw))")
             let start = mazeStore.startCoordinate ?? GridCoordinate(row: 0, col: 0)
             let end = mazeStore.endCoordinate ?? start
             let facing = startingFacing(at: start, cells: mazeStore.cells)
@@ -1455,15 +1234,10 @@ struct HallwaySceneView: UIViewRepresentable {
             // already-known type to destructure in a SEPARATE, trivial second
             // statement, instead of solving both at once. No behavior change --
             // same call, same arguments, same resulting bindings below.
-            navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(mazeStore.currentMazeID)")
-            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:])
-            navBridge.pendingElevatorArtwork = [:]
+            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current)
             let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes) = hallwaySceneBuildResult
-            navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) elapsed=\(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagBuildStart))s raw-spawn cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles) elevatorDoors-present=\(elevatorDoors != nil)")
             view.scene = scene
-            navLog("[ARRIVALDIAG] view.scene = scene assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970))")
             view.pointOfView = cameraNode
-            navLog("[ARRIVALDIAG] view.pointOfView = cameraNode assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
             context.coordinator.wallMaterials = wallMaterials
             context.coordinator.floorMaterial = floorMaterial
             context.coordinator.ceilingMaterial = ceilingMaterial
@@ -1506,37 +1280,18 @@ struct HallwaySceneView: UIViewRepresentable {
                     _ = view.prepare(shaftNodes)
                 }
             }
-            navLog("[ARRIVALDIAG] TapNavigationController(...) about to construct t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
-            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, exitSignNodes: exitSignNodes, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
-            // Eddie, Sept 16 (remove automatic step-out): this build
-            // IS an elevator ride's destination floor -- passive or
-            // player-controlled -- exactly when
-            // navBridge.pendingElevatorArrival is true (set by
-            // onReachedEnd or onElevatorArrivedControlled, just below,
-            // on the PREVIOUS floor's own build). Consumed and cleared
-            // here, once, so it can never leak into a later, unrelated
-            // floor load. pendingArrivalYaw is only ever non-nil
-            // alongside it, for a controlled ride -- nil means present
-            // the normal passive "facing the doors" default instead.
-            navLog("[ARRIVALDIAG] pendingElevatorArrival check t=\(String(format: "%.4f", Date().timeIntervalSince1970)) pendingElevatorArrival=\(navBridge.pendingElevatorArrival) pendingArrivalYaw=\(String(describing: navBridge.pendingArrivalYaw))")
-            if navBridge.pendingElevatorArrival {
-                let preservedYaw = navBridge.pendingArrivalYaw
-                navBridge.pendingElevatorArrival = false
+            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, exitSignNodes: exitSignNodes, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind)
+            // Eddie, Sept 16 (manual elevator exit, 2nd pass): this
+            // build IS a player-controlled ride's destination floor
+            // exactly when navBridge.pendingArrivalYaw is non-nil (set
+            // by onElevatorArrivedControlled, just below, on the
+            // PREVIOUS floor's own build). Consumed and cleared here,
+            // once, so it can never leak into a later, unrelated floor
+            // load -- an ordinary walk-in arrival, or even a later
+            // passive ride.
+            if let pendingArrivalYaw = navBridge.pendingArrivalYaw {
                 navBridge.pendingArrivalYaw = nil
-                navController.presentArrivalInsideElevator(preservedYaw: preservedYaw)
-                // Eddie, Sept 16 (atomic arrival presentation): only
-                // set once presentArrivalInsideElevator has fully run,
-                // synchronously, right above -- by the time this line
-                // executes the camera/doors are already sitting in
-                // their final canonical arrival state (that call also
-                // now disables implicit SceneKit actions on its own
-                // property sets -- see its own comment -- so there's no
-                // animation left in flight for the curtain to catch
-                // mid-transition either). ElevatorCurtainOverlay's
-                // onChange handler waits on this flag before it lets
-                // openFraction start moving.
-                navBridge.arrivalSceneReady = true
-                navLog("[ARRIVALDIAG] arrivalSceneReady = true SET t=\(String(format: "%.4f", Date().timeIntervalSince1970)) makeUIView total elapsed=\(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagBuildStart))s")
+                navController.presentControlledArrival(yaw: pendingArrivalYaw)
             }
             navController.onCollectCash = { [mazeStore] amount in
                 mazeStore.addMoney(amount)
@@ -1553,9 +1308,6 @@ struct HallwaySceneView: UIViewRepresentable {
             // grid editor's onDismiss fix.
             navController.onReachedEnd = { [weak view, mazeStore, navBridge] in
                 guard mazeStore.nextMazeID != nil else { return }
-                // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator
-                // arrival visual-transition audit)
-                navLog("[ARRIVALDIAG] onReachedEnd (passive) START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(mazeStore.currentMazeID) nextMazeID=\(String(describing: mazeStore.nextMazeID))")
                 // Eddie, Sept 8: "the same exact color/lighting has
                 // to be on the doors when theyre opening as when
                 // theyre closing." The curtain's gradient was
@@ -1570,56 +1322,47 @@ struct HallwaySceneView: UIViewRepresentable {
                 // for the next floor, it's the literal pixels the
                 // player was just looking at, not a guess at them.
                 navBridge.doorSnapshot = view?.snapshot()
-                navBridge.pendingElevatorArtwork = view?.scene.map { HallwayScene.elevatorArtwork(in: $0) } ?? [:]
-                // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
-                navLog("[ARRIVALDIAG] onReachedEnd doorSnapshot captured t=\(String(format: "%.4f", Date().timeIntervalSince1970)) snapshot=\(navBridge.doorSnapshot != nil ? "non-nil" : "NIL")")
                 // Fired on navBridge itself, not read off the outgoing
                 // controller -- see NavigationBridge.floorTransitionRequested.
                 navBridge.floorTransitionRequested = TapNavigationController.FloorTransitionEvent()
                 navBridge.controller = nil
-                // Eddie, Sept 16 (remove automatic step-out): tells the
-                // destination floor's own build to present the player
-                // standing inside the just-arrived elevator, doors
-                // open, rather than the normal default spawn -- see
-                // NavigationBridge.pendingElevatorArrival. pendingArrivalYaw
-                // stays nil here (a passive ride), so
-                // presentArrivalInsideElevator uses its natural
-                // "already facing the doors" orientation.
-                navBridge.pendingElevatorArrival = true
-                // Eddie, Sept 16 (atomic arrival presentation): this
-                // arrival hasn't been presented yet -- cleared here so
-                // a stale `true` left over from the LAST ride can never
-                // let the curtain below skip its wait.
-                navBridge.arrivalSceneReady = false
-                // Eddie, Sept 16 (spatially-truthful controlled
-                // arrival): a passive arrival -- see NavigationBridge.arrivalWasControlled.
-                navBridge.arrivalWasControlled = false
-                // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
-                navLog("[ARRIVALDIAG] onReachedEnd calling advanceToNextMaze() t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID(before)=\(mazeStore.currentMazeID)")
                 mazeStore.advanceToNextMaze()
-                navLog("[ARRIVALDIAG] onReachedEnd advanceToNextMaze() returned t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID(after)=\(mazeStore.currentMazeID)")
             }
-            // Controlled arrival keeps a full-frame snapshot (never split into doors)
-            // while the destination is constructed with the same displayed artwork.
-            navController.onElevatorArrivedControlled = { [weak view, mazeStore, navBridge] yaw in
-                navBridge.doorSnapshot = view?.snapshot()
-                navBridge.pendingElevatorArtwork = view?.scene.map { HallwayScene.elevatorArtwork(in: $0) } ?? [:]
+            // Eddie, Sept 16 (manual elevator exit, 2nd pass): fires
+            // INSTEAD of onReachedEnd above when the player took
+            // camera control this ride. Does exactly what onReachedEnd
+            // does, on the exact same schedule -- the destination
+            // floor becomes real immediately, same as a passive ride
+            // (the FIRST attempt at this deferred that advance until a
+            // second "tap the doors again" gesture and left the player
+            // on their own OLD floor -- confirmed broken by physical
+            // testing). The one deliberate difference: doorSnapshot is
+            // left nil instead of a live view?.snapshot() -- a
+            // controlled ride's camera can be facing anything (a rear
+            // wall, a corner) at arrival, and a live snapshot doubled
+            // as a picture of whatever wall the player happened to be
+            // facing, split and animated open like doors (the OTHER
+            // confirmed bug). ElevatorCurtainOverlay already has a
+            // generic, camera-orientation-agnostic fallback for
+            // exactly this case (doorGradient, used whenever
+            // doorSnapshot is nil) -- reusing it keeps the curtain's
+            // normal open animation and arrival-sound/Muzak-stop
+            // timing completely intact, just without pretending to
+            // show real doors it doesn't actually have a picture of.
+            // pendingArrivalYaw stashes the preserved yaw for the
+            // brand-new destination floor's own build (this same
+            // function, next time it runs) to consume once -- see
+            // NavigationBridge.pendingArrivalYaw and
+            // TapNavigationController.presentControlledArrival(yaw:).
+            navController.onElevatorArrivedControlled = { [mazeStore, navBridge] yaw in
+                navBridge.doorSnapshot = nil
                 navBridge.floorTransitionRequested = TapNavigationController.FloorTransitionEvent()
                 navBridge.controller = nil
-                navBridge.pendingElevatorArrival = true
                 navBridge.pendingArrivalYaw = yaw
-                // Eddie, Sept 16 (atomic arrival presentation): same
-                // reset as onReachedEnd above -- see that comment.
-                navBridge.arrivalSceneReady = false
-                // Eddie, Sept 16 (spatially-truthful controlled
-                // arrival): a controlled arrival -- see
-                // NavigationBridge.arrivalWasControlled.
-                navBridge.arrivalWasControlled = true
                 mazeStore.advanceToNextMaze()
             }
             view.delegate = navController
             context.coordinator.navigationController = navController
-            context.coordinator.navBridge = navBridge
             navController.onHandheldMapOpened = { [weak coordinator = context.coordinator] in
                 coordinator?.cancelHeldWalkForMap()
             }
@@ -1679,9 +1422,39 @@ struct HallwaySceneView: UIViewRepresentable {
                     }
                 }
 
-                // Arrival setup is complete. Remain in the cab until an explicit
-                // tap/hold; the former delayed advance also triggered manual walk-out.
-
+                // Eddie, Sept 8, 13-screenshot elevator pass, the very
+                // last item: "when you are off the elevator and in the
+                // cube adjacent to the cube that holds the mission
+                // text, you have to tap to move closer... automate the
+                // one step into the next box." Every floor reached via
+                // the elevator starts you at MazeStore.elevatorCoordinate
+                // with the Floor Mission sign one cell away at
+                // missionCoordinate (elevatorCoordinate.row + 1) --
+                // currentMazeID == 1 is the one floor that's the
+                // exception, entered on foot from the intro walk-in at
+                // floorOneEntryCoordinate instead, so it's excluded
+                // here rather than auto-walking someone forward before
+                // they've even taken a real step. advance() is the
+                // exact same call a tap already makes, so it inherits
+                // every stop condition (mission sign included) for
+                // free -- it's called here rather than from inside the
+                // elevator ride itself because this is the one place
+                // that runs once the NEW floor's own controller (not
+                // the old one the ride played out on) actually exists.
+                // Eddie, Sept 8: "after you pivot, and the
+                // elevator doors proceed to open, you start moving
+                // closer to the mission sign cube AS the door is
+                // opening. it should be sequential." This runs on
+                // the very next runloop tick after
+                // floorTransitionRequested fires, but
+                // ElevatorCurtainOverlay opens as the arrival chime sounds.
+                // Match the full reveal duration
+                // so walking starts only after the doors are open.
+                if mazeStore.currentMazeID != 1 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + SoundEffects.elevatorRevealDuration) { [weak navController] in
+                        navController?.advance()
+                    }
+                }
             }
         }
 
@@ -1692,20 +1465,12 @@ struct HallwaySceneView: UIViewRepresentable {
         view.rendersContinuously = true
 
         if let scene = view.scene {
-            var surfaces: [MirrorSurfaceTarget] = []
+            var surfaces: [SCNMaterial] = []
             scene.rootNode.enumerateChildNodes { node, _ in
-                if node.name == "mirrorSurface", let material = node.geometry?.firstMaterial {
-                    // Eddie, Sept 16 (Floor 1 lobby mirror aspect-fill correction):
-                    // pass each surface's true rendered aspect ratio (accounting for
-                    // any ancestor node scale, e.g. the lobby mirror's scale.y = 2)
-                    // so MirrorCamera can crop the live feed to match instead of
-                    // letting SceneKit stretch it onto the scaled plane.
-                    let aspect = HallwayScene.mirrorSurfaceAspect(of: node)
-                    surfaces.append(MirrorSurfaceTarget(material: material, aspect: aspect))
-                }
+                if node.name == "mirrorSurface", let material = node.geometry?.firstMaterial { surfaces.append(material) }
             }
             if !surfaces.isEmpty {
-                context.coordinator.mirrorCamera = MirrorCamera(surfaces: surfaces, comments: mirrorComments)
+                context.coordinator.mirrorCamera = MirrorCamera(materials: surfaces, comments: mirrorComments)
                 context.coordinator.mirrorCamera?.setActive(cameraEnabled)
             }
         }
@@ -1770,11 +1535,6 @@ struct HallwaySceneView: UIViewRepresentable {
         var mirrorCamera: MirrorCamera?
         var movementController: MovementController?
         var navigationController: TapNavigationController?
-        // Eddie, Sept 16 (entrance-door tap -> opening screen): the only
-        // Coordinator property that reaches back into ContentView's own
-        // NavigationBridge -- set once in makeUIView, same object
-        // HallwaySceneView already holds as an @ObservedObject.
-        weak var navBridge: NavigationBridge?
         var lastResetToken = 0
         /// Swapping a material's texture in place (no scene rebuild) is
         /// what lets the theme button change the hallway's look
@@ -1805,38 +1565,6 @@ struct HallwaySceneView: UIViewRepresentable {
         // constant — smaller means a shorter drag commits a turn,
         // larger means a longer, more deliberate one.
         private let dragRotateDistance: CGFloat = 140
-
-        // Positional counterpart of dragRotateDistance -- how many
-        // points of vertical drag equal one full grid cell of forward/
-        // backward movement. Starts equal to dragRotateDistance (same
-        // interaction philosophy, per Eddie's spec) but kept as its own
-        // named constant so move feel can be retuned independently of
-        // turn feel.
-        private let dragMoveDistance: CGFloat = 140
-
-        // Once a single finger-down pan gesture has moved far enough in
-        // one direction to tell horizontal drag (turn) apart from
-        // vertical drag (move), it commits to that axis for the rest of
-        // the gesture -- see handlePanRotate below. Below this many
-        // points of total movement, every pan still reads as the
-        // existing horizontal turn drag, exactly as before this axis
-        // existed, so ordinary left/right dragging is unchanged.
-        private let dragAxisLockDistance: CGFloat = 10
-        private enum PanDragAxis { case horizontal, vertical }
-        private var lockedPanAxis: PanDragAxis?
-
-        // Pinch counterpart of dragMoveDistance: how much UIPinchGesture
-        // Recognizer's `scale` has to move away from 1.0 (its neutral,
-        // fingers-unmoved value) to represent one full grid cell of
-        // forward/backward travel. Pinch OUT (scale > 1) = forward,
-        // pinch IN (scale < 1) = backward -- see handlePinch below,
-        // which feeds this straight into the SAME beginDragMove/
-        // updateDragMove/endDragMove machinery the one-finger vertical
-        // drag uses, not a second locomotion model. 0.4 means spreading
-        // (or pinching) your fingers to 1.4x (or 0.6x) their starting
-        // distance apart is one cell -- an initial feel constant, easy
-        // to retune independently of dragMoveDistance.
-        private let pinchScalePerCell: Double = 0.4
 
         // Ticks while a long-press-forward is held -- see
         // handleLongPressForward below. nil whenever nothing's held.
@@ -2009,16 +1737,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
                 if hits.contains(where: { controller.isElevatorDoor($0.node) }), controller.elevatorAtCurrentCell {
                     navLog("tap hit elevator door")
-                    if controller.canReenterArrivedElevator {
-                        controller.advance()
-                    } else {
-                        controller.openElevator()
-                    }
-                    return
-                }
-                if hits.contains(where: { controller.isEntranceDoor($0.node) }), controller.entranceDoorAtCurrentCell {
-                    navLog("tap hit floor 1 entrance doors (inside) -- returning to opening screen")
-                    navBridge?.requestReturnToOpening = true
+                    controller.openElevator()
                     return
                 }
                 if hits.contains(where: { controller.isFloorMapNode($0.node) }), controller.floorMapAtCurrentCell {
@@ -2029,40 +1748,13 @@ struct HallwaySceneView: UIViewRepresentable {
             controller.advance()
         }
 
-        // Eddie, Sept 17 (pinch continuity fix): was "wait for the
-        // gesture to end, then look at the final scale and make one
-        // discrete move" (pinchForward()/stepBackward(), each a single
-        // legal cell). That's why movement used to wait for finger-up
-        // instead of tracking the pinch live -- .began/.changed were
-        // never handled at all. Rewired to drive the exact same
-        // continuous-scrub machinery the one-finger vertical drag uses
-        // (beginDragMove/updateDragMove/endDragMove in
-        // TapNavigationController.swift) instead of a second locomotion
-        // model: pinch OUT (scale > 1) = forward, pinch IN (scale < 1)
-        // = backward, continuously, with the same reversal, topology
-        // limits, and release settle/snap vertical drag already has.
-        // Note: the old pinchForward() also auto-opened the elevator
-        // when pinching forward while standing at the end facing it --
-        // that shortcut isn't carried over here (endDragMove doesn't
-        // know about the elevator), so for now reaching the elevator
-        // via pinch stops there without opening it, same as walking up
-        // to it without tapping the door. pinchForward() itself is left
-        // in place, just unused, in case that shortcut should come back.
+        // One move per completed pinch, with a dead zone for accidental motion.
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-            guard let controller = navigationController else { return }
-            let fraction = (Double(gesture.scale) - 1.0) / pinchScalePerCell
-            let velocityFraction = Double(gesture.velocity) / pinchScalePerCell
-            switch gesture.state {
-            case .began:
-                navLog("pinch began")
-                controller.beginDragMove()
-            case .changed:
-                controller.updateDragMove(fraction: fraction)
-            case .ended, .cancelled, .failed:
-                navLog("pinch ended, fraction=\(String(format: "%.2f", fraction)), velocityFraction=\(String(format: "%.2f", velocityFraction))")
-                controller.endDragMove(fraction: fraction, velocityFraction: velocityFraction)
-            default:
-                break
+            guard gesture.state == .ended else { return }
+            if gesture.scale >= 1.15 {
+                navigationController?.pinchForward()
+            } else if gesture.scale <= 0.85 {
+                navigationController?.stepBackward()
             }
         }
 
@@ -2074,25 +1766,16 @@ struct HallwaySceneView: UIViewRepresentable {
 
         @objc func handlePanRotate(_ gesture: UIPanGestureRecognizer) {
             guard let controller = navigationController, let view = gesture.view else { return }
-            let translation = gesture.translation(in: view)
-            let velocity = gesture.velocity(in: view)
             // Positive translation.x (finger moving left-to-right) is
             // "swipe right," which Eddie's spec pivots LEFT — matches
             // Direction's yaw convention where turning left is always
             // a positive angle change regardless of current facing.
-            let fraction = Double(translation.x / dragRotateDistance)
+            let fraction = Double(gesture.translation(in: view).x / dragRotateDistance)
             // Same normalization as `fraction` itself, just per second --
             // lets endDragRotate compare position and flick speed on the
             // same 90-degree-turn scale (see its own release-decision
             // comment in TapNavigationController.swift).
-            let velocityFraction = Double(velocity.x / dragRotateDistance)
-            // Positional counterpart of fraction/velocityFraction above:
-            // drag DOWN = move FORWARD (Eddie's spec), and UIKit's
-            // translation.y is already positive moving down, so this
-            // needs no sign flip the way the horizontal fraction above
-            // does for its left/right convention.
-            let verticalFraction = Double(translation.y / dragMoveDistance)
-            let verticalVelocityFraction = Double(velocity.y / dragMoveDistance)
+            let velocityFraction = Double(gesture.velocity(in: view).x / dragRotateDistance)
             // Eddie, Sept 15 (elevator camera control): same gesture,
             // same fraction/dragRotateDistance math, routed to the
             // elevator's own freeform look instead of the grid-
@@ -2102,10 +1785,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // share beginDragRotate/updateDragRotate/endDragRotate
             // outright (that trio always commits to one of the 4
             // cardinal facings on release, which an elevator interior
-            // -- off the grid entirely -- shouldn't). Vertical drag-move
-            // doesn't apply here either -- an elevator interior is off
-            // the grid, so there's no forward/backward cell to move
-            // between.
+            // -- off the grid entirely -- shouldn't).
             if controller.isElevatorRideInProgress {
                 switch gesture.state {
                 case .began:
@@ -2121,55 +1801,15 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
                 return
             }
-            // Axis disambiguation: every pan starts out treated as the
-            // existing horizontal turn-drag, exactly as before this
-            // vertical mode existed (beginDragRotate() fires immediately
-            // on .began, same as always). Only once the finger has moved
-            // dragAxisLockDistance points in EITHER direction does this
-            // decide, once, which axis actually owns the gesture -- if
-            // vertical wins, the in-flight (and by construction still
-            // tiny, since it hasn't crossed the lock distance yet)
-            // horizontal drag is cleanly released with fraction: 0
-            // (facing snaps back to whatever it already was -- no turn
-            // commits) and beginDragMove() takes over instead. Once
-            // locked, that axis keeps the rest of the gesture until
-            // release, so a diagonal finger movement can never straddle
-            // both a turn and a move in one interaction.
             switch gesture.state {
             case .began:
-                lockedPanAxis = nil
                 navLog("pan rotate began")
                 controller.beginDragRotate()
             case .changed:
-                if lockedPanAxis == nil {
-                    let ax = abs(translation.x)
-                    let ay = abs(translation.y)
-                    if max(ax, ay) >= dragAxisLockDistance {
-                        if ay > ax {
-                            lockedPanAxis = .vertical
-                            navLog("pan drag committed to vertical axis (move)")
-                            controller.cancelDragRotateForAxisHandoff()
-                            controller.beginDragMove()
-                        } else {
-                            lockedPanAxis = .horizontal
-                            navLog("pan drag committed to horizontal axis (turn)")
-                        }
-                    }
-                }
-                if lockedPanAxis == .vertical {
-                    controller.updateDragMove(fraction: verticalFraction)
-                } else {
-                    controller.updateDragRotate(fraction: fraction)
-                }
+                controller.updateDragRotate(fraction: fraction)
             case .ended, .cancelled, .failed:
-                if lockedPanAxis == .vertical {
-                    navLog("pan drag ended (move), fraction=\(String(format: "%.2f", verticalFraction)), velocityFraction=\(String(format: "%.2f", verticalVelocityFraction))")
-                    controller.endDragMove(fraction: verticalFraction, velocityFraction: verticalVelocityFraction)
-                } else {
-                    navLog("pan rotate ended, fraction=\(String(format: "%.2f", fraction)), velocityFraction=\(String(format: "%.2f", velocityFraction))")
-                    controller.endDragRotate(fraction: fraction, velocityFraction: velocityFraction)
-                }
-                lockedPanAxis = nil
+                navLog("pan rotate ended, fraction=\(String(format: "%.2f", fraction)), velocityFraction=\(String(format: "%.2f", velocityFraction))")
+                controller.endDragRotate(fraction: fraction, velocityFraction: velocityFraction)
             default:
                 break
             }
@@ -2221,22 +1861,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // own lobby-wall/lobby-ceiling textures or it silently
             // overwrites them back to the current theme's. Floors
             // 2-16: exactly theme.wallImageName, unchanged.
-            // Eddie, Sept 16 (Floor 2 visual pass): same per-floor
-            // override shape as Floor 1's lobby-wall, so tapping the
-            // theme button while on Floor 2 keeps showing the
-            // experimental plaster wall instead of switching back to
-            // brick/cave/etc. Floors 3-16: exactly theme.wallImageName,
-            // unchanged.
-            let effectiveWallImageName: String?
-            switch currentFloorNumber {
-            case 1: effectiveWallImageName = "lobby-wall"
-            // Eddie, Sept 17 (Floor 2 visual pass v2): matches
-            // HallwayScene.build(fromMaze:)'s own case 2 -- wood-oak.jpg
-            // instead of the earlier procedural plaster, so a theme-
-            // cycle tap while on Floor 2 doesn't clobber it back.
-            case 2: effectiveWallImageName = "wood-walnut"
-            default: effectiveWallImageName = theme.wallImageName
-            }
+            let effectiveWallImageName = currentFloorNumber == 1 ? "lobby-wall" : theme.wallImageName
             for material in wallMaterials {
                 applySurface(material, imageName: effectiveWallImageName, fallbackColor: HallwayScene.wallFallbackColor)
             }
@@ -2251,9 +1876,9 @@ struct HallwaySceneView: UIViewRepresentable {
             // this just makes the SAME choice again here, where it
             // actually sticks. Floors 2-19: exactly theme.floorImageName,
             // unchanged.
-            let effectiveFloorImageName = currentFloorNumber == 1 ? "floor1" : (currentFloorNumber == 2 ? "floor-carpet1" : theme.floorImageName)
+            let effectiveFloorImageName = currentFloorNumber == 1 ? "floor1" : theme.floorImageName
             applySurface(floorMaterial, imageName: effectiveFloorImageName, fallbackColor: HallwayScene.floorFallbackColor)
-            let effectiveCeilingImageName = currentFloorNumber == 1 ? "lobby-ceiling" : (currentFloorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName)
+            let effectiveCeilingImageName = currentFloorNumber == 1 ? "lobby-ceiling" : theme.ceilingImageName
             applySurface(ceilingMaterial, imageName: effectiveCeilingImageName, fallbackColor: HallwayScene.ceilingFallbackColor)
         }
 

@@ -1622,7 +1622,7 @@ enum HallwayScene {
             // longer referenced here, in case this gets revisited.
             // Floors 3-16 unaffected -- they still fall to
             // theme.wallImageName exactly as before.
-            effectiveWallImageName = "wood-walnut"
+            effectiveWallImageName = "wood-oak"
         default:
             effectiveWallImageName = theme.wallImageName
         }
@@ -1969,13 +1969,11 @@ enum HallwayScene {
         // (maybe diff color metal)... and of course the 2 vertical
         // sliding doors that open and close."
         let elevatorDoorMaterial = makeElevatorDoorMaterial()
-        let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial(imageName: "elevator-wall")
-        let elevatorShaftCeilingMaterial = makeElevatorShaftMaterial(imageName: "elevator-ceiling")
-        let elevatorShaftFloorMaterial = makeElevatorShaftMaterial(imageName: "elevator-floor")
+        let elevatorShaftInteriorMaterial = makeElevatorShaftMaterial()
         let elevatorGeometry = ElevatorGeometry(cellSize: cellSize)
         let elevatorDoorWidth = elevatorGeometry.doorWidth
         // Shorter exterior opening; the cab envelope and all its contents stay put.
-        let elevatorDoorHeight: CGFloat = 2.5
+        let elevatorDoorHeight: CGFloat = 2.05
         let elevatorCabHeight: CGFloat = 2.6
         let elevatorDoorThickness: CGFloat = 0.05
         let elevatorCenterY: CGFloat = elevatorDoorHeight / 2
@@ -1999,9 +1997,9 @@ enum HallwayScene {
             let depth = Float(elevatorShaftDepth)
             let thick = Float(elevatorPanelThickness)
 
-            func panel(width: CGFloat, height: CGFloat, length: CGFloat, material: SCNMaterial = elevatorShaftInteriorMaterial) -> SCNNode {
+            func panel(width: CGFloat, height: CGFloat, length: CGFloat) -> SCNNode {
                 let geo = SCNBox(width: width, height: height, length: length, chamferRadius: 0)
-                geo.materials = [material]
+                geo.materials = [elevatorShaftInteriorMaterial]
                 return SCNNode(geometry: geo)
             }
 
@@ -2009,9 +2007,9 @@ enum HallwayScene {
             shaft.position = SCNVector3(Float(wallCenterX), Float(elevatorCabCenterY), Float(wallCenterZ))
             let back = panel(width: CGFloat(halfW * 2), height: CGFloat(halfH * 2), length: CGFloat(thick))
             back.position = SCNVector3(0, 0, -depth)
-            let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth), material: elevatorShaftCeilingMaterial)
+            let top = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             top.position = SCNVector3(0, halfH, -depth / 2)
-            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth), material: elevatorShaftFloorMaterial)
+            let bottom = panel(width: CGFloat(halfW * 2), height: CGFloat(thick), length: CGFloat(depth))
             bottom.position = SCNVector3(0, -halfH, -depth / 2)
             let left = panel(width: CGFloat(thick), height: CGFloat(halfH * 2), length: CGFloat(depth))
             left.position = SCNVector3(-halfW, 0, -depth / 2)
@@ -2648,7 +2646,7 @@ enum HallwayScene {
         // build time, and never changes live the way the map's tracking
         // dot does), so there's no reason for build()'s own return tuple
         // to track these nodes at all.
-        func addMissionSignNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage) {
+        func addMissionSignNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage, fillsWall: Bool = true) {
             let aspect = texture.size.height / max(texture.size.width, 1)
             // 0.75, not 1.1 -- see the patch-script comment above this
             // call site for the "why" (portrait FOV is narrow; this
@@ -2685,15 +2683,16 @@ enum HallwayScene {
             // render the inside of the chute container") -- addWall was
             // skipped for this cell's ENTIRE wall face via
             // missionDirection above, not just the sign's own small
-            // footprint. Eddie, Sept 18: reverted the Sept 17/18 Floor-2
-            // open-side special cases (a relaxed guard plus a fabricated
-            // backing plate) -- a mission sign is a WALL-MOUNTED object,
-            // same category as a picture, mirror, or floor map, and
-            // every one of those requires a genuinely solid wall to
-            // mount on; none of them get a special exception. This is
-            // unconditional again, exactly like addPictureNode's own
-            // addDoorFrame call just below.
-            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.12, doorHeight: panelHeight + 0.12, doorCenterY: wallHeight * 0.55)
+            // footprint. Only when fillsWall -- Sept 17 (Eddie, Floor 2
+            // entrance nook): a sign mounted over a genuinely OPEN,
+            // walkable side has no wall there to fill in the first
+            // place, and addDoorFrame's strips would wall the doorway
+            // back up around it; skipped there so the frame just hangs
+            // in the opening, matching how Exit Signs already handle
+            // an open-direction mount just above.
+            if fillsWall {
+                addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.12, doorHeight: panelHeight + 0.12, doorCenterY: wallHeight * 0.55)
+            }
 
             frame.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55), Float(wallCenterZ))
             switch direction {
@@ -3263,12 +3262,21 @@ enum HallwayScene {
             let missionTexture = makeMissionSignTexture(heading: missionHeading, body: missionBody)
             for (coord, direction) in missionSigns {
                 guard cells.contains(coord) else { continue }
-                // Eddie, Sept 18: back to the same solid-wall-required
-                // rule pictures/mirrors/floor maps all use, with no
-                // floor-2 exception -- see addMissionSignNode's own
-                // comment for why the Sept 17/18 open-side special case
-                // was reverted.
-                guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
+                // Sept 17 (Eddie, Floor 2 entrance nook): a mission
+                // sign is now allowed on a genuinely OPEN side too --
+                // e.g. the new elevator block's east wall, which is
+                // also the doorway into the existing hallway -- but
+                // ONLY on floor 2. Several other floors (7-12, found
+                // while checking this) already have a missionSigns
+                // coordinate that happens to sit on an open side --
+                // previously always silently skipped, never rendered.
+                // Gating this on floorNumber == 2 keeps every one of
+                // those floors' behavior byte-identical to before;
+                // only floor 2's new block gets the relaxed rule.
+                // fillsWall (passed to addMissionSignNode below) is
+                // what keeps this from walling the doorway back up.
+                let mountsOnOpenSide = isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col)
+                if mountsOnOpenSide, floorNumber != 2 { continue }
                 let signX = worldX(coord.col)
                 let signZ = worldZ(coord.row)
                 let wx: CGFloat
@@ -3279,7 +3287,7 @@ enum HallwayScene {
                 case .east: (wx, wz) = (signX + half, signZ)
                 case .west: (wx, wz) = (signX - half, signZ)
                 }
-                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture)
+                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture, fillsWall: !mountsOnOpenSide)
             }
         }
 
@@ -4395,7 +4403,7 @@ enum HallwayScene {
     /// blue-grey emissive tint instead of that one's warm ember, so a
     /// glimpse through open elevator doors never gets mistaken for a
     /// destination cubby.
-    private static func makeElevatorShaftMaterial(imageName: String? = nil) -> SCNMaterial {
+    private static func makeElevatorShaftMaterial() -> SCNMaterial {
         // Eddie, Sept 8: "back wall... turns black for some reason."
         // This panel was always counting on getting hit near
         // point-blank by the FULL headlamp to read as dark charcoal
@@ -4417,19 +4425,7 @@ enum HallwayScene {
         // surface form under the existing lights instead of losing
         // definition to near-black. Purely a material change -- no
         // light intensity/position/color touched.
-        // Sept 17 (Eddie): optional bundled photo for the cab's own
-        // wall/ceiling/floor surfaces -- same flat dark-charcoal
-        // fallback as before when no image is supplied or found, so
-        // every other existing caller (and the addDoorFrame reveal,
-        // which still calls this with no imageName) is unaffected.
-        if let imageName, let image = resolveThemeImage(imageName) {
-            m.diffuse.contents = image
-            m.diffuse.wrapS = .repeat
-            m.diffuse.wrapT = .repeat
-            m.diffuse.contentsTransform = SCNMatrix4MakeScale(2, 2, 1)
-        } else {
-            m.diffuse.contents = UIColor(white: 0.32, alpha: 1)
-        }
+        m.diffuse.contents = UIColor(white: 0.32, alpha: 1)
         m.lightingModel = .physicallyBased
         m.metalness.contents = 0.0
         m.roughness.contents = 0.9

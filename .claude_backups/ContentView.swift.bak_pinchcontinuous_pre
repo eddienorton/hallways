@@ -198,15 +198,11 @@ struct ContentView: View {
     // itself once. After that, it assumes the player has learned the
     // lobby and trusts them to navigate it normally." Same @AppStorage
     // (persists across launches) shape as hasSeenNavGestureHint just
-    // above.
-    //
-    // Eddie, Sept 17: no longer a one-time gate -- the ceremonial
-    // front-door-to-elevator walk now happens on EVERY front-door
-    // entrance, not just the first ever. This flag is still written
-    // (see the IntroScreenView onEnter closure below) but nothing
-    // reads it to decide whether the walk happens anymore. Left in
-    // place rather than removed -- persisted first-run/resume state
-    // is a separate future task, not part of this change.
+    // above. Gates the automatic entrance-to-elevator walk below --
+    // true the moment that walk is dispatched, never reset by the
+    // entrance-door tap-to-reopen flow (NavigationBridge.
+    // requestReturnToOpening), so re-entering later is ordinary,
+    // tap-driven Floor 1 navigation like any other floor.
     @AppStorage("hasCompletedInitialEntrance") private var hasCompletedInitialEntrance = false
 
     // The cash "earth-shattering graphic" -- Eddie, Sept 6: grabbing
@@ -471,21 +467,14 @@ struct ContentView: View {
                     withAnimation(.easeOut(duration: 0.5)) {
                         showIntroScreen = false
                     }
-                    if mazeStore.currentMazeID == 1 {
-                        // The special uninterrupted intro walk -- Eddie,
-                        // Sept 17: no longer first-entrance-only. EVERY
-                        // front-door entrance (this IntroScreenView
-                        // closing while on floor 1 -- cold launch,
-                        // walking out the front doors and back in via
-                        // NavigationBridge.requestReturnToOpening, or
-                        // the dev Reset button) performs this same
-                        // ceremonial walk, every time. Elevator arrivals
-                        // never show this intro screen at all, so they
-                        // stay completely untouched by this. The two
-                        // hasCompletedInitialEntrance writes below no
-                        // longer gate anything (see its declaration
-                        // above) -- kept as-is since that persisted flag
-                        // is a separate future resume/persistence task.
+                    if mazeStore.currentMazeID == 1 && !hasCompletedInitialEntrance {
+                        // The special uninterrupted intro walk -- first
+                        // entrance only. Every later entrance (including
+                        // walking back out the front doors and back in)
+                        // leaves the player standing at the spawn cell
+                        // instead, same as arriving on any other floor:
+                        // a normal tap starts normal tap-to-walk
+                        // navigation from there.
                         navBridge.controller?.advance(source: "CEREMONIAL")
                         hasCompletedInitialEntrance = true
                         navBridge.controller?.hasCompletedInitialEntrance = true
@@ -1825,19 +1814,6 @@ struct HallwaySceneView: UIViewRepresentable {
         private enum PanDragAxis { case horizontal, vertical }
         private var lockedPanAxis: PanDragAxis?
 
-        // Pinch counterpart of dragMoveDistance: how much UIPinchGesture
-        // Recognizer's `scale` has to move away from 1.0 (its neutral,
-        // fingers-unmoved value) to represent one full grid cell of
-        // forward/backward travel. Pinch OUT (scale > 1) = forward,
-        // pinch IN (scale < 1) = backward -- see handlePinch below,
-        // which feeds this straight into the SAME beginDragMove/
-        // updateDragMove/endDragMove machinery the one-finger vertical
-        // drag uses, not a second locomotion model. 0.4 means spreading
-        // (or pinching) your fingers to 1.4x (or 0.6x) their starting
-        // distance apart is one cell -- an initial feel constant, easy
-        // to retune independently of dragMoveDistance.
-        private let pinchScalePerCell: Double = 0.4
-
         // Ticks while a long-press-forward is held -- see
         // handleLongPressForward below. nil whenever nothing's held.
         private var forwardHoldTimer: Timer?
@@ -2029,40 +2005,13 @@ struct HallwaySceneView: UIViewRepresentable {
             controller.advance()
         }
 
-        // Eddie, Sept 17 (pinch continuity fix): was "wait for the
-        // gesture to end, then look at the final scale and make one
-        // discrete move" (pinchForward()/stepBackward(), each a single
-        // legal cell). That's why movement used to wait for finger-up
-        // instead of tracking the pinch live -- .began/.changed were
-        // never handled at all. Rewired to drive the exact same
-        // continuous-scrub machinery the one-finger vertical drag uses
-        // (beginDragMove/updateDragMove/endDragMove in
-        // TapNavigationController.swift) instead of a second locomotion
-        // model: pinch OUT (scale > 1) = forward, pinch IN (scale < 1)
-        // = backward, continuously, with the same reversal, topology
-        // limits, and release settle/snap vertical drag already has.
-        // Note: the old pinchForward() also auto-opened the elevator
-        // when pinching forward while standing at the end facing it --
-        // that shortcut isn't carried over here (endDragMove doesn't
-        // know about the elevator), so for now reaching the elevator
-        // via pinch stops there without opening it, same as walking up
-        // to it without tapping the door. pinchForward() itself is left
-        // in place, just unused, in case that shortcut should come back.
+        // One move per completed pinch, with a dead zone for accidental motion.
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-            guard let controller = navigationController else { return }
-            let fraction = (Double(gesture.scale) - 1.0) / pinchScalePerCell
-            let velocityFraction = Double(gesture.velocity) / pinchScalePerCell
-            switch gesture.state {
-            case .began:
-                navLog("pinch began")
-                controller.beginDragMove()
-            case .changed:
-                controller.updateDragMove(fraction: fraction)
-            case .ended, .cancelled, .failed:
-                navLog("pinch ended, fraction=\(String(format: "%.2f", fraction)), velocityFraction=\(String(format: "%.2f", velocityFraction))")
-                controller.endDragMove(fraction: fraction, velocityFraction: velocityFraction)
-            default:
-                break
+            guard gesture.state == .ended else { return }
+            if gesture.scale >= 1.15 {
+                navigationController?.pinchForward()
+            } else if gesture.scale <= 0.85 {
+                navigationController?.stepBackward()
             }
         }
 
@@ -2234,7 +2183,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // HallwayScene.build(fromMaze:)'s own case 2 -- wood-oak.jpg
             // instead of the earlier procedural plaster, so a theme-
             // cycle tap while on Floor 2 doesn't clobber it back.
-            case 2: effectiveWallImageName = "wood-walnut"
+            case 2: effectiveWallImageName = "wood-oak"
             default: effectiveWallImageName = theme.wallImageName
             }
             for material in wallMaterials {

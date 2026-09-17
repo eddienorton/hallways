@@ -570,15 +570,6 @@ final class MazeStore: ObservableObject {
 
     static let elevatorCoordinate = GridCoordinate(row: 10, col: 7)
 
-    /// Floor 2 ONLY, Sept 17 (Eddie): the elevator physically moved one
-    /// block west of the building's normal fixed elevatorCoordinate, so
-    /// this floor's own entrance nook can put the elevator on that new
-    /// cell's west wall (facing east) with the mission sign directly
-    /// opposite it on the east wall -- see startCoordinate/endCoordinate
-    /// below, the only two places this is read. Every OTHER floor keeps
-    /// using elevatorCoordinate itself, completely untouched.
-    static let floor2ElevatorCoordinate = GridCoordinate(row: elevatorCoordinate.row, col: elevatorCoordinate.col - 1)
-
     /// The one other cell every floor always has, no matter what --
     /// one step south of the elevator. startingFacing(at:cells:) checks
     /// south first, so walking off the elevator always faces this cell,
@@ -890,8 +881,7 @@ final class MazeStore: ObservableObject {
     /// here, whether or not that floor's hallway happens to reach it.
     var startCoordinate: GridCoordinate? {
         guard !cells.isEmpty else { return nil }
-        if currentMazeID == 1 { return floorOneEntryCoordinate }
-        return currentMazeID == 2 ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate
+        return currentMazeID == 1 ? floorOneEntryCoordinate : Self.elevatorCoordinate
     }
 
     /// You get off the elevator, and you're standing right where you
@@ -904,7 +894,7 @@ final class MazeStore: ObservableObject {
     /// ride it up from there, it's only where you START floor 1
     /// that's different.
     var endCoordinate: GridCoordinate? {
-        cells.isEmpty ? nil : (currentMazeID == 2 ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate)
+        cells.isEmpty ? nil : Self.elevatorCoordinate
     }
 
     /// Floor 1 only: the far end of its straight entry hallway --
@@ -1288,62 +1278,14 @@ final class MazeStore: ObservableObject {
     /// loads a different floor in, so nothing painted is ever lost
     /// mid-session.
     func save() {
-        // Eddie, Sept 15 (2nd build failure after adding Window Room):
-        // Swift's type checker timed out on the single giant
-        // MazeRecord(...) call below when it combined ~20 inline
-        // `.map { ... }` transformations with a large memberwise
-        // initializer call. Precomputing every transformation as its
-        // own named local (following the placements/destinationPlacements/
-        // etc. pattern already used for the first few fields) gives the
-        // compiler a series of small, concrete expressions instead of one
-        // enormous constraint-solving problem. Purely a compiler-
-        // complexity workaround -- the resulting MazeRecord's field
-        // values are identical to before.
-        let cellsArray = Array(cells)
-        let spotlightsArray = Array(spotlights)
         let placements = objects.map { ObjectPlacement(coord: $0.key, kind: $0.value) }
         let destinationPlacements = destinations.map { ObjectPlacement(coord: $0.key, kind: $0.value) }
         let exitSignPlacements = exitSigns.map { ExitSignPlacement(coord: $0.key, direction: $0.value) }
         let floorMapPlacements = floorMaps.map { FloorMapPlacement(coord: $0.key, direction: $0.value) }
         let missionSignPlacements = missionSigns.map { MissionSignPlacement(coord: $0.key, direction: $0.value) }
         let picturePlacements = pictures.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let mirrorPlacements = mirrors.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        // Eddie, Sept 15 (3rd pass): bathroomDoors was never actually
-        // passed into MazeRecord(...) below -- it has a default value
-        // ([]) in MazeRecord's own declaration, so the call compiled
-        // fine without it, but that meant every save() silently wrote
-        // bathroomDoors: [] to disk regardless of what was actually
-        // placed, discarding it on the next load. Restored here, in
-        // its correct declared position (right after mirrors, right
-        // before windowRooms -- see MazeRecord's own field order) so
-        // it round-trips the same way every other placement here
-        // already does.
-        let bathroomDoorPlacements = bathroomDoors.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        // windowRooms is placed here, immediately after
-        // bathroomDoorPlacements, to match WindowRoomPlacement's
-        // declared position in MazeRecord -- it was previously placed
-        // next to roomDoors below, which put it out of the memberwise
-        // initializer's required declaration order and was itself
-        // contributing to the type-checker's failure, independent of
-        // sheer expression size. See report for detail.
-        let windowRoomPlacements = Array(windowRooms.values)
-        let ticTacToeTerminalPlacements = ticTacToeTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let shellGameStationPlacements = shellGameStations.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let rockPaperScissorsTerminalPlacements = rockPaperScissorsTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let higherLowerTerminalPlacements = higherLowerTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let fiveCardDrawTerminalPlacements = fiveCardDrawTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let simonTerminalPlacements = simonTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let hangmanTerminalPlacements = hangmanTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let connectFourTerminalPlacements = connectFourTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let checkersTerminalPlacements = checkersTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let woidleTerminalPlacements = woidleTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
-        let firePlacements = fires.map { FirePlacement(coord: $0) }
-        let extinguisherPlacements = extinguishers.map { ExtinguisherPlacement(coord: $0.key, direction: $0.value) }
         let photoBoothPlacements = photoBooths.map { PhotoBoothPlacement(coord: $0.key, direction: $0.value.direction, expression: $0.value.expression) }
-        let roomDoorPlacements = Array(roomDoors.values)
-        let itemRoomPlacements = itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }
-        let record = MazeRecord(id: currentMazeID, cells: cellsArray, nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: spotlightsArray, missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrorPlacements, bathroomDoors: bathroomDoorPlacements, windowRooms: windowRoomPlacements, ticTacToeTerminals: ticTacToeTerminalPlacements, shellGameStations: shellGameStationPlacements, rockPaperScissorsTerminals: rockPaperScissorsTerminalPlacements, higherLowerTerminals: higherLowerTerminalPlacements, fiveCardDrawTerminals: fiveCardDrawTerminalPlacements, simonTerminals: simonTerminalPlacements, hangmanTerminals: hangmanTerminalPlacements, connectFourTerminals: connectFourTerminalPlacements, checkersTerminals: checkersTerminalPlacements, woidleTerminals: woidleTerminalPlacements, fires: firePlacements, extinguishers: extinguisherPlacements, photoBooths: photoBoothPlacements, roomDoors: roomDoorPlacements, itemRooms: itemRoomPlacements, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
-        library[currentMazeID] = record
+        library[currentMazeID] = MazeRecord(id: currentMazeID, cells: Array(cells), nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: Array(spotlights), missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrors.map { PicturePlacement(coord: $0.key, direction: $0.value) }, ticTacToeTerminals: ticTacToeTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, shellGameStations: shellGameStations.map { PicturePlacement(coord: $0.key, direction: $0.value) }, rockPaperScissorsTerminals: rockPaperScissorsTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, higherLowerTerminals: higherLowerTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, fiveCardDrawTerminals: fiveCardDrawTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, simonTerminals: simonTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, hangmanTerminals: hangmanTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, connectFourTerminals: connectFourTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, checkersTerminals: checkersTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, woidleTerminals: woidleTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }, fires: fires.map { FirePlacement(coord: $0) }, extinguishers: extinguishers.map { ExtinguisherPlacement(coord: $0.key, direction: $0.value) }, photoBooths: photoBoothPlacements, roomDoors: Array(roomDoors.values), windowRooms: Array(windowRooms.values), itemRooms: itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind)
         MazeLibrary.saveAll(library)
     }
 
@@ -1380,13 +1322,7 @@ final class MazeStore: ObservableObject {
     /// way, just triggered from two different places.
     func switchTo(id: Int) {
         guard id != currentMazeID else { return }
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): save() is a
-        // synchronous disk write -- timed here in case it's adding
-        // real latency between arrival and the scene actually
-        // swapping.
-        let arrivalDiagSaveStart = Date().timeIntervalSince1970
         save()
-        navLog("[ARRIVALDIAG] switchTo(id:) save() took \(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagSaveStart))s")
         currentMazeID = id
         if let record = library[id] {
             cells = Set(record.cells)
@@ -1478,14 +1414,8 @@ final class MazeStore: ObservableObject {
     /// floor authored without a next-floor link just quietly stays on
     /// the existing "You made it!" screen instead of going anywhere.
     func advanceToNextMaze() {
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator arrival
-        // visual-transition audit). Remove alongside every other
-        // [ARRIVALDIAG]-tagged line in ContentView.swift and
-        // TapNavigationController.swift once diagnosed.
-        navLog("[ARRIVALDIAG] advanceToNextMaze() START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(currentMazeID) nextMazeID=\(String(describing: nextMazeID))")
         guard let next = nextMazeID else { return }
         switchTo(id: next)
-        navLog("[ARRIVALDIAG] advanceToNextMaze() END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(currentMazeID)")
     }
 
     // MARK: - Undo / Clear

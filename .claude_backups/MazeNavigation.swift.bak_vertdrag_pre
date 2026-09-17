@@ -90,13 +90,6 @@ enum NavigationOutcome {
     case deadEnd
     case reachedEnd
     case steppedBackward
-    /// Same idea as steppedBackward, but for a manual one-cell FORWARD
-    /// hop -- TapNavigationController's endDragMove() uses this when a
-    /// vertical drag commits to moving forward, so logs/haptics can
-    /// distinguish a drag-driven single step from an ordinary
-    /// walkToNextDecision-driven advance() run (.intersection etc.)
-    /// without inventing a second outcome-tracking mechanism.
-    case steppedForward
     /// Not a topology outcome at all -- walkToNextDecision never
     /// produces this one (it doesn't know objects exist). Reserved for
     /// TapNavigationController to use when it deliberately stops a walk

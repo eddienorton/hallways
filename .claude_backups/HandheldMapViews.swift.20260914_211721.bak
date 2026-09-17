@@ -1,0 +1,171 @@
+import SwiftUI
+
+/// The gameplay map is separate from the developer's map editor.
+struct HandheldMapButton: View {
+    @ObservedObject var controller: TapNavigationController
+
+    /// Round 7 (Eddie): "MAP BUTTON = toggle map open/closed... the
+    /// only intended open/close control." Used to always call
+    /// openHandheldMap() -- fine back when the card itself closed on
+    /// tap, but now that the card is inert (see HandheldMapOverlay
+    /// below), this button is the ONLY way in or out, so it has to
+    /// flip both directions. Disabling only blocks OPENING (elevator/
+    /// terminal/etc. busy) -- closing must always be possible once the
+    /// map is up, so it's never gated behind canOpenHandheldMap (which
+    /// doesn't itself know about handheldMapVisible).
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                Button {
+                    if controller.handheldMapVisible {
+                        controller.closeHandheldMap()
+                    } else {
+                        controller.openHandheldMap()
+                    }
+                } label: {
+                    Image(systemName: "map")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .disabled(!controller.handheldMapVisible && !controller.canOpenHandheldMap)
+                .accessibilityLabel(controller.handheldMapVisible ? "Hide floor map" : "Show floor map")
+                .accessibilityIdentifier("handheldMapButton")
+            }
+        }
+        .padding(.trailing, 20)
+        .padding(.bottom, 28)
+    }
+}
+
+struct HandheldMapOverlay: View {
+    @ObservedObject var controller: TapNavigationController
+
+    /// Sept 14 (Eddie): "raise a physical map in front of yourself."
+    /// controller.handheldMapVisible, currentFloorMapImage() (the same
+    /// live, already-updating wall-map texture), floorLabel, and the
+    /// open/close calls are all untouched -- this struct only changes
+    /// HOW that state is presented.
+    ///
+    /// Round 3: replaced a conditionally-inserted card + .transition(
+    /// .move(edge: .bottom)) (which compiled but wouldn't reliably
+    /// animate on-device -- .transition() depends on precise view-
+    /// identity insertion/removal timing) with an ALWAYS-PRESENT view
+    /// positioned via a plain, continuously-animatable .offset(y:) --
+    /// 0 when open, cardHiddenOffset (well below the screen) when
+    /// closed -- driven by a single .animation(.easeOut(duration:
+    /// 0.28), value: controller.handheldMapVisible) at the bottom of
+    /// this body. That one modifier watches the Bool directly and
+    /// animates whatever changes as a result, regardless of which view
+    /// (this one or HandheldMapButton) triggered the flip -- no
+    /// dependency on withAnimation being active at the mutation site,
+    /// no dependency on insertion timing. This is still the mechanism;
+    /// round 4 below only changes what's inside it.
+    ///
+    /// Round 4 (Eddie, on-device, final simplification): removed the
+    /// large rounded card/background and the Close button entirely.
+    /// Closing is a single tap ANYWHERE on screen while the map is open
+    /// -- one .onTapGesture + .contentShape(Rectangle()) on the
+    /// outermost ZStack, replacing the old per-element tap targets and
+    /// the Close button; .allowsHitTesting(controller.handheldMapVisible)
+    /// on that same outer view gates the whole thing at once so it's
+    /// inert (and doesn't eat gameplay taps) while closed. The scrim
+    /// (blur + dim) still only fades in place via its own .opacity(...);
+    /// the title+map group still slides via its own .offset(y:) --
+    /// that separation (background stays put, only the map moves) is
+    /// unchanged from round 3. Blur strength bumped from 0.35 to 0.45
+    /// opacity on the .ultraThinMaterial layer per Eddie's on-device
+    /// call (0.35 read as slightly too weak); the separate
+    /// Color.black.opacity(0.12) dim layer is untouched.
+    ///
+    /// Round 5 (Eddie, on-device): after round 4, the title floated
+    /// above the map with no visual container of its own -- read as
+    /// two separate things, not one object. Folded the title into the
+    /// SAME rounded/bordered/shadowed panel as the map instead of its
+    /// own free-floating Text: one outer VStack (title header, then the
+    /// map image) now owns the shared background/clipShape/border/
+    /// shadow that used to sit on the Image alone, so title + map are
+    /// one physical panel, just taller than before by the header's own
+    /// height (title + its padding) -- the map image's own frame(
+    /// maxWidth: 340, maxHeight: 400) is untouched, so the actual map
+    /// drawing size doesn't change, only the panel's overall height
+    /// grows to make room above it. Title styling (dark gray, 18pt,
+    /// semibold, rounded) is unchanged, just re-homed into the header.
+    /// The image's own former background/clipShape/border (added in
+    /// round 2 to blend its letterbox bands, then round 4's shadow) are
+    /// removed from the Image itself since the outer panel now provides
+    /// all of that for the whole panel at once, header included.
+    private var cardHiddenOffset: CGFloat { 1000 }
+
+    /// Round 6 (Eddie, on-device): the overlay used to be one giant
+    /// hit-testable rectangle covering the whole screen whenever the
+    /// map was visible -- .contentShape(Rectangle()) + .onTapGesture +
+    /// .allowsHitTesting(handheldMapVisible) all lived on this
+    /// outermost ZStack, so EVERY touch anywhere on screen (including
+    /// the visible hallway above/around the card) was caught here and
+    /// never reached HallwaySceneView's own gesture recognizers
+    /// underneath (SwiftUI resolves hit-testing top-down through the
+    /// ZStack before a UIViewRepresentable's own UIGestureRecognizers
+    /// ever see a touch) -- so swiping/tapping to navigate did nothing
+    /// while the map was up. Eddie: "the visible 3D scene around the
+    /// map should behave normally; only the map itself should catch
+    /// taps." Fix is pure hit-testing routing, nothing visual: the
+    /// scrim (blur+dim) and the Spacer/positioning wrapper both get
+    /// .allowsHitTesting(false) -- inert to touch, still fully visible
+    /// -- and the tap-to-close gesture moves down onto ONLY the card
+    /// VStack itself (already sized to its own real bounds via
+    /// .frame(maxWidth: 340), not the full screen), which re-enables
+    /// hit-testing for just itself with .allowsHitTesting(
+    /// controller.handheldMapVisible) -- a child can always override an
+    /// ancestor's allowsHitTesting(false) for its own subtree. Net
+    /// effect: taps/swipes anywhere outside the card's own rounded
+    /// panel fall straight through to the scene below; a tap on the
+    /// card itself still closes the map exactly as before.
+    var body: some View {
+        ZStack {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                    .opacity(0.45)
+                Color.black.opacity(0.12)
+            }
+            .ignoresSafeArea()
+            .opacity(controller.handheldMapVisible ? 1 : 0)
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    Text(controller.floorLabel)
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(white: 0.25))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                    Image(uiImage: controller.currentFloorMapImage())
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 340, maxHeight: 400)
+                        .accessibilityLabel("Floor map with your location and facing, elevator, and mission markers")
+                }
+                .frame(maxWidth: 340)
+                .background(Color(white: 0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.35), lineWidth: 2))
+                .shadow(color: .black.opacity(0.28), radius: 14, x: 0, y: -3)
+                .padding(.bottom, 40)
+                .contentShape(Rectangle())
+                .allowsHitTesting(controller.handheldMapVisible)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(edges: .bottom)
+            .offset(y: controller.handheldMapVisible ? 0 : cardHiddenOffset)
+            .allowsHitTesting(false)
+        }
+        .ignoresSafeArea()
+        .animation(.easeOut(duration: 0.28), value: controller.handheldMapVisible)
+        .accessibilityAction(.escape) { controller.closeHandheldMap() }
+    }
+}

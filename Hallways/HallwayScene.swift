@@ -174,45 +174,13 @@ enum HallwayScene {
         root.addChildNode(readout)
         setPhotoBoothStatus(expression.prompt, on: root)
 
-        // TEMP DIAGNOSTIC -- Eddie, Sept 13: "add a temporary
-        // unmistakable debug state to PROVE where the text plane is."
-        // Traced photoBoothReadout above end-to-end -- correct node
-        // reference (photoBoothNodes[coord] really is this exact root),
-        // correct material/texture pipeline (same UIGraphicsImageRenderer
-        // approach photoBoothScreen already uses successfully), position
-        // within the frame's own bounds, unlit so scene lighting can't
-        // dim it -- and could not find a code-level reason it would be
-        // invisible on device. So instead of guessing further: this is a
-        // second, much bigger, brighter, closer-to-camera panel (double-
-        // sided so facing direction can't hide it either), floating well
-        // out in front of the whole booth where nothing could occlude
-        // it, updated by the exact same calls as the real readout. If
-        // you see this magenta panel and its text updates live as you
-        // change expression, the data/update pipeline is proven fine and
-        // the real bug is that photoBoothReadout itself is too small/
-        // low/subtle or otherwise mis-rendered -- tell me that and I'll
-        // fix its actual size/position. If you see NOTHING at all, that
-        // points to something more fundamental (e.g. the booth object
-        // itself not resolving on device) and I'll dig further from
-        // there. Remove this whole block once we know which.
-        let debugPanel = SCNPlane(width: 1.4, height: 0.4)
-        let debugMaterial = SCNMaterial()
-        debugMaterial.lightingModel = .constant
-        debugMaterial.isDoubleSided = true
-        debugPanel.materials = [debugMaterial]
-        let debugNode = SCNNode(geometry: debugPanel)
-        debugNode.name = "photoBoothDebugText"
-        debugNode.position = SCNVector3(0, 0.05, 0.5)
-        root.addChildNode(debugNode)
-        setPhotoBoothDebugText("FACE TEXT TEST", on: root)
-        // TEMP DIAGNOSTIC: log the readout and debug planes' own state
+        // TEMP DIAGNOSTIC: log the readout's own state
         // right at creation, before anything else could possibly touch
-        // them -- if isHidden/material are already wrong here, the
-        // problem is in this function; if they look fine here but
-        // still don't render on device, the problem is downstream
+        // it -- if isHidden/material are already wrong here, the
+        // problem is in this function; if it looks fine here but
+        // still doesn't render on device, the problem is downstream
         // (scene attachment, camera frustum, or something device-only).
         navLog("PBDIAG makePhotoBoothNode readout: parent=\(readout.parent?.name ?? "nil") isHidden=\(readout.isHidden) pos=\(readout.position) materialContentsSet=\(readout.geometry?.firstMaterial?.diffuse.contents != nil)")
-        navLog("PBDIAG makePhotoBoothNode debugNode: parent=\(debugNode.parent?.name ?? "nil") isHidden=\(debugNode.isHidden) pos=\(debugNode.position) materialContentsSet=\(debugNode.geometry?.firstMaterial?.diffuse.contents != nil)")
 
         let lensHousing = SCNCylinder(radius: 0.042, height: 0.025)
         let housingMaterial = SCNMaterial()
@@ -312,26 +280,6 @@ enum HallwayScene {
             ])
         }
         node.childNode(withName: "photoBoothReadout", recursively: true)?.geometry?.firstMaterial?.diffuse.contents = image
-    }
-
-    // TEMP DIAGNOSTIC -- see photoBoothDebugText's creation comment in
-    // makePhotoBoothNode above. Same rendering approach as
-    // setPhotoBoothStatus, just bigger/brighter/unmissable. Remove
-    // together with that block once photoBoothReadout's visibility is
-    // confirmed one way or the other.
-    static func setPhotoBoothDebugText(_ status: String, on node: SCNNode) {
-        let size = CGSize(width: 1000, height: 300)
-        let image = UIGraphicsImageRenderer(size: size).image { ctx in
-            UIColor.magenta.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = .center
-            (status as NSString).draw(in: CGRect(x: 20, y: 40, width: 960, height: 220), withAttributes: [
-                .font: UIFont.boldSystemFont(ofSize: 44),
-                .foregroundColor: UIColor.black, .paragraphStyle: paragraph
-            ])
-        }
-        node.childNode(withName: "photoBoothDebugText", recursively: true)?.geometry?.firstMaterial?.diffuse.contents = image
     }
 
     /// Floor 7's first embedded mini-game, "EMPLOYEE APTITUDE TEST /

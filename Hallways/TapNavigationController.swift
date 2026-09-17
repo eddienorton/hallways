@@ -936,7 +936,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         photoBoothCameraState = "starting"
         if let booth = photoBoothNodes[coord] {
             HallwayScene.setPhotoBoothStatus("STARTING CAMERA...", on: booth)
-            HallwayScene.setPhotoBoothDebugText("STARTING CAMERA...", on: booth) // TEMP DIAGNOSTIC, see HallwayScene.makePhotoBoothNode
             // TEMP DIAGNOSTIC (Eddie, Sept 13, round 2): both the real
             // readout and the giant magenta panel were reported
             // invisible on device, so this proves/disproves scene
@@ -972,14 +971,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 }
                 return false
             }
-            let debugNode = booth.childNode(withName: "photoBoothDebugText", recursively: true)
             let readoutNode = booth.childNode(withName: "photoBoothReadout", recursively: true)
             navLog("PBDIAG activate booth=\(coord) boothInScene=\(isAttached(booth)) boothWorldPos=\(booth.worldPosition) cameraWorldPos=\(cameraNode.worldPosition)")
-            if let debugNode {
-                navLog("PBDIAG debugNode worldPos=\(debugNode.worldPosition) inScene=\(isAttached(debugNode)) materialContentsSet=\(debugNode.geometry?.firstMaterial?.diffuse.contents != nil) chain=\(hiddenChain(debugNode))")
-            } else {
-                navLog("PBDIAG debugNode NOT FOUND on booth \(coord) -- childNode(withName:) failed")
-            }
             if let readoutNode {
                 navLog("PBDIAG readoutNode worldPos=\(readoutNode.worldPosition) inScene=\(isAttached(readoutNode)) materialContentsSet=\(readoutNode.geometry?.firstMaterial?.diffuse.contents != nil) chain=\(hiddenChain(readoutNode))")
             } else {
@@ -1056,7 +1049,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let dots = String(repeating: "\u{25CF}", count: held) + String(repeating: "\u{25CB}", count: 3 - held)
         let status = matched ? "\(prompt)\nHOLD IT... \(dots)" : "\(prompt)\nSWIPE TO STEP AWAY"
         HallwayScene.setPhotoBoothStatus(status, on: node)
-        HallwayScene.setPhotoBoothDebugText(status, on: node) // TEMP DIAGNOSTIC, see HallwayScene.makePhotoBoothNode
     }
 
     func completePhotoBooth(at coord: GridCoordinate, image: UIImage) {

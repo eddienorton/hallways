@@ -448,11 +448,7 @@
         "col": 7
       },
       {
-        "row": 10,
-        "col": 6
-      },
-      {
-        "row": 10,
+        "row": 9,
         "col": 8
       }
     ],
@@ -467,10 +463,10 @@
       },
       {
         "coord": {
-          "row": 10,
+          "row": 9,
           "col": 7
         },
-        "direction": "west"
+        "direction": "south"
       }
     ],
     "floorMaps": [
@@ -479,7 +475,7 @@
           "row": 10,
           "col": 7
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "id": 3,
@@ -491,7 +487,7 @@
     "missionSigns": [
       {
         "coord": {
-          "row": 10,
+          "row": 9,
           "col": 8
         },
         "direction": "east"

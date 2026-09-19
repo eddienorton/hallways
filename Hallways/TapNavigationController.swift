@@ -141,18 +141,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private let startFacing: Direction
     /// The cell you're standing in right now — exposed so the 2D grid
     /// editor can show a "you are here" marker when you jump back to it.
-    /// Also drives updateExitSignHighlight() below: Eddie, Sept 5
-    /// (round 2), reported that an Exit Sign one cell short of the
-    /// intersection it's mounted at reads as "turn now" when the real
-    /// instruction only applies once you're actually standing there.
-    /// This didSet is how exactly one sign -- the one at wherever
-    /// currentCell just became -- gets promoted to the bright/enlarged
-    /// "neon" look while every other sign (including the one just
-    /// left) stays dim.
     @Published private(set) var currentCell: GridCoordinate {
         didSet {
             guard oldValue != currentCell else { return }
-            updateExitSignHighlight()
             // "it informs you of something that just happened, then
             // its gone once you leave" (Eddie, Sept 5) -- leaving IS
             // currentCell changing, so that's the one place this needs
@@ -651,25 +642,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private var standaloneRotation = false
     private var pendingRotationTarget: Direction = .north
 
-    /// Every Exit Sign built for this floor, keyed by the intersection
-    /// cell it's mounted at -- HallwayScene.build(fromMaze:) already
-    /// computed placement/direction once at build time; this is just
-    /// the lookup table so this controller can react to the player's
-    /// OWN position without duplicating any of that topology logic.
-    private let exitSignNodes: [GridCoordinate: SCNNode]
-    /// Each sign's own compass-facing direction, straight from
-    /// mazeStore.exitSigns -- kept here (not just baked into the node)
-    /// so this controller can recompute a label relative to the
-    /// player's CURRENT facing every time a sign goes neon, rather
-    /// than trusting whatever string HallwayScene happened to build
-    /// the node with (which is only ever a placeholder -- see
-    /// HallwayScene.makeExitSignNode's doc comment).
-    private let exitSignDirections: [GridCoordinate: Direction]
-    /// Whichever Exit Sign is currently neon, if any -- at most one at
-    /// a time, matching "there's only one cell you're actually
-    /// standing in."
-    private var neonExitSignCell: GridCoordinate?
-
     /// Every cell a "You Are Here" map is mounted at, straight from
     /// mazeStore.floorMaps -- just the coordinates, since advance()'s
     /// stop check and viewedFloorMapCoords below only ever need "is
@@ -793,7 +765,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         update()
     }
 
-    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, exitSignNodes: [GridCoordinate: SCNNode] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], ticTacToeTerminalNodes: [GridCoordinate: SCNNode] = [:], shellGameStations: [GridCoordinate: Direction] = [:], shellGameStationNodes: [GridCoordinate: SCNNode] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminalNodes: [GridCoordinate: SCNNode] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode] = [:], simonTerminals: [GridCoordinate: Direction] = [:], simonTerminalNodes: [GridCoordinate: SCNNode] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], hangmanTerminalNodes: [GridCoordinate: SCNNode] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], checkersTerminalNodes: [GridCoordinate: SCNNode] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], woidleTerminalNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], missionObjectKind: ObjectKind? = nil, hasCompletedInitialEntrance: Bool = false) {
+    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], ticTacToeTerminalNodes: [GridCoordinate: SCNNode] = [:], shellGameStations: [GridCoordinate: Direction] = [:], shellGameStationNodes: [GridCoordinate: SCNNode] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminalNodes: [GridCoordinate: SCNNode] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode] = [:], simonTerminals: [GridCoordinate: Direction] = [:], simonTerminalNodes: [GridCoordinate: SCNNode] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], hangmanTerminalNodes: [GridCoordinate: SCNNode] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], checkersTerminalNodes: [GridCoordinate: SCNNode] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], woidleTerminalNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], missionObjectKind: ObjectKind? = nil, hasCompletedInitialEntrance: Bool = false) {
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -854,8 +826,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.floorNumber = floorNumber
         self.nextFloorNumber = nextFloorNumber
         self.hasCompletedInitialEntrance = hasCompletedInitialEntrance
-        self.exitSignNodes = exitSignNodes
-        self.exitSignDirections = exitSigns
         self.floorMapCoords = Set(floorMaps.keys)
         self.photoBoothCoords = Set(photoBooths.keys)
         self.ticTacToeTerminalCoords = Set(ticTacToeTerminals.keys)
@@ -871,7 +841,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.missionSignCoords = Set(missionSigns.keys)
         self.pictureCoords = Set(pictures.keys).union(mirrors.keys)
         self.floorMapPlaneNodes = floorMapPlaneNodes
-        exitSignNodes.values.forEach { $0.isHidden = true }
 
         let foundLight = cameraNode.childNodes.compactMap { $0.light }.first { $0.type == .omni }
         self.headlampLight = foundLight
@@ -890,10 +859,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.baseAttenEnd = foundLight.map { Self.doubleValue($0.attenuationEndDistance) } ?? 0
 
         super.init()
-        // didSet never fires for an initializer's own first assignment
-        // to currentCell above, so this covers the (rare, but real)
-        // case where startCell itself happens to be an Exit Sign cell.
-        updateExitSignHighlight()
         // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): the exact instant a
         // NEW floor's TapNavigationController finishes constructing --
         // marks where HallwayScene.build's own raw default spawn
@@ -1668,83 +1633,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         showMessage("You beat the building! Return to the elevator.")
         activeWoidleTerminal = nil
-    }
-
-    /// Shows whichever Exit Sign sits at currentCell (bright/enlarged
-    /// "neon" look) and hides everything else, including whichever
-    /// sign was showing a moment ago. Round 6 (Eddie, Sept 5): a dim
-    /// sign left visible down the hallway read as if it might belong
-    /// to whichever box the player was CURRENTLY standing in, even
-    /// when that box had no sign of its own -- confusing with sparse,
-    /// manually-placed signs where most boxes have none at all. Fully
-    /// hiding every sign except the current cell's own removes that
-    /// ambiguity: seeing a sign at all now means it's telling YOU
-    /// something, full stop.
-    private func updateExitSignHighlight() {
-        if let previous = neonExitSignCell, previous != currentCell {
-            setExitSignNeon(at: previous, neon: false)
-        }
-        if exitSignNodes[currentCell] != nil {
-            setExitSignNeon(at: currentCell, neon: true)
-            neonExitSignCell = currentCell
-        } else {
-            neonExitSignCell = nil
-        }
-    }
-
-    /// Turns a sign's fixed compass direction into the glyph that's
-    /// actually correct for THIS arrival. Eddie, Sept 5, round 9: "it
-    /// should be pointing right, not left" -- the old label was picked
-    /// from the sign's compass direction alone ("west" always rendered
-    /// "< EXIT"), which is only correct if you always arrive facing
-    /// north. Comparing against the player's actual current `facing`
-    /// with the same left/right vocabulary the D-pad itself uses makes
-    /// "turn left"/"turn right"/"straight ahead" mean what they say
-    /// from wherever the player is actually standing.
-    private static func relativeExitLabel(pointing direction: Direction, facing: Direction) -> String {
-        if direction == facing {
-            return "EXIT ^"
-        } else if direction == facing.left {
-            return "< EXIT"
-        } else if direction == facing.right {
-            return "EXIT >"
-        } else {
-            // Sign points back the way we came -- shouldn't normally
-            // happen (an Exit Sign sits on an open side, and we just
-            // walked in through one), but "^" is the least-wrong
-            // fallback if it ever does.
-            return "EXIT ^"
-        }
-    }
-
-    private func setExitSignNeon(at coord: GridCoordinate, neon: Bool) {
-        guard let sign = exitSignNodes[coord],
-              let textNode = sign.childNodes.first,
-              let text = textNode.geometry as? SCNText,
-              let material = text.firstMaterial else { return }
-        sign.isHidden = !neon
-        if neon, let direction = exitSignDirections[coord] {
-            // Changing the string moves the bounding box, so pivot and
-            // scale both have to be recomputed from it every time --
-            // the same math HallwayScene.makeExitSignNode used to set
-            // them up the first time, just re-run here on demand.
-            text.string = Self.relativeExitLabel(pointing: direction, facing: facing)
-        }
-        let (minBound, maxBound) = text.boundingBox
-        let textWidth = maxBound.x - minBound.x
-        let textHeight = maxBound.y - minBound.y
-        textNode.pivot = SCNMatrix4MakeTranslation(minBound.x + textWidth / 2, minBound.y + textHeight / 2, 0)
-        let baseScale = textHeight > 0 ? Float(cellSize * HallwayScene.exitSignBaseSizeFactor) / textHeight : 1
-        if neon {
-            material.diffuse.contents = HallwayScene.exitSignNeonDiffuse
-            material.emission.contents = HallwayScene.exitSignNeonEmission
-            let m = HallwayScene.exitSignNeonScaleMultiplier
-            textNode.scale = SCNVector3(baseScale * m, baseScale * m, baseScale * m)
-        } else {
-            material.diffuse.contents = HallwayScene.exitSignDimDiffuse
-            material.emission.contents = HallwayScene.exitSignDimEmission
-            textNode.scale = SCNVector3(baseScale, baseScale, baseScale)
-        }
     }
 
     private func worldPosition(for coord: GridCoordinate) -> SCNVector3 {
@@ -4505,7 +4393,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     self?.applyNavigationUpdate { [weak self] in
                         self?.facing = newFacing
                         self?.isAnimating = false
-                        self?.updateExitSignHighlight()
                         if let self {
                             self.activatePhotoBooth(at: self.currentCell)
                             self.activateTicTacToeTerminal(at: self.currentCell)
@@ -4572,8 +4459,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     DispatchQueue.main.async { [weak self] in
                         self?.applyNavigationUpdate { [weak self] in
                             guard let self else { return }
-                            // facing before currentCell -- see round-9 note
-                            // above setExitSignNeon's relative-label logic.
+                            // facing before currentCell -- arrival order matters
                             self.applyArrival(cell: newCell, heading: newFacing)
                             self.markFloorMapViewedIfPresent(at: newCell)
                             self.markMissionSignViewedIfPresent(at: newCell)
@@ -4589,8 +4475,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                             self.isAnimating = false
                             self.translateDurationScale = 1.0
                             SoundEffects.stopWalking()
-                            // facing before currentCell -- see round-9 note
-                            // above setExitSignNeon's relative-label logic.
+                            // facing before currentCell -- arrival order matters
                             self.applyArrival(cell: newCell, heading: newFacing)
                             self.markFloorMapViewedIfPresent(at: newCell)
                             self.markMissionSignViewedIfPresent(at: newCell)

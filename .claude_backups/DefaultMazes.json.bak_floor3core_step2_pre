@@ -470,16 +470,16 @@
           "row": 10,
           "col": 7
         },
-        "direction": "west"
+        "direction": "north"
       }
     ],
     "floorMaps": [
       {
         "coord": {
-          "row": 10,
+          "row": 9,
           "col": 7
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "id": 3,

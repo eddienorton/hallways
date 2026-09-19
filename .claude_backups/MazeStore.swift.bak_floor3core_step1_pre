@@ -891,7 +891,7 @@ final class MazeStore: ObservableObject {
     var startCoordinate: GridCoordinate? {
         guard !cells.isEmpty else { return nil }
         if currentMazeID == 1 { return floorOneEntryCoordinate }
-        return (currentMazeID == 2 || currentMazeID == 3) ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate
+        return currentMazeID == 2 ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate
     }
 
     /// You get off the elevator, and you're standing right where you
@@ -904,7 +904,7 @@ final class MazeStore: ObservableObject {
     /// ride it up from there, it's only where you START floor 1
     /// that's different.
     var endCoordinate: GridCoordinate? {
-        cells.isEmpty ? nil : ((currentMazeID == 2 || currentMazeID == 3) ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate)
+        cells.isEmpty ? nil : (currentMazeID == 2 ? Self.floor2ElevatorCoordinate : Self.elevatorCoordinate)
     }
 
     /// Floor 1 only: the far end of its straight entry hallway --

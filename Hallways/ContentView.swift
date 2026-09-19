@@ -404,6 +404,24 @@ struct ContentView: View {
                         showIntroScreen = true
                     }
                 }
+                // Eddie, Sept 18: street/city ambience for the
+                // building-exterior opening screen. Starts whenever the
+                // intro is back up (cold launch -- handled by onAppear
+                // below since showIntroScreen already starts true -- or
+                // any return-to-opening: the Reset button or tapping
+                // the inside of the entrance doors), and fades out in
+                // the IntroScreenView onEnter closure below the moment
+                // the player steps inside.
+                .onChange(of: showIntroScreen) { _, shown in
+                    if shown { SoundEffects.startStreetAudio() }
+                }
+                // Cold launch: showIntroScreen already starts true, so
+                // the onChange above can't fire -- start the street
+                // loop here instead (harmless double-start if both fire,
+                // since startStreetAudio rewinds to 0 anyway).
+                .onAppear {
+                    if showIntroScreen { SoundEffects.startStreetAudio() }
+                }
 
             if let navController = navBridge.controller {
                 NavigationOverlay(controller: navController)
@@ -432,8 +450,10 @@ struct ContentView: View {
                     .zIndex(34)
                 WoidleOverlayHost(controller: navController)
                     .zIndex(35)
-                HandheldMapButton(controller: navController)
-                    .zIndex(31)
+                if mazeStore.currentMazeID != 1 {
+                    HandheldMapButton(controller: navController)
+                        .zIndex(31)
+                }
                 HandheldMapOverlay(controller: navController)
                     .zIndex(30)
                 DevPatternButton(store: devPatternStore) // Hallways-Texture-Test only
@@ -467,10 +487,19 @@ struct ContentView: View {
             // including the money celebration and both alarm/map
             // overlays above.
             if showIntroScreen {
-                IntroScreenView(sceneReady: navBridge.scenePrepared) {
-                    withAnimation(.easeOut(duration: 0.5)) {
-                        showIntroScreen = false
-                    }
+                    IntroScreenView(sceneReady: navBridge.scenePrepared) {
+                        // Eddie, Sept 18: the street ambience ends when
+                        // the player enters the building and the
+                        // entrance is behind them -- which is exactly
+                        // this moment (intro dismissed, ceremonial walk
+                        // begins); the door is a static fixture behind
+                        // spawn, so there's no later "door closes"
+                        // event to hang it on. 0.8s fade, then silence
+                        // until the next opening screen.
+                        SoundEffects.stopStreetAudio()
+                        withAnimation(.easeOut(duration: 0.5)) {
+                            showIntroScreen = false
+                        }
                     if mazeStore.currentMazeID == 1 {
                         // The special uninterrupted intro walk -- Eddie,
                         // Sept 17: no longer first-entrance-only. EVERY
@@ -1119,7 +1148,7 @@ private struct IntroScreenView: View {
                 // title text -- the new intro artwork already has the
                 // building's HALLWAYS sign over the door, so this
                 // white on-screen title was duplicating it.
-                Text("Tap to walk. Swipe to turn.\nFind your way through every floor.")
+                Text("Tap to walk. Swipe to turn. Drag up or down to scout the hallway. Head for the elevator.")
                     .multilineTextAlignment(.center)
                     .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
@@ -1458,7 +1487,7 @@ struct HallwaySceneView: UIViewRepresentable {
             navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(mazeStore.currentMazeID)")
             let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:])
             navBridge.pendingElevatorArtwork = [:]
-            let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes) = hallwaySceneBuildResult
+            let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, _, floorMapPlaneNodes) = hallwaySceneBuildResult
             navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) elapsed=\(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagBuildStart))s raw-spawn cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles) elevatorDoors-present=\(elevatorDoors != nil)")
             view.scene = scene
             navLog("[ARRIVALDIAG] view.scene = scene assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970))")
@@ -1507,7 +1536,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
             }
             navLog("[ARRIVALDIAG] TapNavigationController(...) about to construct t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
-            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, exitSignNodes: exitSignNodes, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
             // Eddie, Sept 16 (remove automatic step-out): this build
             // IS an elevator ride's destination floor -- passive or
             // player-controlled -- exactly when

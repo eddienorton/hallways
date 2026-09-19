@@ -1460,11 +1460,10 @@ enum HallwayScene {
         var connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:]
         var checkersTerminalNodes: [GridCoordinate: SCNNode] = [:]
         var woidleTerminalNodes: [GridCoordinate: SCNNode] = [:]
-        // Every Exit Sign built below, keyed by the intersection cell
-        // it's mounted at -- TapNavigationController uses this to know
-        // exactly which node to light up neon-bright once the player
-        // actually reaches that cell (see makeExitSignNode's own doc
-        // comment for why the DEFAULT look is dim/small instead).
+        // Every Exit Sign built below, keyed by the cell it hangs over --
+        // returned in the build() tuple so callers can look any sign's
+        // node up by coordinate. Nothing lights or hides these anymore;
+        // they're permanent ceiling fixtures now.
         var exitSignNodes: [GridCoordinate: SCNNode] = [:]
         // The DOOR node specifically for each destination (not the icon
         // behind it) -- this is what TapNavigationController animates
@@ -1638,6 +1637,13 @@ enum HallwayScene {
         // dark-walled cubby behind the shutter in response.
         let destinationDoorMaterial = makeDestinationDoorMaterial()
         let destinationCubbyInteriorMaterial = makeCubbyInteriorMaterial(imageName: effectiveWallImageName)
+        // A trash chute's interior uses Eddie's own photo of the
+        // building's real chute (trash-chute-inside.jpeg) instead of
+        // the ordinary wall texture every other destination cubby
+        // uses -- picked below, per-chute, in addDestinationDoor
+        // when kind == .trashCan, so every OTHER destination
+        // keeps its existing wall-textured oven/cubby look untouched.
+        let trashChuteInteriorMaterial = makeTrashChuteInteriorMaterial()
         let destinationDoorWidth: CGFloat = 0.9
         let destinationDoorHeight: CGFloat = 0.6
         let destinationDoorThickness: CGFloat = 0.04
@@ -1784,17 +1790,27 @@ enum HallwayScene {
             let halfH = Float(destinationDoorHeight / 2)
             let depth = Float(destinationCubbyDepth)
             let thick = Float(destinationPanelThickness)
+            // Trash chutes show the real chute-interior photo on their
+            // shaft's faces; every other destination keeps the ordinary
+            // wall-textured cubby (see trashChuteInteriorMaterial's own
+            // comment above). The trash photo is a single image, so it
+            // must NOT be tiled -- `customInterior` below skips the
+            // per-face repeat/scale transform every other cubby gets.
+            let interiorMaterial = kind == .trashCan ? trashChuteInteriorMaterial : destinationCubbyInteriorMaterial
+            let customInterior = kind == .trashCan
 
             func panel(width: CGFloat, height: CGFloat, length: CGFloat) -> SCNNode {
                 let geo = SCNBox(width: width, height: height, length: length, chamferRadius: 0)
                 // Each face tiles at the hallway's brick size, even on a
                 // six-unit shaft. One stretched texture cannot fit all faces.
                 func faceMaterial(horizontal: CGFloat, vertical: CGFloat) -> SCNMaterial {
-                    let material = destinationCubbyInteriorMaterial.copy() as! SCNMaterial
-                    material.diffuse.wrapS = .repeat
-                    material.diffuse.wrapT = .repeat
-                    material.diffuse.contentsTransform = SCNMatrix4MakeScale(
-                        Float(2 * horizontal / cellSize), Float(2 * vertical / wallHeight), 1)
+                    let material = interiorMaterial.copy() as! SCNMaterial
+                    if !customInterior {
+                        material.diffuse.wrapS = .repeat
+                        material.diffuse.wrapT = .repeat
+                        material.diffuse.contentsTransform = SCNMatrix4MakeScale(
+                            Float(2 * horizontal / cellSize), Float(2 * vertical / wallHeight), 1)
+                    }
                     return material
                 }
                 // SCNBox: front, right, back, left, top, bottom.
@@ -2341,16 +2357,7 @@ enum HallwayScene {
                 indicator.position = SCNVector3(x, 0, 0.024)
                 header.addChildNode(indicator)
             }
-            // Dark returns bridge the shallow trim to the pocket, without
-            // narrowing the opening or touching the moving panels behind it.
-            for sign: Float in [-1, 1] {
-                let reveal = SCNNode(geometry: SCNBox(width: 0.06, height: elevatorDoorHeight,
-                                                     length: 0.15, chamferRadius: 0))
-                reveal.name = "elevatorExteriorReveal"
-                reveal.geometry?.materials = [darkMetal]
-                reveal.position = SCNVector3(sign * Float(elevatorDoorWidth / 2 + 0.03), Float(elevatorCenterY), -0.075)
-                entrance.addChildNode(reveal)
-            }
+
             let brass = exteriorDoorMaterial.copy() as! SCNMaterial
             brass.roughness.contents = 0.38
             let callPanel = exteriorBox("elevatorExteriorCallPanel", width: 0.20, height: 0.54,
@@ -3112,54 +3119,18 @@ enum HallwayScene {
             let x = worldX(coord.col)
             let z = worldZ(coord.row)
             let sign = makeExitSignNode(pointing: direction, cellSize: cellSize)
-
-            // Which way to offset the mount point -- Eddie, Sept 5
-            // (round 7): a forced-turn cell (exactly 2 open sides) is
-            // arrived at STILL FACING the way you were walking, not
-            // the way the sign points -- e.g. you walk south into a
-            // corner whose only other way onward is west; you arrive
-            // facing south, and a sign offset toward west sits a full
-            // 90 degrees off your view, so close (one cell away) that
-            // no amount of billboard rotation puts it back in frame.
-            // "i hit fwd again... it hits the corner which also has an
-            // exit sign... although im in that corner box, the exit
-            // sign does not appear. i just see the wall." That "wall"
-            // IS the right place for the sign -- it's the wall that
-            // stopped you, so it's exactly what you're already looking
-            // at. For a true fork (3-4 open sides) `direction` itself
-            // is usually the "keep going straight" option anyway
-            // (already tested working at the very first intersection),
-            // so this only overrides the offset for the narrower,
-            // unambiguous 2-open-sides case.
-            let openDirections = Direction.allCases.filter { d in
-                isOpen(coord.row + d.delta.row, coord.col + d.delta.col)
-            }
-            var offsetDirection = direction
-            if openDirections.count == 2, let onlyOtherOpen = openDirections.first(where: { $0 != direction }) {
-                offsetDirection = onlyOtherOpen.opposite
-            }
-            // Still not showing up even after last round's reposition
-            // (Eddie, Sept 5, round 8: "the corner one still does
-            // not"). The turn fix above got the ANGLE right -- offsetting
-            // toward the wall the player is actually facing -- but for a
-            // forced turn that wall is, by definition, a SOLID one (the
-            // reason it's a forced turn at all), and 1.05x half pushes
-            // the sign almost to that wall's far face. addWall's panel
-            // is 0.1 thick, centered on the cell boundary, so at 1.05x
-            // the sign lands only ~0.03 units short of coming out the
-            // BACK of it -- comfortably behind the wall's near face from
-            // the camera's side, i.e. hidden behind solid geometry
-            // instead of merely out of frame. Every OPEN-direction
-            // offset (the original "toward the doorway" case, and the
-            // true-fork case above) keeps the full 1.05x, since there's
-            // no wall there to hide behind; only a CLOSED-direction
-            // offset (this forced-turn case) needs real clearance from
-            // that wall's near face, which sits at half - 0.05.
-            let offsetIsOpen = isOpen(coord.row + offsetDirection.delta.row, coord.col + offsetDirection.delta.col)
-            let offsetFraction: CGFloat = offsetIsOpen ? 1.05 : 0.8
-            let towardOffsetX = CGFloat(offsetDirection.delta.col) * half * offsetFraction
-            let towardOffsetZ = CGFloat(offsetDirection.delta.row) * half * offsetFraction
-            sign.position = SCNVector3(Float(x + towardOffsetX), Float(wallHeight * 0.72), Float(z + towardOffsetZ))
+            // Centered in the cell, hung from the ceiling slab's
+            // underside (the v2 pendant's anchor sits at y == wallHeight
+            // and hangs DOWN from there). `direction` is the physical
+            // WORLD direction toward the exit route; makeExitSignNode
+            // derives the fixture's orientation (broad faces toward the
+            // cross approaches that must TURN) and each face's fixed
+            // arrow from it. The sign is built once as ordinary
+            // persistent geometry -- no per-player rotation, no dynamic
+            // text, no cell-based visibility; SceneKit perspective alone
+            // shows a broad face to the approaches that need it and the
+            // thin edge to anyone already travelling along the route.
+            sign.position = SCNVector3(Float(x), Float(wallHeight), Float(z))
             root.addChildNode(sign)
             exitSignNodes[coord] = sign
         }
@@ -3208,7 +3179,38 @@ enum HallwayScene {
         // text, no live per-frame refresh needed unlike the map's
         // tracking dot), same solid-wall-required check as floor maps.
         if !missionSigns.isEmpty {
-            let missionTexture = makeMissionSignTexture(heading: missionHeading, body: missionBody)
+            // Eddie, Sept 18: some floors' boards are now the production
+            // artwork (mission-2.png / mission-3.png), which already
+            // contains each sign's full text and design, so those floors
+            // skip the baked heading/body texture entirely (no text
+            // overlay). Every other floor keeps the old shared
+            // makeMissionSignTexture bake, and any artwork floor still
+            // falls back to it if its file ever fails to load.
+            let missionArtworkName: String?
+            switch floorNumber {
+            case 2: missionArtworkName = "mission-2"
+            case 3: missionArtworkName = "mission-3"
+            case 4: missionArtworkName = "mission-4"
+            case 5: missionArtworkName = "mission-5"
+            case 6: missionArtworkName = "mission-6"
+            case 7: missionArtworkName = "mission-7"
+            case 8: missionArtworkName = "mission-8"
+            case 9: missionArtworkName = "mission-9"
+            case 10: missionArtworkName = "mission-10"
+            case 11: missionArtworkName = "mission-11"
+            case 12: missionArtworkName = "mission-12"
+            case 13: missionArtworkName = "mission-13"
+            case 14: missionArtworkName = "mission-14"
+            case 15: missionArtworkName = "mission-15"
+            case 16: missionArtworkName = "mission-16"
+            default: missionArtworkName = nil
+            }
+            var missionTexture = makeMissionSignTexture(heading: missionHeading, body: missionBody)
+            if let missionArtworkName,
+               let path = Bundle.main.path(forResource: missionArtworkName, ofType: "png"),
+               let artwork = UIImage(contentsOfFile: path) {
+                missionTexture = artwork
+            }
             for (coord, direction) in missionSigns {
                 guard cells.contains(coord) else { continue }
                 // Eddie, Sept 18: back to the same solid-wall-required
@@ -4299,6 +4301,38 @@ enum HallwayScene {
         return m
     }
 
+    /// The trash chute's interior -- trash-chute-inside.jpeg (Eddie's
+    /// photo of the building's real chute, Sept 18) instead of the
+    /// ordinary wall texture, so a Floor 2-style destination reads as a
+    /// real trash chute rather than a hole in drywall. INTERIOR ONLY:
+    /// used exclusively for the destination cubby's shaft faces when
+    /// kind == .trashCan (see addDestinationDoor) -- the shutter, its
+    /// frame, and the surrounding wall stay exactly as they were.
+    /// Clamped with an identity contentsTransform (NOT tiled): it's a
+    /// single photograph, and panel() skips its usual per-face
+    /// repeat/scale transform for this material (customInterior), so
+    /// the photo shows once, full-face, rather than as repeated
+    /// shrunken tiles. Same near-black, physically-based, faint-ember
+    /// treatment as makeCubbyInteriorMaterial so the deep shaft stays
+    /// faintly readable in the dark.
+    private static func makeTrashChuteInteriorMaterial() -> SCNMaterial {
+        let m = SCNMaterial()
+        if let path = Bundle.main.path(forResource: "trash-chute-inside", ofType: "jpeg"),
+           let image = UIImage(contentsOfFile: path) {
+            m.diffuse.contents = image
+        } else {
+            m.diffuse.contents = UIColor(white: 0.03, alpha: 1)
+        }
+        m.diffuse.wrapS = .clamp
+        m.diffuse.wrapT = .clamp
+        m.diffuse.contentsTransform = SCNMatrix4Identity
+        m.lightingModel = .physicallyBased
+        m.metalness.contents = 0.0
+        m.roughness.contents = 0.9
+        m.emission.contents = UIColor(red: 0.05, green: 0.025, blue: 0.01, alpha: 1)
+        return m
+    }
+
     /// The elevator's own door material -- warm brushed brass instead
     /// of the destination shutter's bright chrome, so the two wall
     /// fixtures read as different things at a glance. Eddie, Sept 5:
@@ -5074,36 +5108,33 @@ enum HallwayScene {
     /// the one color in this game not already claimed by trash (white),
     /// cash (gold), or the doorway/amber "notice this" markers, so an
     /// Exit Sign reads as its own distinct category at a glance.
-    // Dim (the DEFAULT look, from any distance) vs. neon (only the ONE
-    // sign at the player's actual current cell, toggled live by
-    // TapNavigationController) -- shared here as plain internal
-    // constants, not private, specifically so TapNavigationController
-    // can read and re-apply them without this file needing to know
-    // anything about player position itself. See the doc comment on
-    // makeExitSignNode below for why this split exists at all.
-    static let exitSignDimDiffuse = UIColor(red: 0.7, green: 0.05, blue: 0.04, alpha: 1)
-    static let exitSignDimEmission = UIColor(red: 0.26, green: 0.02, blue: 0.01, alpha: 1)
-    static let exitSignNeonDiffuse = UIColor(red: 0.95, green: 0.08, blue: 0.05, alpha: 1)
-    static let exitSignNeonEmission = UIColor(red: 0.85, green: 0.12, blue: 0.05, alpha: 1)
-    static let exitSignNeonScaleMultiplier: Float = 1.1
-    static let exitSignBaseSizeFactor: CGFloat = 0.05
+    // v2 (Sept 18): the whole dim-vs-neon split is gone -- nothing
+    // depends on the player's position anymore, so every material the
+    // fixture needs now lives privately inside makeExitSignNode below.
 
-    /// A non-interactive hallway fixture, hidden by default --
-    /// TapNavigationController shows the ONE sign at the player's
-    /// actual current cell (see exitSignNodes/updateExitSignHighlight
-    /// there) and hides everything else, so build() never needs to
-    /// worry about distance-based dimming here at all anymore.
+    /// v2 (Sept 18): a permanent, ceiling-mounted illuminated EXIT
+    /// fixture, hung centered in its grid cell from the ceiling slab --
+    /// no show/hide, no distance dimming, no facing-relative label:
+    /// the sign is always up and always lit, so nothing here depends on
+    /// player position anymore. A dark housing box on two thin rods with
+    /// a red illuminated face plate on each side, built once as fixed
+    /// scene geometry.
     ///
-    /// The `label` built here is only ever a placeholder -- it's never
-    /// actually seen, since the node starts hidden and stays that way
-    /// until TapNavigationController shows it, which is also exactly
-    /// when it OVERWRITES this string with one computed relative to
-    /// the player's CURRENT FACING (Eddie, Sept 5, round 9: a sign
-    /// whose compass direction is west needs to say "turn right" to a
-    /// player facing south, "turn left" to one facing north -- there's
-    /// no single fixed glyph that's correct for every possible
-    /// arrival, so build() has no business picking one). See
-    /// TapNavigationController.relativeExitLabel(pointing:facing:).
+    /// Fixed-architecture wayfinding: `direction` is the physical WORLD
+    /// direction toward the exit route. The pendant is oriented so its
+    /// broad faces look down the CROSS approaches that must TURN (spun
+    /// 90° for a north/south route, unrotated for an east/west one), and
+    /// each face prints the fixed instruction for the viewer facing it --
+    /// "EXIT →" for a right turn, "← EXIT" for a left turn. Because the
+    /// two viewers face opposite ways, the two faces of the same fixture
+    /// show opposite horizontal arrows that still lead to the same
+    /// route. There are no ↑/↓ "ahead"/"behind" glyphs at all, and the
+    /// fixture never rotates or re-labels for the player: SceneKit
+    /// perspective alone picks the face or the thin edge. The -Z face's
+    /// SCNText is mirrored 180° about Y so its back view reads normally
+    /// (the same double-faced trick MailDelivery's envelopes use). Rich
+    /// 3D only -- the text is real extruded SCNText, no texture maps, no
+    /// new assets.
     /// A single flat triangle lying in the floor plane, tip pointing
     /// out along `direction` -- used to cap each arm of
     /// addIntersectionMarker with a proper arrowhead instead of
@@ -5135,37 +5166,136 @@ enum HallwayScene {
     }
 
     private static func makeExitSignNode(pointing direction: Direction, cellSize: CGFloat) -> SCNNode {
+        // A pendant "EXIT" fixture hung from the ceiling slab, scaled to
+        // the maze cell so it reads well on any floor. The anchor node's
+        // origin sits ON the ceiling (build() places it at y == wallHeight,
+        // the slab's underside); all geometry hangs below it.
+        //
+        // Real fixed-architecture rules (Eddie, Sept 18): `direction` is
+        // the WORLD direction a player must eventually travel from this
+        // location to reach the exit route. The two broad faces are
+        // mounted to face the CROSS approaches -- the players who have to
+        // TURN here, not the ones already travelling along the route --
+        // so the fixture is spun 90° about Y when the route runs
+        // north/south (faces look down the east/west hallway) and left
+        // unrotated when it runs east/west (faces already look down the
+        // north/south hallway). Each face carries the fixed instruction
+        // for the viewer facing it: "EXIT →" for a right turn, "← EXIT"
+        // for a left turn. The two opposite faces therefore show OPPOSITE
+        // horizontal arrows that still lead to the same physical route.
+        // No ↑/↓ glyphs anywhere: a vertical route reads as the left or
+        // right turn into its corridor, never as "ahead"/"behind".
         let anchor = SCNNode()
+        let cell = Float(cellSize)
 
-        let label: String
-        switch direction {
-        case .north, .south: label = "EXIT ^"
-        case .east: label = "EXIT >"
-        case .west: label = "< EXIT"
+        // Housing width is driven by the WORST-CASE face layout, not one
+        // face tuned alone: "← EXIT" measures ~1.80 world units at the
+        // fitted text scale and "EXIT →" ~1.75, so the old 0.5-cell box
+        // (1.60 wide) let both lines spill past the housing edge -- the
+        // white artifact seen past "← EXIT"'s trailing T on device. The
+        // box is widened so the widest line lands at ~72% of the housing
+        // width (the red plate's 90% face still carries it with ~10%
+        // horizontal padding on each side).
+        let signWidth = cell * 0.78
+        let signHeight = cell * 0.20
+        let signThickness = cell * 0.08
+        let rodLength = cell * 0.14
+        let rodRadius = cell * 0.012
+        let rodInset = cell * 0.06
+        let housingY = -rodLength - signHeight / 2
+        let textHeight = signHeight * 0.62
+
+        let housingMaterial = SCNMaterial()
+        housingMaterial.diffuse.contents = UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
+        housingMaterial.lightingModel = .physicallyBased
+        housingMaterial.metalness.contents = 0.35
+        housingMaterial.roughness.contents = 0.8
+
+        let faceMaterial = SCNMaterial()
+        faceMaterial.diffuse.contents = UIColor(red: 0.45, green: 0.02, blue: 0.02, alpha: 1)
+        faceMaterial.emission.contents = UIColor(red: 0.28, green: 0.015, blue: 0.01, alpha: 1)
+        faceMaterial.lightingModel = .physicallyBased
+        faceMaterial.metalness.contents = 0.0
+        faceMaterial.roughness.contents = 0.5
+
+        let textMaterial = SCNMaterial()
+        textMaterial.diffuse.contents = UIColor(red: 0.95, green: 0.92, blue: 0.9, alpha: 1)
+        textMaterial.emission.contents = UIColor(red: 0.7, green: 0.62, blue: 0.58, alpha: 1)
+        textMaterial.lightingModel = .physicallyBased
+
+        // Suspension rods -- ceiling down to the two housing corners.
+        for rodX in [signWidth / 2 - rodInset, -signWidth / 2 + rodInset] {
+            let rod = SCNNode(geometry: SCNCylinder(radius: CGFloat(rodRadius), height: CGFloat(rodLength)))
+            rod.geometry?.materials = [housingMaterial]
+            rod.position = SCNVector3(rodX, -rodLength / 2, 0)
+            anchor.addChildNode(rod)
         }
 
-        let text = SCNText(string: label, extrusionDepth: 4)
-        text.font = UIFont.boldSystemFont(ofSize: 44)
-        text.flatness = 0.2
-        let textMaterial = SCNMaterial()
-        textMaterial.diffuse.contents = exitSignDimDiffuse
-        textMaterial.emission.contents = exitSignDimEmission
-        textMaterial.lightingModel = .physicallyBased
-        textMaterial.metalness.contents = 0.05
-        textMaterial.roughness.contents = 0.6
-        text.materials = [textMaterial]
+        // Dark, slightly chamfered housing box.
+        let housing = SCNNode(geometry: SCNBox(width: CGFloat(signWidth), height: CGFloat(signHeight), length: CGFloat(signThickness), chamferRadius: CGFloat(cell) * 0.02))
+        housing.geometry?.materials = [housingMaterial]
+        housing.position.y = housingY
+        anchor.addChildNode(housing)
 
-        let textNode = SCNNode(geometry: text)
-        let (minBound, maxBound) = text.boundingBox
-        let textWidth = maxBound.x - minBound.x
-        let textHeight = maxBound.y - minBound.y
-        textNode.pivot = SCNMatrix4MakeTranslation(minBound.x + textWidth / 2, minBound.y + textHeight / 2, 0)
-        let textScale = textHeight > 0 ? Float(cellSize * exitSignBaseSizeFactor) / textHeight : 1
-        textNode.scale = SCNVector3(textScale, textScale, textScale)
-        let billboard = SCNBillboardConstraint()
-        billboard.freeAxes = .Y
-        textNode.constraints = [billboard]
-        anchor.addChildNode(textNode)
+        // Face plates sit on the ±Z sides of the unrotated fixture (broad
+        // faces facing north/south). A route running east/west leaves that
+        // exactly as it is -- the broad faces already look down the N/S
+        // cross hallway. A route running north/south spins the WHOLE
+        // pendant 90° about Y so the same broad faces instead look down
+        // the E/W cross hallway. `direction` never changes frame to frame,
+        // so the whole fixture (rods, housing, both faces) gets built in
+        // exactly one orientation and then just hangs there.
+        let rotatingForNorthSouthRoute = direction == .north || direction == .south
+        anchor.eulerAngles.y = rotatingForNorthSouthRoute ? .pi / 2 : 0
+
+        let facePlate = SCNNode(geometry: SCNPlane(width: CGFloat(signWidth) * 0.9, height: CGFloat(signHeight) * 0.74))
+        facePlate.geometry?.materials = [faceMaterial]
+
+        // One face per side, each with its OWN printed header (the two
+        // faces cannot share one SCNText anymore -- they read differently).
+        // The viewer who reads a face stands on the far side of it and so
+        // faces `faceWorld.opposite`; the arrow is their correct turn
+        // toward the exit route: a RIGHT turn prints "EXIT →" (arrow after
+        // the word), a LEFT turn "← EXIT" (arrow leading, the real-world
+        // convention). The -Z face is built mirrored (its text node spun
+        // 180° about Y -- MailDelivery's envelope trick) so its glyphs
+        // stay upright for the viewer on its own side.
+        for back in [false, true] {
+            let zSign: Float = back ? -1 : 1
+
+            let faceWorld: Direction
+            if rotatingForNorthSouthRoute {
+                // A +90° yaw maps local +Z -> world east, local -Z -> west.
+                faceWorld = back ? .west : .east
+            } else {
+                // Unrotated: local +Z -> south, local -Z -> north.
+                faceWorld = back ? .north : .south
+            }
+            let viewerFaces = faceWorld.opposite
+            let headline = direction == viewerFaces.right ? "EXIT →" : "← EXIT"
+
+            let text = SCNText(string: headline, extrusionDepth: 2)
+            text.font = UIFont.boldSystemFont(ofSize: 36)
+            text.flatness = 0.2
+            text.materials = [textMaterial]
+            let (minBound, maxBound) = text.boundingBox
+            let width = maxBound.x - minBound.x
+            let height = maxBound.y - minBound.y
+            let scale = height > 0 ? textHeight / height : 1
+            let pivot = SCNMatrix4MakeTranslation(minBound.x + width / 2, minBound.y + height / 2, 0)
+
+            let face = SCNNode()
+            face.position = SCNVector3(0, housingY, (signThickness / 2 + 0.004) * zSign)
+            face.addChildNode(facePlate.clone())
+            anchor.addChildNode(face)
+
+            let labelNode = SCNNode(geometry: text)
+            labelNode.pivot = pivot
+            labelNode.scale = SCNVector3(scale, scale, scale)
+            labelNode.position = SCNVector3(0, housingY, (signThickness / 2 + 0.008) * zSign)
+            if back { labelNode.eulerAngles.y = .pi }
+            anchor.addChildNode(labelNode)
+        }
 
         return anchor
     }
@@ -5180,7 +5310,8 @@ enum HallwayScene {
     /// straight off ObjectKind.missionLegendLabel per chute instead of
     /// a hardcoded string.
     ///
-    /// Billboarded (same trick makeExitSignNode uses just above) so it
+    /// Billboarded (the same trick the old EXIT sign used before the
+    /// Sept 18 ceiling-fixture rewrite) so it
     /// always faces the player dead-on -- sidesteps working out which
     /// of the 4 door rotations would read mirrored/backward if this
     /// were instead baked flat into the door's own rotated local frame.

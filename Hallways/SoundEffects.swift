@@ -28,7 +28,8 @@ enum SoundEffects {
             { trashPickup1Player }, { trashPickup2Player }, { trashChuteOpenPlayer }, { trashChuteClosePlayer },
             { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer }, { extinguisherGrabPlayer },
             { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer },
-            { ticTacToeXPlayer }, { ticTacToeOPlayer }, { ticTacToeWinPlayer }, { ticTacToeLosePlayer }
+            { ticTacToeXPlayer }, { ticTacToeOPlayer }, { ticTacToeWinPlayer }, { ticTacToeLosePlayer },
+            { streetAudioPlayer }
         ]
         for load in loaders {
             try? await Task.sleep(for: .milliseconds(10))
@@ -183,6 +184,59 @@ enum SoundEffects {
 
     static func stopElevatorMusic() {
         elevatorMusicPlayer?.pause()
+    }
+
+    /// Eddie, Sept 18: street/city ambience for the building-exterior
+    /// opening screen (street1.mp3 from Eddie's Downloads, one
+    /// long-ish ambient loop rather than the short one-shots above).
+    /// Same explicit start/stop model as walking/elevator music --
+    /// NOT a play-from-zero sound effect. Starts when the intro/
+    /// opening screen appears (ContentView's showIntroScreen onChange),
+    /// loops for as long as that screen is up, and fades out over
+    /// ~0.8s (midrange of Eddie's "~0.5-1s") the moment the player
+    /// dismisses it and steps inside on the ceremonial walk
+    /// (stopStreetAudio from the IntroScreenView onEnter). By the
+    /// time the walk hands off to floor 1, the street is gone -- it
+    /// never bleeds into the lobby or any gameplay floor, exactly
+    /// per spec: exterior only, no lobby ambience.
+    private static let streetAudioPlayer: AVAudioPlayer? = {
+        let player = loadPlayer("street1.mp3")
+        player?.numberOfLoops = -1
+        return player
+    }()
+
+    static func startStreetAudio() {
+        guard let player = streetAudioPlayer else { return }
+        // Explicit game-audio activation, same as the chute/mail
+        // helpers -- the intro screen is exactly when the OS may
+        // still have the session unconfigured.
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            print("SoundEffects: could not activate street audio: \(error)")
+        }
+        player.volume = 1
+        player.currentTime = 0
+        player.play()
+    }
+
+    static func stopStreetAudio() {
+        guard let player = streetAudioPlayer, player.isPlaying else { return }
+        let duration = 0.8
+        let steps = 8
+        let step = duration / Double(steps)
+        for i in 1...steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i)) {
+                guard player.isPlaying else { return }
+                player.volume = Float(1 - Double(i) / Double(steps))
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            player.stop()
+            player.volume = 1
+        }
     }
 
     /// Eddie, Sept 9: "improve the picking up of trash... enclosed are

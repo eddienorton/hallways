@@ -184,6 +184,110 @@ struct HallwaysTests {
         #expect(store.mirrors[coord] == .north)
     }
 
+    // Sept 21 (Photo Booth Floor Editor placement): coord/direction (4,0)
+    // facing west and coord/direction (4,1) facing north on Floor 2 are
+    // both confirmed, directly from DefaultMazes.json, to be open cells
+    // with a solid neighbor in that direction and no other placed content
+    // -- deliberately NOT reusing mirrorEditsSurviveFloorSwitchExportAndUndo's
+    // own (5,4)/.north coordinate above, so this test can never collide
+    // with that one's own placeMirror call regardless of test run order.
+    @Test func photoBoothPlacementSurvivesFloorSwitchAndSupportsMultipleBooths() throws {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        let first = GridCoordinate(row: 4, col: 0)
+        let second = GridCoordinate(row: 4, col: 1)
+        #expect(store.canPlacePhotoBooth(.west, at: first))
+        store.placePhotoBooth(.west, expression: .mouthOpen, at: first)
+        #expect(store.photoBooths[first]?.direction == .west)
+        #expect(store.photoBooths[first]?.expression == .mouthOpen)
+        // A second, independent booth on the SAME floor -- "multiple
+        // booths remain supported."
+        #expect(store.canPlacePhotoBooth(.north, at: second))
+        store.placePhotoBooth(.north, expression: .eyebrowsRaised, at: second)
+        #expect(store.photoBooths.count == 2)
+        // Rejected: an open neighbor is not a wall to mount a booth on.
+        store.placePhotoBooth(.south, expression: .smile, at: MazeStore.elevatorCoordinate)
+        #expect(store.photoBooths[MazeStore.elevatorCoordinate] == nil)
+        // Coordinate, direction, AND expression all survive a floor
+        // switch away and back.
+        store.switchTo(id: 3)
+        store.switchTo(id: 2)
+        #expect(store.photoBooths[first]?.direction == .west)
+        #expect(store.photoBooths[first]?.expression == .mouthOpen)
+        #expect(store.photoBooths[second]?.direction == .north)
+        #expect(store.photoBooths[second]?.expression == .eyebrowsRaised)
+        let json = try #require(store.exportLibraryJSON()?.data(using: .utf8))
+        let floors = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
+        let exported = try #require(floors.first { $0["id"] as? Int == 2 })
+        let booths = try #require(exported["photoBooths"] as? [[String: Any]])
+        #expect(booths.contains { item in
+            let placed = item["coord"] as? [String: Int]
+            return placed?["row"] == 4 && placed?["col"] == 0 && item["direction"] as? String == "west" && item["expression"] as? String == "mouthOpen"
+        })
+        // Floor 6's pre-existing, hand-authored booth is completely
+        // unaffected by any of the above -- still exactly one booth,
+        // same expression and direction as DefaultMazes.json.
+        store.switchTo(id: 6)
+        #expect(store.photoBooths.count == 1)
+        #expect(store.photoBooths.values.first?.expression == .smile)
+        #expect(store.photoBooths.values.first?.direction == .east)
+    }
+
+    // Sept 21 (Picture Size): same shape as
+    // mirrorEditsSurviveFloorSwitchExportAndUndo above, plus the
+    // backward-compatibility guarantee -- a picture placed through the
+    // plain 2-argument placePicture(_:at:) (every pre-existing call
+    // site's exact form) gets Standard with no size argument at all,
+    // the same outcome a genuinely legacy floor (no `size` key in its
+    // saved JSON) produces via PictureSizePlacement's Optional `size`
+    // field and MazeStore's own `?? .standard` at every load site.
+    @Test func pictureSizeDefaultsToStandardAndSurvivesFloorSwitchAndExport() throws {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        let coord = GridCoordinate(row: 4, col: 0)
+        store.placePicture(.west, at: coord)
+        #expect(store.pictureSize(at: coord) == .standard)
+        #expect(PictureSize.standard.scale == 1.0)
+        store.setPictureSize(.fullLength, at: coord)
+        #expect(store.pictureSize(at: coord) == .fullLength)
+        #expect(store.pictures[coord]?.direction == .west) // direction untouched by a size-only change
+        store.switchTo(id: 3)
+        store.switchTo(id: 2)
+        #expect(store.pictureSize(at: coord) == .fullLength)
+        let json = try #require(store.exportLibraryJSON()?.data(using: .utf8))
+        let floors = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
+        let exported = try #require(floors.first { $0["id"] as? Int == 2 })
+        let pics = try #require(exported["pictures"] as? [[String: Any]])
+        #expect(pics.contains { item in
+            let placed = item["coord"] as? [String: Int]
+            return placed?["row"] == 4 && placed?["col"] == 0 && item["direction"] as? String == "west" && item["size"] as? String == "fullLength"
+        })
+    }
+
+    // Sept 21 (3D Decorator wall authoring, Pass 3): canPlacePicture is
+    // the full occupancy check DecoratorState.canAddPicture relies on
+    // for a live wall-tap ADD -- deliberately stricter than
+    // placePicture's own looser guard (see both functions' own doc
+    // comments). Same coordinate this file's own
+    // pictureSizeDefaultsToStandardAndSurvivesFloorSwitchAndExport test
+    // just above already relies on being a legal, ordinary ((row: 4,
+    // col: 0), .west) an ordinary dead-end wall on floor 2.
+    @Test func canPlacePictureAcceptsAnOrdinaryWallButRejectsOneAlreadyClaimedOrTheElevatorCell() {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        let coord = GridCoordinate(row: 4, col: 0)
+        #expect(store.canPlacePicture(.west, at: coord))
+        store.placeMirror(.west, at: coord)
+        // Already claimed by a Mirror -- Picture must be refused on
+        // that same wall, matching canPlaceWallLight/canPlacePhotoBooth's
+        // own mirrors[coord] exclusion.
+        #expect(!store.canPlacePicture(.west, at: coord))
+        // The elevator cell is never a legal Picture wall, regardless
+        // of direction -- matches canPlaceMirror/canPlaceWallLight/
+        // canPlacePhotoBooth's own elevatorCoordinate exclusion.
+        #expect(!store.canPlacePicture(.north, at: MazeStore.elevatorCoordinate))
+    }
+
     @Test func mirrorsStopWalkingOnReturnTrips() async {
         let scene = SCNScene()
         let camera = SCNNode(); camera.position.y = 1.6

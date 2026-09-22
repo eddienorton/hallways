@@ -10,8 +10,64 @@
 
 import SceneKit
 import UIKit
+import ObjectiveC
+
+private var pictureBackfillIdentityKey: UInt8 = 0
+private final class PictureBackfillIdentityBox: NSObject {
+    let target: PictureBackfillTarget
+    init(_ target: PictureBackfillTarget) { self.target = target }
+}
+
+/// Sept 21 (Picture Decorator complete pass, Goal 1): identity tag for
+/// the wall backfill around a Picture -- the wall-matching backing
+/// panel plus the 4 door-frame strips HallwayScene.buildPictureBackfill
+/// builds around a Picture's reserved gap. Deliberately separate from
+/// DecoratorTarget (DecoratorMode.swift): these nodes are siblings of
+/// a Picture's `frame` node, not its children, and must never become
+/// independently Decorator-selectable the way DecoratorTarget-tagged
+/// nodes are (DecoratorState.select walks up through node.parent
+/// looking for a tag). DecoratorState only ever looks these up by
+/// (floor, coord, direction) -- via PictureBackfillTarget.read, the
+/// same enumerateChildNodes scan DecoratorTarget-based lookups already
+/// use -- to remove and rebuild them on a live Size change or a live
+/// Delete, never to select or tap into them directly.
+struct PictureBackfillTarget: Equatable {
+    let floor: Int
+    let coord: GridCoordinate
+    let direction: Direction
+
+    func tag(_ node: SCNNode) {
+        objc_setAssociatedObject(node, &pictureBackfillIdentityKey, PictureBackfillIdentityBox(self), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
+    static func read(_ node: SCNNode) -> PictureBackfillTarget? {
+        (objc_getAssociatedObject(node, &pictureBackfillIdentityKey) as? PictureBackfillIdentityBox)?.target
+    }
+}
 
 enum HallwayScene {
+    /// Sept 21 (Picture Decorator complete pass, Goal 1): the
+    /// direction-based proud-offset wall positioning that used to be a
+    /// local `orient` closure inside buildPictureNode -- pulled out so
+    /// buildPictureBackfill's own backing panel can share it too.
+    /// Behavior unchanged.
+    static func orientOnWall(_ node: SCNNode, direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, wallHeight: CGFloat, proud: CGFloat) {
+        node.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55), Float(wallCenterZ))
+        switch direction {
+        case .north:
+            node.position.z += Float(proud)
+        case .south:
+            node.position.z -= Float(proud)
+            node.eulerAngles.y = .pi
+        case .east:
+            node.position.x -= Float(proud)
+            node.eulerAngles.y = -.pi / 2
+        case .west:
+            node.position.x += Float(proud)
+            node.eulerAngles.y = .pi / 2
+        }
+    }
+
     /// Capture the displayed artwork, including a pending-photo placeholder.
     /// Arrival reuses these values without starting new Photos requests.
     static func elevatorArtwork(in scene: SCNScene) -> [String: Any] {
@@ -1197,7 +1253,7 @@ enum HallwayScene {
         }
     }
 
-    static func makeFireNode(at coord: GridCoordinate, cellSize: CGFloat) -> SCNNode {
+    static func makeFireNode(at coord: GridCoordinate, cellSize: CGFloat, brightness: Int = 3) -> SCNNode {
         let root = SCNNode()
         root.name = "fire_\(coord.row)_\(coord.col)"
         let texture = makeFireTexture()
@@ -1221,7 +1277,7 @@ enum HallwayScene {
         let glow = SCNLight()
         glow.type = .omni
         glow.color = UIColor(red: 1.0, green: 0.18, blue: 0.02, alpha: 1)
-        glow.intensity = 85
+        glow.intensity = AuthoredLightKind.fire.intensity(level: brightness)
         glow.attenuationEndDistance = 2.2
         let glowNode = SCNNode()
         glowNode.light = glow
@@ -1239,6 +1295,69 @@ enum HallwayScene {
                 .scale(to: 0.94, duration: 0.22)
             ])
         ])), forKey: "fireAnimation")
+        return root
+    }
+
+    /// The editor's Wall Light fixture -- a warm sconce bolted to the TOP
+    /// of an already-solid wall, right where makeFireNode leaves off (this
+    /// is makeWallLightNode's own "Eddie, Sept 20" round-2 twin).
+    static func makeWallLightNode(at coord: GridCoordinate, direction: Direction, cellSize: CGFloat, brightness: Int = 3) -> SCNNode {
+        let root = SCNNode()
+        root.name = "wallLight_\(coord.row)_\(coord.col)"
+
+        // Dark stem + tiny warm bracket -- sized to read as the bobble you
+        // spot BEFORE the glow, matching the picture/mirror "solid
+        // fixture + a real light" feel. (Editor paints these on walls the
+        // same way it paints mirrors: cell open, neighbor closed.)
+        let stem = SCNBox(width: 0.035, height: 0.16, length: 0.035, chamferRadius: 0.008)
+        let stemMat = SCNMaterial()
+        stemMat.diffuse.contents = UIColor(white: 0.20, alpha: 1)
+        stemMat.specular.contents = UIColor.white
+        stemMat.shininess = 0.5
+        stemMat.lightingModel = .blinn
+        stem.materials = [stemMat]
+        let stemNode = SCNNode(geometry: stem)
+        stemNode.position.y = 0.80
+        root.addChildNode(stemNode)
+
+        let bulb = SCNSphere(radius: 0.05)
+        let bulbMat = SCNMaterial()
+        bulbMat.diffuse.contents = UIColor(white: 0.98, alpha: 1)
+        bulbMat.emission.contents = UIColor(red: 1.0, green: 0.79, blue: 0.5, alpha: 1)
+        bulbMat.lightingModel = .constant
+        bulb.materials = [bulbMat]
+        let bulbNode = SCNNode(geometry: bulb)
+        bulbNode.position.y = 0.62
+        root.addChildNode(bulbNode)
+
+        // A warm omni clipped modestly behind the bulb so the wall it
+        // hangs on gets lit with the same warm falloff the ceiling
+        // glow uses, but NOT so hot that it washes the whole cell out
+        // at point-blank (the exact thing that scorched the earlier
+        // ceiling-light prototype -- see makeFireNode's same
+        // attenuationEndDistance guard).
+        let warm = SCNLight()
+        warm.type = .omni
+        warm.color = UIColor(red: 1.0, green: 0.82, blue: 0.55, alpha: 1)
+        warm.intensity = AuthoredLightKind.wall.intensity(level: brightness)
+        warm.attenuationStartDistance = CGFloat(cellSize) * 0.2
+        warm.attenuationEndDistance = CGFloat(cellSize) * 2.0
+        warm.attenuationFalloffExponent = 2
+        warm.castsShadow = false
+        let warmNode = SCNNode()
+        warmNode.light = warm
+        warmNode.position.y = 0.62
+        root.addChildNode(warmNode)
+
+        // Root sits at the same world position makePictureNode uses
+        // (wallCenter grid position + half-cell offset along the
+        // direction axis), so the editor's paint-at-coord math lines up
+        // with what the player actually walks next to.
+        root.position = SCNVector3(
+            Float(CGFloat(coord.col) * cellSize + CGFloat(direction.delta.col) * (cellSize / 2 - 0.12)),
+            0.62,
+            Float(CGFloat(coord.row) * cellSize + CGFloat(direction.delta.row) * (cellSize / 2 - 0.12))
+        )
         return root
     }
 
@@ -1412,6 +1531,261 @@ enum HallwayScene {
         return (scene, cameraNode, [walkable1, walkable2], wallMaterial, floorMaterial, ceilingMaterial)
     }
 
+    // MARK: - Sept 21 (3D Decorator wall authoring): shared wall/picture
+    // geometry, hoisted to real HallwayScene static methods.
+    //
+    // addWall/addDoorFrame/addPictureNode used to live ONLY as local
+    // closures trapped inside build(fromMaze:...) below, closing over
+    // that one call's cellSize/wallHeight/effectiveWallImageName/root/
+    // wallMaterials. That made them unreachable from anywhere except a
+    // fresh full scene build -- fine until DecoratorState needed to add
+    // a Picture to an ALREADY-BUILT live scene (tap an empty wall in
+    // Decorate mode -> ADD -> Picture) using the exact same geometry
+    // logic, not a second, separately-maintained approximation of it.
+    //
+    // buildWallPanel/buildDoorFrame/buildPictureNode below are that
+    // same logic, byte-for-byte, with their captured state promoted to
+    // explicit parameters. build(fromMaze:...)'s own addWall/
+    // addDoorFrame/addPictureNode are now thin closures that just
+    // forward to these -- every existing call site inside
+    // build(fromMaze:...) is unchanged (addWall's 4 call sites gained
+    // one new `direction:` argument each, see below; nothing else
+    // changed), and DecoratorState.addPicture calls the very same
+    // static methods directly once the scene already exists. See
+    // DecoratorMode.swift's DecoratorTarget.Kind.wallSurface doc
+    // comment for why buildWallPanel also tags the node it builds.
+
+    /// Same per-floor wall-image override table build(fromMaze:...) has
+    /// always used, now callable standalone so a live Decorator
+    /// mutation can resolve the same image a fresh build would have.
+    static func effectiveWallImageName(floorNumber: Int, theme: HallwayTheme) -> String? {
+        switch floorNumber {
+        case 1:
+            return "lobby-wall"
+        case 2:
+            return "wood-walnut"
+        default:
+            return theme.wallImageName
+        }
+    }
+
+    /// The ordinary per-cell wall panel -- was the local `addWall`
+    /// closure inside build(fromMaze:...)'s per-cell loop. Behavior is
+    /// unchanged; `direction` is new (needed to tag the node's own
+    /// wallSurface identity, see DecoratorTarget) and every other
+    /// parameter is exactly what that closure used to capture.
+    @discardableResult
+    static func buildWallPanel(coord: GridCoordinate, direction: Direction, width: CGFloat, length: CGFloat, x: CGFloat, z: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, floorNumber: Int, root: SCNNode, wallMaterials: inout [SCNMaterial]) -> SCNNode {
+        let geo = SCNBox(width: width, height: wallHeight, length: length, chamferRadius: 0)
+        let material = makeWallMaterial(imageName: effectiveWallImageName)
+        geo.materials = [material]
+        wallMaterials.append(material)
+        let node = SCNNode(geometry: geo)
+        node.name = WallPainter.nodeName(coord)
+        node.position = SCNVector3(Float(x), Float(wallHeight / 2), Float(z))
+        DecoratorTarget(floor: floorNumber, coord: coord, kind: .wallSurface, direction: direction).tag(node)
+        root.addChildNode(node)
+        return node
+    }
+
+    /// The flat wall-textured strip frame around a small fixture/door
+    /// opening -- was the local `addDoorFrame` closure. Behavior is
+    /// unchanged; every parameter here is exactly what that closure
+    /// used to capture (cellSize, wallHeight, effectiveWallImageName,
+    /// root, wallMaterials).
+    /// Sept 21 (Picture Decorator complete pass, Goal 1): `tag` (new,
+    /// optional, defaulted nil so every existing call site -- there are
+    /// ~17-21 of them, doors/destinations/elevators/mirrors/photo
+    /// booths/window rooms/mini-game terminals -- keeps compiling and
+    /// behaving unchanged) is invoked on each of the 4 strip nodes this
+    /// builds, right before it's added to the scene. The return value
+    /// (new; @discardableResult so no existing call site needs to
+    /// change) hands back those same 4 nodes, so a caller building a
+    /// Picture's backfill can find and remove exactly this group again
+    /// later without a second identity mechanism of its own -- see
+    /// PictureBackfillTarget and buildPictureBackfill just below.
+    @discardableResult
+    static func buildDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, cellSize: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, root: SCNNode, wallMaterials: inout [SCNMaterial], tag: ((SCNNode) -> Void)? = nil) -> [SCNNode] {
+        let thick: CGFloat = 0.1
+        let doorTop = doorCenterY + doorHeight / 2
+        let doorBottom = doorCenterY - doorHeight / 2
+        let sideStripWidth = (cellSize - doorWidth) / 2
+        var createdStrips: [SCNNode] = []
+
+        func stripMaterial(width: CGFloat, height: CGFloat) -> SCNMaterial {
+            let material = makeWallMaterial(imageName: effectiveWallImageName)
+            let sScale = Float(2 * width / cellSize)
+            let tScale = Float(2 * height / wallHeight)
+            material.diffuse.contentsTransform = SCNMatrix4MakeScale(sScale, tScale, 1)
+            material.name = "wallRepeat:\(sScale)x\(tScale)"
+            wallMaterials.append(material)
+            return material
+        }
+
+        func strip(alongLength: CGFloat, verticalHeight: CGFloat, alongOffset: CGFloat, verticalCenter: CGFloat) {
+            guard verticalHeight > 0, alongLength > 0 else { return }
+            let isTop = verticalCenter > doorTop
+            let stripThickness = thick + (isTop ? topFrontExtension : 0)
+            let geo: SCNBox
+            let x: CGFloat
+            let z: CGFloat
+            switch direction {
+            case .north, .south:
+                geo = SCNBox(width: alongLength, height: verticalHeight, length: stripThickness, chamferRadius: 0)
+                x = wallCenterX + alongOffset
+                z = wallCenterZ
+            case .east, .west:
+                geo = SCNBox(width: stripThickness, height: verticalHeight, length: alongLength, chamferRadius: 0)
+                x = wallCenterX
+                z = wallCenterZ + alongOffset
+            }
+            let exterior = stripMaterial(width: alongLength, height: verticalHeight)
+            if let interiorMaterial {
+                let outsideFace: Int
+                switch direction {
+                case .north: outsideFace = 0
+                case .south: outsideFace = 2
+                case .east: outsideFace = 3
+                case .west: outsideFace = 1
+                }
+                var faces = Array(repeating: interiorMaterial, count: 6)
+                faces[outsideFace] = exterior
+                geo.materials = faces
+            } else {
+                geo.materials = [exterior]
+            }
+            let node = SCNNode(geometry: geo)
+            let owner = GridCoordinate(row: Int((wallCenterZ / cellSize - CGFloat(direction.delta.row) / 2).rounded()),
+                                       col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
+            node.name = WallPainter.nodeName(owner)
+            node.position = SCNVector3(Float(x), Float(verticalCenter), Float(z))
+            if isTop {
+                node.position.x -= Float(direction.delta.col) * Float(topFrontExtension / 2)
+                node.position.z -= Float(direction.delta.row) * Float(topFrontExtension / 2)
+            }
+            tag?(node)
+            root.addChildNode(node)
+            createdStrips.append(node)
+        }
+
+        strip(alongLength: cellSize, verticalHeight: wallHeight - doorTop, alongOffset: 0, verticalCenter: doorTop + (wallHeight - doorTop) / 2)
+        strip(alongLength: cellSize, verticalHeight: doorBottom, alongOffset: 0, verticalCenter: doorBottom / 2)
+        strip(alongLength: sideStripWidth, verticalHeight: doorHeight, alongOffset: -(doorWidth / 2 + sideStripWidth / 2), verticalCenter: doorCenterY)
+        strip(alongLength: sideStripWidth, verticalHeight: doorHeight, alongOffset: doorWidth / 2 + sideStripWidth / 2, verticalCenter: doorCenterY)
+        return createdStrips
+    }
+
+    /// Sept 21 (Picture Decorator complete pass, Goal 1): the wall
+    /// backfill around a Picture's reserved gap -- the wall-matching
+    /// backing panel plus the 4 buildDoorFrame strips -- pulled out of
+    /// buildPictureNode's own `if backfillWall` block so
+    /// DecoratorState.changePictureSize (live resize) and
+    /// DecoratorState.deletePicture (live delete) can remove and
+    /// rebuild (or just remove) ONLY this group later, without
+    /// touching the frame/plane/pictureLight buildPictureNode also
+    /// builds. `reservedWidth`/`reservedHeight` are the CURRENT
+    /// Picture's own panel dimensions (not always the largest
+    /// authored size -- see buildPictureNode's own updated doc
+    /// comment), so the visible cutout always matches what's actually
+    /// mounted there. Every node this returns is tagged with a
+    /// PictureBackfillTarget for exactly that later lookup.
+    @discardableResult
+    static func buildPictureBackfill(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, coord: GridCoordinate, floorNumber: Int, reservedWidth: CGFloat, reservedHeight: CGFloat, cellSize: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, root: SCNNode, wallMaterials: inout [SCNMaterial]) -> [SCNNode] {
+        let backfillTarget = PictureBackfillTarget(floor: floorNumber, coord: coord, direction: direction)
+        var created: [SCNNode] = []
+
+        created.append(contentsOf: buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: reservedWidth + 0.1, doorHeight: reservedHeight + 0.1, doorCenterY: wallHeight * 0.55, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: root, wallMaterials: &wallMaterials, tag: { backfillTarget.tag($0) }))
+
+        let backingWidth = reservedWidth + 0.1
+        let backingHeight = reservedHeight + 0.1
+        let backingMaterial = makeWallMaterial(imageName: effectiveWallImageName)
+        let backingSScale = Float(2 * backingWidth / cellSize)
+        let backingTScale = Float(2 * backingHeight / wallHeight)
+        backingMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(backingSScale, backingTScale, 1)
+        backingMaterial.name = "wallRepeat:\(backingSScale)x\(backingTScale)"
+        wallMaterials.append(backingMaterial)
+        let backingGeo = SCNBox(width: backingWidth, height: backingHeight, length: 0.02, chamferRadius: 0)
+        backingGeo.materials = [backingMaterial]
+        let backing = SCNNode(geometry: backingGeo)
+        orientOnWall(backing, direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, wallHeight: wallHeight, proud: 0.001)
+        backfillTarget.tag(backing)
+        root.addChildNode(backing)
+        created.append(backing)
+
+        return created
+    }
+
+    /// A framed Picture, with its reserved-gap wall backfill -- was the
+    /// local `addPictureNode` closure. Behavior is unchanged EXCEPT
+    /// (Sept 21, Picture Decorator complete pass, Goal 1): the reserved
+    /// wall gap now matches THIS Picture's own current size (post-scale
+    /// panelWidth/panelHeight) instead of always reserving the largest
+    /// authored size (.fullLength) -- that old behavior is what caused
+    /// the oversized-cutout-with-visible-seams bug around Small/
+    /// Standard/Poster pictures. `coord`/`floorNumber` are new,
+    /// required parameters -- needed only so a `backfillWall` call can
+    /// tag its backfill nodes with a PictureBackfillTarget (see
+    /// buildPictureBackfill just above); both build-time call sites and
+    /// DecoratorState.addPicture already have both values in scope.
+    /// Every other parameter here is exactly what the old closure used
+    /// to capture (cellSize, wallHeight, effectiveWallImageName, root,
+    /// wallMaterials), and its internal addDoorFrame call now goes
+    /// through buildPictureBackfill/buildDoorFrame above instead of a
+    /// sibling local closure.
+    static func buildPictureNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage, backfillWall: Bool = true, scale: CGFloat = 1, pictureLightLevel: Int? = nil, coord: GridCoordinate, floorNumber: Int, cellSize: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, root: SCNNode, wallMaterials: inout [SCNMaterial]) -> (material: SCNMaterial, frameNode: SCNNode) {
+        let aspect = texture.size.height / max(texture.size.width, 1)
+        var panelWidth: CGFloat = 0.6
+        var panelHeight = panelWidth * aspect
+        let maxPanelHeight: CGFloat = 0.85
+        if panelHeight > maxPanelHeight {
+            panelHeight = maxPanelHeight
+            panelWidth = panelHeight / aspect
+        }
+
+        panelWidth *= scale
+        panelHeight *= scale
+
+        // Sept 21 (Picture Decorator complete pass, Goal 1): reserve
+        // exactly THIS picture's own current footprint, not the
+        // largest authored size's -- see this method's own doc
+        // comment above.
+        let reservedWidth = panelWidth
+        let reservedHeight = panelHeight
+
+        let frameMaterial = SCNMaterial()
+        frameMaterial.diffuse.contents = UIColor(red: 0.3, green: 0.22, blue: 0.1, alpha: 1)
+        frameMaterial.lightingModel = .physicallyBased
+        frameMaterial.metalness.contents = 0.6
+        frameMaterial.roughness.contents = 0.4
+        let frameGeo = SCNBox(width: panelWidth + 0.1, height: panelHeight + 0.1, length: 0.04, chamferRadius: 0.01)
+        frameGeo.materials = [frameMaterial]
+        let frame = SCNNode(geometry: frameGeo)
+
+        let planeMaterial = SCNMaterial()
+        planeMaterial.diffuse.contents = texture
+        planeMaterial.diffuse.wrapT = .clamp
+        planeMaterial.lightingModel = .physicallyBased
+        planeMaterial.metalness.contents = 0.0
+        planeMaterial.roughness.contents = 0.6
+        let planeGeo = SCNPlane(width: panelWidth, height: panelHeight)
+        planeGeo.materials = [planeMaterial]
+        let plane = SCNNode(geometry: planeGeo)
+        plane.name = "authoredPicturePlane"
+        plane.position = SCNVector3(0, 0, 0.021)
+        frame.addChildNode(plane)
+        if let pictureLightLevel {
+            frame.addChildNode(Self.makePictureLight(panelWidth: panelWidth, panelHeight: panelHeight, level: pictureLightLevel))
+        }
+
+        if backfillWall {
+            buildPictureBackfill(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, coord: coord, floorNumber: floorNumber, reservedWidth: reservedWidth, reservedHeight: reservedHeight, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: root, wallMaterials: &wallMaterials)
+        }
+
+        orientOnWall(frame, direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, wallHeight: wallHeight, proud: 0.07)
+        root.addChildNode(frame)
+        return (planeMaterial, frame)
+    }
+
     /// Builds the 3D scene directly from a MazeStore's grid: one room per
     /// open cell, using the SAME brick/dark materials as the original
     /// hand-built prototype (per-cell random color was tried and
@@ -1425,7 +1799,8 @@ enum HallwayScene {
     /// FloorRect, inset only on the sides that actually have a wall, so
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
-    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, elevatorArtwork: [String: Any] = [:]) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode]) {
+    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: (direction: Direction, size: PictureSize)] = [:], mirrors: [GridCoordinate: Direction] = [:],
+                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], pictureLights: [GridCoordinate: Direction] = [:], lightBrightness: [LightBrightness] = [], pictureImageSelections: [GridCoordinate: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:]) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [GridCoordinate: SCNMaterial]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -1436,6 +1811,12 @@ enum HallwayScene {
         scene.fogEndDistance = distance(Double(span) * 1.1)
 
         let root = SCNNode()
+        // Sept 21 (3D Decorator wall authoring): named so a live
+        // Decorator mutation after this scene already exists (see
+        // DecoratorState.addPicture) can find the SAME root ordinary
+        // wall/picture geometry is parented to, without guessing at
+        // scene.rootNode's child ordering.
+        root.name = "hallwaySceneRoot"
         scene.rootNode.addChildNode(root)
 
         let half = cellSize / 2
@@ -1556,23 +1937,14 @@ enum HallwayScene {
         // everywhere a "wall" surface is built. Floors 2-16 are
         // unaffected -- they still resolve theme.wallImageName /
         // theme.ceilingImageName exactly as before.
-        let effectiveWallImageName: String?
-        switch floorNumber {
-        case 1:
-            effectiveWallImageName = "lobby-wall"
-        case 2:
-            // Eddie, Sept 17 (Floor 2 visual pass v2): replaces the
-            // earlier procedural plaster experiment with a real bundled
-            // photo, wood-oak.jpg -- same per-floor override shape as
-            // Floor 1's lobby-wall just above. floor2PlasterWallImageName/
-            // makeFloor2PlasterWallImage() are left in the file, just no
-            // longer referenced here, in case this gets revisited.
-            // Floors 3-16 unaffected -- they still fall to
-            // theme.wallImageName exactly as before.
-            effectiveWallImageName = "wood-walnut"
-        default:
-            effectiveWallImageName = theme.wallImageName
-        }
+        // Sept 21 (3D Decorator wall authoring): now a real static
+        // method (HallwayScene.effectiveWallImageName(floorNumber:theme:))
+        // instead of only this inline switch, so a live Decorator
+        // mutation after this scene already exists (see DecoratorState.
+        // addPicture) can resolve the exact same per-floor wall image a
+        // fresh build would have used, without duplicating this
+        // per-floor override table. Same values, same behavior.
+        let effectiveWallImageName = Self.effectiveWallImageName(floorNumber: floorNumber, theme: theme)
         let effectiveCeilingImageName = floorNumber == 1 ? "lobby-ceiling" : (floorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName)
         let ceilingMaterial = makeCeilingMaterial(imageName: effectiveCeilingImageName)
         var wallMaterials: [SCNMaterial] = []
@@ -1684,105 +2056,10 @@ enum HallwayScene {
         // the door, so the cubby becomes a small hole in a
         // normal-looking wall again, not the entire wall itself.
         func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0) {
-            let thick: CGFloat = 0.1
-            let doorTop = doorCenterY + doorHeight / 2
-            let doorBottom = doorCenterY - doorHeight / 2
-            let sideStripWidth = (cellSize - doorWidth) / 2
-
-            // Eddie, Sept 5, comparing a wall with a floor map (built
-            // almost entirely out of these 4 strips) against an
-            // ordinary wall: "more bricks per sq in... the wall with
-            // the map should be the same scaling as the normal blank
-            // wall." Root cause: makeWallMaterial's 2x repeat is tuned
-            // for a normal wall panel's fixed cellSize x wallHeight
-            // face -- fine there since every ordinary wall is exactly
-            // that size, but SceneKit maps EVERY box face to the same
-            // 0...1 UV range regardless of its actual physical size,
-            // so reusing one material (and its one fixed 2x transform)
-            // across these 4 strips -- each a different, much smaller
-            // size than a full wall -- crammed that same 2 repeats
-            // into a much smaller area, i.e. smaller-looking, denser
-            // bricks. A material of its own per strip, with the repeat
-            // count scaled down by that strip's own size relative to
-            // the normal cellSize x wallHeight reference, keeps brick
-            // size constant in world units everywhere, strips
-            // included.
-            func stripMaterial(width: CGFloat, height: CGFloat) -> SCNMaterial {
-                let material = makeWallMaterial(imageName: effectiveWallImageName)
-                let sScale = Float(2 * width / cellSize)
-                let tScale = Float(2 * height / wallHeight)
-                material.diffuse.contentsTransform = SCNMatrix4MakeScale(sScale, tScale, 1)
-                // ContentView's Coordinator.applySurface(_:imageName:fallbackColor:)
-                // re-applies a flat 2x2 repeat to every material in
-                // wallMaterials on every theme cycle -- correct for a
-                // normal full wall (that IS its right scale) but it
-                // would silently undo THIS strip's own smaller,
-                // size-correct scale the moment Eddie taps the palette
-                // button. Stashing the intended scale in the
-                // material's own name (nothing else on SCNMaterial
-                // holds arbitrary per-instance data) lets applySurface
-                // recover and reapply the right one instead of the
-                // generic one -- see that function's own comment.
-                material.name = "wallRepeat:\(sScale)x\(tScale)"
-                wallMaterials.append(material)
-                return material
-            }
-
-            func strip(alongLength: CGFloat, verticalHeight: CGFloat, alongOffset: CGFloat, verticalCenter: CGFloat) {
-                guard verticalHeight > 0, alongLength > 0 else { return }
-                let isTop = verticalCenter > doorTop
-                let stripThickness = thick + (isTop ? topFrontExtension : 0)
-                let geo: SCNBox
-                let x: CGFloat
-                let z: CGFloat
-                switch direction {
-                case .north, .south:
-                    geo = SCNBox(width: alongLength, height: verticalHeight, length: stripThickness, chamferRadius: 0)
-                    x = wallCenterX + alongOffset
-                    z = wallCenterZ
-                case .east, .west:
-                    geo = SCNBox(width: stripThickness, height: verticalHeight, length: alongLength, chamferRadius: 0)
-                    x = wallCenterX
-                    z = wallCenterZ + alongOffset
-                }
-                let exterior = stripMaterial(width: alongLength, height: verticalHeight)
-                if let interiorMaterial {
-                    // SCNBox faces: +Z, +X, -Z, -X, +Y, -Y.
-                    // Only the hallway-facing face follows the hallway theme.
-                    let outsideFace: Int
-                    switch direction {
-                    case .north: outsideFace = 0
-                    case .south: outsideFace = 2
-                    case .east: outsideFace = 3
-                    case .west: outsideFace = 1
-                    }
-                    var faces = Array(repeating: interiorMaterial, count: 6)
-                    faces[outsideFace] = exterior
-                    geo.materials = faces
-                } else {
-                    geo.materials = [exterior]
-                }
-                let node = SCNNode(geometry: geo)
-                let owner = GridCoordinate(row: Int((wallCenterZ / cellSize - CGFloat(direction.delta.row) / 2).rounded()),
-                                           col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
-                node.name = WallPainter.nodeName(owner)
-                node.position = SCNVector3(Float(x), Float(verticalCenter), Float(z))
-                if isTop {
-                    // Cover the projecting cab-ceiling edge from the hallway;
-                    // keep the cab-facing wall surface and ceiling unchanged.
-                    node.position.x -= Float(direction.delta.col) * Float(topFrontExtension / 2)
-                    node.position.z -= Float(direction.delta.row) * Float(topFrontExtension / 2)
-                }
-                root.addChildNode(node)
-            }
-
-            // Top strip -- full cell width, floor-to-ceiling gap above the door.
-            strip(alongLength: cellSize, verticalHeight: wallHeight - doorTop, alongOffset: 0, verticalCenter: doorTop + (wallHeight - doorTop) / 2)
-            // Bottom strip -- full cell width, floor up to the door's sill.
-            strip(alongLength: cellSize, verticalHeight: doorBottom, alongOffset: 0, verticalCenter: doorBottom / 2)
-            // Side strips -- only alongside the door's own height band.
-            strip(alongLength: sideStripWidth, verticalHeight: doorHeight, alongOffset: -(doorWidth / 2 + sideStripWidth / 2), verticalCenter: doorCenterY)
-            strip(alongLength: sideStripWidth, verticalHeight: doorHeight, alongOffset: doorWidth / 2 + sideStripWidth / 2, verticalCenter: doorCenterY)
+            // Sept 21 (3D Decorator wall authoring): now forwards to the
+            // real HallwayScene.buildDoorFrame static method -- see this
+            // file's "Sept 21" MARK section above. Behavior unchanged.
+            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: root, wallMaterials: &wallMaterials)
         }
 
         func addDestinationDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, kind: ObjectKind) -> SCNNode {
@@ -1983,6 +2260,14 @@ enum HallwayScene {
             right.position = SCNVector3(halfW, 0, -depth / 2)
             [back, top, bottom, left, right].forEach { shaft.addChildNode($0) }
             shaft.name = "elevatorCab"
+            DecoratorTarget(floor: floorNumber, location: .elevatorCeiling, kind: .ceilingSurface).tag(top)
+            let ceilingMount = SCNNode()
+            ceilingMount.name = "elevatorCabCeilingMount"
+            ceilingMount.position = SCNVector3(0, halfH - thick / 2, -depth / 2)
+            shaft.addChildNode(ceilingMount)
+            if let fixture = elevatorCabDecoration.ceilingFixture {
+                ceilingMount.addChildNode(makeElevatorCabFixture(fixture, cellSize: cellSize, floorNumber: floorNumber))
+            }
             back.name = "elevatorCabBack"
             left.name = "elevatorCabLeft"
             right.name = "elevatorCabRight"
@@ -2388,22 +2673,16 @@ enum HallwayScene {
             entrance.enumerateHierarchy { node, _ in node.categoryBitMask |= hardwareMask }
             leftDoor.categoryBitMask |= hardwareMask
             rightDoor.categoryBitMask |= hardwareMask
-            let wash = SCNNode()
-            wash.name = "elevatorExteriorWarmWash"
-            let light = SCNLight()
-            light.type = .spot
-            light.color = UIColor(red: 1, green: 0.82, blue: 0.58, alpha: 1)
-            light.intensity = 26
-            light.spotInnerAngle = 35
-            light.spotOuterAngle = 75
-            light.attenuationStartDistance = 0.25
-            light.attenuationEndDistance = 2.8
-            light.attenuationFalloffExponent = 2
-            light.categoryBitMask = hardwareMask
-            wash.light = light
-            wash.position = SCNVector3(0, 2.48, 0.65)
-            wash.eulerAngles.x = -0.75
-            entrance.addChildNode(wash)
+            // Sept 19 (Eddie, source-based lighting model): the
+            // "elevatorExteriorWarmWash" spot light that used to be
+            // added here is removed -- it had no real physical source
+            // in the world, it existed only to make the entrance look
+            // better, which the new rule ("every illumination source
+            // must have a real, visible, understandable physical
+            // source") no longer allows. The hardwareMask tagging just
+            // above (entrance/leftDoor/rightDoor) is left in place even
+            // though nothing reads it anymore -- it's inert node
+            // metadata, not a light, and removing it wasn't asked for.
             root.addChildNode(entrance)
 
             // Eddie, Sept 7, after watching the ride play out: the old
@@ -2501,7 +2780,7 @@ enum HallwayScene {
         // player moves (see makeFloorMapTexture's playerAt) -- callers
         // that want either "was this tapped" or "push a new image here"
         // need this specific node, not its frame.
-        func addFloorMapNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage) -> SCNNode {
+        func addFloorMapNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage, coord: GridCoordinate, pictureLightLevel: Int? = nil) -> SCNNode {
             let aspect = texture.size.height / max(texture.size.width, 1)
             var panelWidth: CGFloat = 0.7
             var panelHeight = panelWidth * aspect
@@ -2519,6 +2798,7 @@ enum HallwayScene {
             let frameGeo = SCNBox(width: panelWidth + 0.14, height: panelHeight + 0.14, length: 0.04, chamferRadius: 0.01)
             frameGeo.materials = [frameMaterial]
             let frame = SCNNode(geometry: frameGeo)
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .floorMap).tag(frame)
 
             let planeMaterial = SCNMaterial()
             planeMaterial.diffuse.contents = texture
@@ -2529,12 +2809,17 @@ enum HallwayScene {
             // flip was the actual bug (wall map ran upside down relative
             // to the real S/E layout), not a fix for one.
             planeMaterial.diffuse.wrapT = .clamp
-            planeMaterial.lightingModel = .constant // reads as a lit sign, not shaded by scene lights/shadows
+            planeMaterial.lightingModel = .physicallyBased // physical plaque -- needs real illumination to be visible
+            planeMaterial.metalness.contents = 0.0
+            planeMaterial.roughness.contents = 0.6
             let planeGeo = SCNPlane(width: panelWidth, height: panelHeight)
             planeGeo.materials = [planeMaterial]
             let plane = SCNNode(geometry: planeGeo)
             plane.position = SCNVector3(0, 0, 0.021)
             frame.addChildNode(plane)
+            if let pictureLightLevel {
+                frame.addChildNode(Self.makePictureLight(panelWidth: panelWidth, panelHeight: panelHeight, level: pictureLightLevel))
+            }
 
             // Legend plaque, mounted BELOW the frame now instead of a
             // single "You Are Here" line above it -- Eddie, Sept 7:
@@ -2560,7 +2845,9 @@ enum HallwayScene {
             let legendGap: CGFloat = 0.09 // same gap the old plaque used
             let legendMaterial = SCNMaterial()
             legendMaterial.diffuse.contents = legendTexture
-            legendMaterial.lightingModel = .constant
+            legendMaterial.lightingModel = .physicallyBased // physical plaque -- needs real illumination to be visible
+            legendMaterial.metalness.contents = 0.0
+            legendMaterial.roughness.contents = 0.6
             let legendGeo = SCNPlane(width: legendWidth, height: legendHeight)
             legendGeo.materials = [legendMaterial]
             let legendNode = SCNNode(geometry: legendGeo)
@@ -2603,7 +2890,7 @@ enum HallwayScene {
         // build time, and never changes live the way the map's tracking
         // dot does), so there's no reason for build()'s own return tuple
         // to track these nodes at all.
-        func addMissionSignNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage) {
+        func addMissionSignNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage, coord: GridCoordinate, pictureLightLevel: Int? = nil) {
             let aspect = texture.size.height / max(texture.size.width, 1)
             // 0.75, not 1.1 -- see the patch-script comment above this
             // call site for the "why" (portrait FOV is narrow; this
@@ -2624,16 +2911,22 @@ enum HallwayScene {
             let frameGeo = SCNBox(width: panelWidth + 0.12, height: panelHeight + 0.12, length: 0.04, chamferRadius: 0.01)
             frameGeo.materials = [frameMaterial]
             let frame = SCNNode(geometry: frameGeo)
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .missionSign).tag(frame)
 
             let planeMaterial = SCNMaterial()
             planeMaterial.diffuse.contents = texture
             planeMaterial.diffuse.wrapT = .clamp
-            planeMaterial.lightingModel = .constant // reads as a lit sign, not shaded by scene lights/shadows
+            planeMaterial.lightingModel = .physicallyBased // physical plaque -- needs real illumination to be visible
+            planeMaterial.metalness.contents = 0.0
+            planeMaterial.roughness.contents = 0.6
             let planeGeo = SCNPlane(width: panelWidth, height: panelHeight)
             planeGeo.materials = [planeMaterial]
             let plane = SCNNode(geometry: planeGeo)
             plane.position = SCNVector3(0, 0, 0.021)
             frame.addChildNode(plane)
+            if let pictureLightLevel {
+                frame.addChildNode(Self.makePictureLight(panelWidth: panelWidth, panelHeight: panelHeight, level: pictureLightLevel))
+            }
 
             // Same fix the destination chute/floor map already needed
             // (Eddie, Sept 5: "the background texture is being used to
@@ -2679,65 +2972,29 @@ enum HallwayScene {
         // a different random photo per call, not one shared baked/still
         // texture, so two pictures placed on the same floor will most
         // likely show two different photos, not the same one twice.
-        func addPictureNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage, backfillWall: Bool = true, scale: CGFloat = 1) -> SCNMaterial {
-            let aspect = texture.size.height / max(texture.size.width, 1)
-            var panelWidth: CGFloat = 0.6
-            var panelHeight = panelWidth * aspect
-            let maxPanelHeight: CGFloat = 0.85
-            if panelHeight > maxPanelHeight {
-                panelHeight = maxPanelHeight
-                panelWidth = panelHeight / aspect
-            }
-
-            panelWidth *= scale
-            panelHeight *= scale
-
-            let frameMaterial = SCNMaterial()
-            frameMaterial.diffuse.contents = UIColor(red: 0.3, green: 0.22, blue: 0.1, alpha: 1)
-            frameMaterial.lightingModel = .physicallyBased
-            frameMaterial.metalness.contents = 0.6
-            frameMaterial.roughness.contents = 0.4
-            let frameGeo = SCNBox(width: panelWidth + 0.1, height: panelHeight + 0.1, length: 0.04, chamferRadius: 0.01)
-            frameGeo.materials = [frameMaterial]
-            let frame = SCNNode(geometry: frameGeo)
-
-            let planeMaterial = SCNMaterial()
-            planeMaterial.diffuse.contents = texture
-            planeMaterial.diffuse.wrapT = .clamp
-            planeMaterial.lightingModel = .constant // reads as a lit photo, not shaded by scene lights/shadows
-            let planeGeo = SCNPlane(width: panelWidth, height: panelHeight)
-            planeGeo.materials = [planeMaterial]
-            let plane = SCNNode(geometry: planeGeo)
-            plane.position = SCNVector3(0, 0, 0.021)
-            frame.addChildNode(plane)
-
-            // Same fix every other wall-mounted picture frame needs
-            // (Eddie, Sept 5: "the background texture is being used to
-            // render the inside of the chute container") -- addWall was
-            // skipped for this cell's entire wall face via
-            // pictureDirection above, not just this frame's own small
-            // footprint.
-            if backfillWall {
-                addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: panelWidth + 0.1, doorHeight: panelHeight + 0.1, doorCenterY: wallHeight * 0.55)
-            }
-
-            frame.position = SCNVector3(Float(wallCenterX), Float(wallHeight * 0.55), Float(wallCenterZ))
-            switch direction {
-            case .north:
-                frame.position.z += Float(0.07)
-            case .south:
-                frame.position.z -= Float(0.07)
-                frame.eulerAngles.y = .pi
-            case .east:
-                frame.position.x -= Float(0.07)
-                frame.eulerAngles.y = -.pi / 2
-            case .west:
-                frame.position.x += Float(0.07)
-                frame.eulerAngles.y = .pi / 2
-            }
-
-            root.addChildNode(frame)
-            return planeMaterial
+        // Sept 21 (Picture Size / live Decorator resize): the frame
+        // this returns reserves a wall gap sized to THIS call's own
+        // current `scale` (see buildPictureNode's own updated doc
+        // comment -- it used to always reserve the LARGEST authored
+        // PictureSize, .fullLength, regardless of `scale`, which is
+        // what caused the oversized-cutout-with-visible-seams bug
+        // Eddie reported on device; fixed as part of the Picture
+        // Decorator complete pass). DecoratorState.changePictureSize
+        // now removes and rebuilds the backfill (via
+        // HallwayScene.buildPictureBackfill) at the new size on every
+        // live resize, in addition to resizing the frame/plane boxes
+        // in place. Returns the frame node too (not just its material)
+        // so callers can tag it for Decorator identity and hand it to
+        // a live resize.
+        func addPictureNode(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, texture: UIImage, backfillWall: Bool = true, scale: CGFloat = 1, pictureLightLevel: Int? = nil, coord: GridCoordinate) -> (material: SCNMaterial, frameNode: SCNNode) {
+            // Sept 21 (3D Decorator wall authoring): now forwards to the
+            // real HallwayScene.buildPictureNode static method -- see
+            // this file's "Sept 21" MARK section above -- so a live
+            // Decorator wall-tap ADD (DecoratorState.addPicture) can
+            // build a Picture using this SAME geometry logic outside
+            // this function, not a second implementation of it.
+            // Behavior unchanged.
+            HallwayScene.buildPictureNode(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, texture: texture, backfillWall: backfillWall, scale: scale, pictureLightLevel: pictureLightLevel, coord: coord, floorNumber: floorNumber, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: root, wallMaterials: &wallMaterials)
         }
 
         // Window Rooms are keyed by their DOOR's cell (coord), but
@@ -2765,6 +3022,7 @@ enum HallwayScene {
             ceilingGeo.materials = [ceilingMaterial]
             let ceilingNode = SCNNode(geometry: ceilingGeo)
             ceilingNode.position = SCNVector3(Float(x), Float(wallHeight) + 0.05, Float(z))
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .ceilingSurface).tag(ceilingNode)
             root.addChildNode(ceilingNode)
 
             // Manually placed ceiling spotlight (Eddie, Sept 6: "how
@@ -2801,82 +3059,20 @@ enum HallwayScene {
             // later for a single accent light if the flat-lit look
             // isn't enough.
             if spotlights.contains(coord) {
-                let fixtureMaterial = SCNMaterial()
-                fixtureMaterial.diffuse.contents = UIColor(white: 0.98, alpha: 1)
-                fixtureMaterial.emission.contents = UIColor(white: 0.95, alpha: 1)
-                fixtureMaterial.lightingModel = .constant // reads as a lit fixture, not shaded like the ceiling around it
-                let fixtureGeo = SCNCylinder(radius: cellSize * 0.12, height: 0.04)
-                fixtureGeo.materials = [fixtureMaterial]
-                let fixtureNode = SCNNode(geometry: fixtureGeo)
-                fixtureNode.position = SCNVector3(Float(x), Float(wallHeight) - 0.02, Float(z))
-                root.addChildNode(fixtureNode)
+                let fixture = makeAuthoredCeilingFixture(cellSize: cellSize,
+                    level: LightBrightness.level(for: .ceiling, at: coord, in: lightBrightness))
+                fixture.position = SCNVector3(Float(x), Float(wallHeight), Float(z))
+                fixture.childNodes.first(where: { $0.light != nil })?.name = "authored_ceiling_\(coord.row)_\(coord.col)"
+                DecoratorTarget(floor: floorNumber, coord: coord, kind: .ceiling).tag(fixture)
+                root.addChildNode(fixture)
+            }
 
-                // Eddie, Sept 6 (round 2): "decrease the target radius
-                // quite a bunch... about half way between where it is
-                // and what it was" -- splitting the difference between
-                // the original tight cone (inner 20/outer 50, end
-                // distance 1.6x wallHeight, intensity 400) and the
-                // widened-to-catch-the-walls version just above
-                // (30/100, 2.4x, 550) on every knob that controls reach,
-                // not just angle -- intensity was raised alongside the
-                // wider cone to keep the same energy from reading
-                // dimmer over more area, so pulling the spread back in
-                // without also pulling intensity back down would leave
-                // it overbright for its new, smaller footprint.
-                let spot = SCNLight()
-                spot.type = .spot
-                spot.color = UIColor.white
-                // Eddie, Sept 14 (round 1): dropped 475 -> 400,
-                // intensity only. On-device that didn't fix the real
-                // problem -- these fixtures were reading as theatrical
-                // spotlight pools (bright discs/scallops, dark gaps
-                // between fixtures) because the CONE ITSELF was narrow
-                // and short-reaching, not because it was too bright.
-                //
-                // Round 2 (Eddie, on-device again): reshape the cone
-                // instead of just dimming it further. attenuationEndDistance
-                // is the dominant lever for visible pool radius here --
-                // at this fixture's height (just under the ceiling,
-                // pointing straight down), the old attenuationEndDistance
-                // (wallHeight*2.0 = 6.0) already cut the light off well
-                // before the old spotOuterAngle's own geometric edge
-                // would have (a 75-degree edge ray doesn't reach the
-                // floor for ~11 units), so reach -- not angle -- was the
-                // real ceiling on pool size. Widened it substantially
-                // (wallHeight*2.0 -> wallHeight*3.5) so neighboring
-                // fixtures' pools actually overlap instead of leaving
-                // dark gaps between them. spotOuterAngle widened too
-                // (75 -> 95) so that extra reach translates into more
-                // horizontal spread rather than being wasted going
-                // straight down; spotInnerAngle narrowed (25 -> 12) so
-                // the falloff from full brightness to the edge is
-                // gradual across nearly the whole cone instead of a
-                // hard-edged bright core -- fewer scallops, softer
-                // blend. attenuationStartDistance nudged out slightly
-                // (cellSize*0.1 -> cellSize*0.15) so the near-fixture
-                // zone isn't a single hot pinpoint. SECONDARY change,
-                // per the "if widening causes too much total
-                // illumination" instruction: intensity 400 -> 300 --
-                // the pool's area grows by several times from the wider
-                // reach/angle, so peak brightness right under each
-                // fixture needed to ease off further to keep the
-                // overall hallway from reading brighter than before,
-                // even though more floor/wall area now receives some
-                // light (which is the actual goal: broader, gentler
-                // coverage instead of a smaller, harsher pool). Fixture
-                // placement/count/geometry are unchanged -- this is all
-                // still the one manually placed spot per marked cell.
-                spot.intensity = 300
-                spot.spotInnerAngle = 12
-                spot.spotOuterAngle = 95
-                spot.attenuationStartDistance = distance(Double(cellSize) * 0.15)
-                spot.attenuationEndDistance = distance(Double(wallHeight) * 3.5)
-                spot.castsShadow = false
-                let spotNode = SCNNode()
-                spotNode.light = spot
-                spotNode.position = SCNVector3(Float(x), Float(wallHeight) - 0.15, Float(z))
-                spotNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0) // aim straight down
-                root.addChildNode(spotNode)
+            if let orientation = fluorescentLights[coord] {
+                let fixture = makeFluorescentLight(orientation: orientation,
+                    level: LightBrightness.level(for: .fluorescent, at: coord, in: lightBrightness), cellSize: cellSize)
+                fixture.position = SCNVector3(Float(x), Float(wallHeight), Float(z))
+                DecoratorTarget(floor: floorNumber, coord: coord, kind: .fluorescent).tag(fixture)
+                root.addChildNode(fixture)
             }
 
             let hasWallNorth = !isOpen(coord.row - 1, coord.col)
@@ -2960,7 +3156,7 @@ enum HallwayScene {
             // placed (Eddie, Sept 9: "make the picture appear as a
             // picture on the wall"), same wall-skip check as the floor
             // map/mission sign.
-            let pictureDirection = pictures[coord]
+            let pictureDirection = pictures[coord]?.direction
             let mirrorDirection = mirrors[coord]
 
             // Same idea once more, for a Window Room's own exterior
@@ -2973,28 +3169,26 @@ enum HallwayScene {
             // above wallMaterials) — either a dead-end cap or a regular
             // wall material, added to its matching array so the live
             // theme swap in ContentView's Coordinator can reach it.
-            func addWall(width: CGFloat, length: CGFloat, x: CGFloat, z: CGFloat) {
-                let geo = SCNBox(width: width, height: wallHeight, length: length, chamferRadius: 0)
-                let material = makeWallMaterial(imageName: effectiveWallImageName)
-                geo.materials = [material]
-                wallMaterials.append(material)
-                let node = SCNNode(geometry: geo)
-                node.name = WallPainter.nodeName(coord)
-                node.position = SCNVector3(Float(x), Float(wallHeight / 2), Float(z))
-                root.addChildNode(node)
+            func addWall(width: CGFloat, length: CGFloat, x: CGFloat, z: CGFloat, direction: Direction) {
+                // Sept 21 (3D Decorator wall authoring): now forwards to
+                // the real HallwayScene.buildWallPanel static method --
+                // see this file's "Sept 21" MARK section above -- so a
+                // live Decorator wall-tap ADD can build/rebuild this
+                // exact same panel outside this loop. Behavior unchanged.
+                HallwayScene.buildWallPanel(coord: coord, direction: direction, width: width, length: length, x: x, z: z, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, floorNumber: floorNumber, root: root, wallMaterials: &wallMaterials)
             }
 
             if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && pictureDirection != .north && mirrorDirection != .north && windowDirection != .north {
-                addWall(width: cellSize, length: 0.1, x: x, z: z - half)
+                addWall(width: cellSize, length: 0.1, x: x, z: z - half, direction: .north)
             }
             if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south && missionDirection != .south && pictureDirection != .south && mirrorDirection != .south && windowDirection != .south {
-                addWall(width: cellSize, length: 0.1, x: x, z: z + half)
+                addWall(width: cellSize, length: 0.1, x: x, z: z + half, direction: .south)
             }
             if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east && missionDirection != .east && pictureDirection != .east && mirrorDirection != .east && windowDirection != .east {
-                addWall(width: 0.1, length: cellSize, x: x + half, z: z)
+                addWall(width: 0.1, length: cellSize, x: x + half, z: z, direction: .east)
             }
             if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && pictureDirection != .west && mirrorDirection != .west && windowDirection != .west {
-                addWall(width: 0.1, length: cellSize, x: x - half, z: z)
+                addWall(width: 0.1, length: cellSize, x: x - half, z: z, direction: .west)
             }
 
             // Doorway markers — only at TRUE intersections (3 or 4 open
@@ -3016,10 +3210,29 @@ enum HallwayScene {
             // judged before any carrying/delivering logic gets built on
             // top.
             if let kind = objects[coord] {
-                let node = kind == .envelope ? makeEnvelopeNode(roomNumber: itemRooms[coord]) : makeObjectNode(kind, size: cellSize * 0.22, floorNumber: floorNumber)
-                node.position = SCNVector3(Float(x), Float(wallHeight * (kind == .envelope ? 0.4 : 0.25)), Float(z))
-                root.addChildNode(node)
-                objectNodes[coord] = node
+                // Sept 21 (Floor Object current-cell authoring): the
+                // trash can branch now goes through buildTrashCanNode
+                // (defined next to trashCanFloorOffset above), the SAME
+                // construction DecoratorState.addFloorObject uses to
+                // build a live trash can with no scene rebuild -- one
+                // implementation, not two. A trash can with no authored
+                // placement (every one placed before the Sept 21 LEFT/
+                // CENTER/RIGHT pass) still draws exactly where it always
+                // did (CENTER is (0,0)). Every other pickup kind is
+                // unchanged: still floats at the shared "on-screen icon"
+                // height (wallHeight * 0.25/0.4), no horizontal offset.
+                if kind == .trashCan {
+                    let placement = floorObjectPlacements[coord] ?? FloorObjectPlacement()
+                    let node = buildTrashCanNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, placement: placement)
+                    root.addChildNode(node)
+                    objectNodes[coord] = node
+                } else {
+                    let node = kind == .envelope ? makeEnvelopeNode(roomNumber: itemRooms[coord]) : makeObjectNode(kind, size: cellSize * 0.22, floorNumber: floorNumber)
+                    let objectY = wallHeight * (kind == .envelope ? 0.4 : 0.25)
+                    node.position = SCNVector3(Float(x), Float(objectY), Float(z))
+                    root.addChildNode(node)
+                    objectNodes[coord] = node
+                }
             }
 
             // The deposit half -- manually placed per cell (GridEditorView).
@@ -3083,7 +3296,7 @@ enum HallwayScene {
             extinguisherNodes[coord] = node
         }
         for coord in fires where cells.contains(coord) {
-            let node = makeFireNode(at: coord, cellSize: cellSize)
+            let node = makeFireNode(at: coord, cellSize: cellSize, brightness: LightBrightness.level(for: .fire, at: coord, in: lightBrightness))
             root.addChildNode(node)
             fireNodes[coord] = node
         }
@@ -3158,6 +3371,8 @@ enum HallwayScene {
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
                 let mapX = worldX(coord.col)
                 let mapZ = worldZ(coord.row)
+                let mapNeighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+                guard cells.contains(coord), !cells.contains(mapNeighbor) else { continue }
                 let wx: CGFloat
                 let wz: CGFloat
                 switch direction {
@@ -3166,7 +3381,7 @@ enum HallwayScene {
                 case .east: (wx, wz) = (mapX + half, mapZ)
                 case .west: (wx, wz) = (mapX - half, mapZ)
                 }
-                let plane = addFloorMapNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: mapTexture)
+                let plane = addFloorMapNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: mapTexture, coord: coord, pictureLightLevel: pictureLights[coord] == direction ? LightBrightness.level(for: .picture, at: coord, in: lightBrightness) : nil)
                 floorMapPlaneNodes.append(plane)
             }
         }
@@ -3229,7 +3444,7 @@ enum HallwayScene {
                 case .east: (wx, wz) = (signX + half, signZ)
                 case .west: (wx, wz) = (signX - half, signZ)
                 }
-                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture)
+                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture, coord: coord, pictureLightLevel: pictureLights[coord] == direction ? LightBrightness.level(for: .picture, at: coord, in: lightBrightness) : nil)
             }
         }
 
@@ -3244,12 +3459,46 @@ enum HallwayScene {
         // different photos, not the same one repeated.
         navLog("PHOTO-PATH-V1 compiled=\(#filePath) floor=\(floorNumber) hallwaySource=\(picturesUseCameraRoll ? "CAMERA_ROLL" : "BUNDLED_NINE") count=\(pictures.count)")
         var cameraRollMaterials: [SCNMaterial] = []
+        // Sept 20 (picture-teleport fix): every picture's own SCNMaterial,
+        // by its wall coord -- lets ContentView's Coordinator update a
+        // SINGLE picture's texture in place later (a live in-gameplay
+        // Change Picture menu choice) the exact same way applyTheme()
+        // already swaps wall/floor/ceiling materials in place, with no
+        // scene rebuild and therefore no player teleport. Populated for
+        // every placed picture regardless of picturesUseCameraRoll/
+        // explicit selection, since ANY of them can later receive an
+        // explicit choice via the menu.
+        var pictureMaterials: [GridCoordinate: SCNMaterial] = [:]
+        // Sept 20 (Change Picture menu): one specific picture can carry
+        // an explicit image choice (pictureImageSelections[coord]),
+        // made by tapping it in-world -- see PictureImageSelection's
+        // own doc comment. A camera-roll choice still needs its own
+        // async fetch (the exact PHAsset it names, not a random one),
+        // collected here and resolved just like cameraRollMaterials is,
+        // right below it. A built-in choice is a synchronous bundle
+        // lookup, same as randomPictureImage, so it needs no queue at
+        // all. Any picture with no explicit choice keeps behaving
+        // exactly as before this pass.
+        var explicitCameraRollMaterials: [(identifier: String, material: SCNMaterial)] = []
         let pendingPhoto = picturesUseCameraRoll ? Self.mirrorPlaceholder("Loading photo…") : nil
         if !pictures.isEmpty {
-            for (coord, direction) in pictures {
+            for (coord, placement) in pictures {
+                let direction = placement.direction
                 guard cells.contains(coord) else { continue }
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
-                guard let pictureTexture = pendingPhoto ?? randomPictureImage(caller: "floor \(floorNumber) hallway \(coord) wall \(direction)") else { continue }
+                let explicitSelection = pictureImageSelections[coord]
+                var pendingIdentifier: String? = nil
+                let pictureTexture: UIImage?
+                switch explicitSelection {
+                case .builtIn(let name):
+                    pictureTexture = Self.namedPictureImage(name) ?? randomPictureImage(caller: "floor \(floorNumber) hallway \(coord) wall \(direction) builtIn=\(name) MISSING")
+                case .cameraRoll(let identifier):
+                    pendingIdentifier = identifier
+                    pictureTexture = Self.mirrorPlaceholder("Loading photo…")
+                case nil:
+                    pictureTexture = pendingPhoto ?? randomPictureImage(caller: "floor \(floorNumber) hallway \(coord) wall \(direction)")
+                }
+                guard let pictureTexture else { continue }
                 let picX = worldX(coord.col)
                 let picZ = worldZ(coord.row)
                 let wx: CGFloat
@@ -3261,8 +3510,20 @@ enum HallwayScene {
                 case .west: (wx, wz) = (picX - half, picZ)
                 }
                 let texture = Self.framedPhoto(pictureTexture)
-                let material = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture)
-                if picturesUseCameraRoll { cameraRollMaterials.append(material) }
+                let (material, frameNode) = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, scale: placement.size.scale, pictureLightLevel: pictureLights[coord] == direction ? LightBrightness.level(for: .picture, at: coord, in: lightBrightness) : nil, coord: coord)
+                // Sept 21 (Decorator Picture support): ONLY ordinary
+                // authored pictures from this loop get tagged -- Floor
+                // 1's hardcoded lobbyPhotos loop below deliberately does
+                // not call this, same for every other image-like
+                // surface (mission boards, signs, elevator posters,
+                // maps, mirrors), exactly per Eddie's scope.
+                DecoratorTarget(floor: floorNumber, coord: coord, kind: .picture).tag(frameNode)
+                pictureMaterials[coord] = material
+                if let pendingIdentifier {
+                    explicitCameraRollMaterials.append((identifier: pendingIdentifier, material: material))
+                } else if explicitSelection == nil, picturesUseCameraRoll {
+                    cameraRollMaterials.append(material)
+                }
             }
         }
 
@@ -3307,11 +3568,12 @@ enum HallwayScene {
                     wallCenterX: worldX(coord.col) + CGFloat(delta.col) * half,
                     wallCenterZ: worldZ(coord.row) + CGFloat(delta.row) * half,
                     texture: texture,
-                    backfillWall: false, scale: 1.4)
+                    backfillWall: false, scale: 1.4, coord: coord)
             }
             let mirrorCell = GridCoordinate(row: 11, col: 7)
             if cells.contains(mirrorCell), !isOpen(mirrorCell.row, mirrorCell.col + 1) {
-                let mirror = Self.makeMirrorNode(at: mirrorCell, direction: .east, cellSize: cellSize)
+                // Blinn remains bright in an unlit scene; this physical lobby frame must not.
+                let mirror = Self.makeMirrorNode(at: mirrorCell, direction: .east, cellSize: cellSize, frameLightingModel: .physicallyBased)
                 mirror.name = "lobbyDecorativeMirror"
                 mirror.scale.y = 2
                 mirror.position.y = 1.35
@@ -3380,6 +3642,19 @@ enum HallwayScene {
             case .west: (wx, wz) = (mirrorX - half, mirrorZ)
             }
             addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
+        }
+
+        // Eddie, Sept 20 (Wall Light round 2): a wall TOP light is the
+        // one fixture in the whole game so far that is BOTH a physical
+        // prop AND a source the SceneKit renderer actually illuminates
+        // from (all the editor's other "lights" are cheats drawn as
+        // bright materials). A little warm omni rides this sconce the
+        // same way the ceiling fixture's omni rides the ceiling slab
+        // above.
+        for (coord, direction) in wallLights where cells.contains(coord) {
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard !cells.contains(neighbor) else { continue }
+            root.addChildNode(makeWallLightNode(at: coord, direction: direction, cellSize: cellSize, brightness: LightBrightness.level(for: .wall, at: coord, in: lightBrightness)))
         }
 
         // Eddie, Sept 14 (round 2): the building's first real bathroom
@@ -3723,6 +3998,18 @@ enum HallwayScene {
             }
         }
 
+        // Sept 20 (Change Picture menu): same weak-reference,
+        // fetch-then-apply shape as cameraRollMaterials just above,
+        // but for pictures with an EXPLICIT camera-roll choice -- each
+        // one fetches its own specific PHAsset by identifier instead
+        // of a random one.
+        for (identifier, material) in explicitCameraRollMaterials {
+            PhotoRollProvider.shared.image(forIdentifier: identifier, caller: "floor \(floorNumber) hallway-picture explicit") { [weak material] image in
+                guard let material else { return }
+                material.diffuse.contents = image.map { Self.framedPhoto($0) } ?? Self.mirrorPlaceholder("Photo unavailable")
+            }
+        }
+
         if !windowRoomMaterials.isEmpty {
             // Eddie, Sept 15 (2nd pass, visual test): "use the simplest
             // existing image/photo infrastructure already available in
@@ -3782,7 +4069,9 @@ enum HallwayScene {
             let surface = SCNPlane(width: height * image.size.width / image.size.height, height: height)
             let material = SCNMaterial()
             material.diffuse.contents = image
-            material.lightingModel = .constant
+            material.lightingModel = .physicallyBased // ordinary door surface -- needs real illumination to be visible (no daylight/window lighting yet)
+            material.metalness.contents = 0.0
+            material.roughness.contents = 0.6
             material.diffuse.wrapS = .clamp
             material.diffuse.wrapT = .clamp
             // Sample only the door/frame within the 1024 x 1536 source;
@@ -3812,67 +4101,20 @@ enum HallwayScene {
         cameraNode.eulerAngles = SCNVector3(0, Float(spawnYaw), 0)
         root.addChildNode(cameraNode)
 
-        // A single light, attached to the camera so it always travels
-        // with you. It can never stack with another light because there
-        // is no other light.
-        //
-        // Round 4 on this same wash-out-to-white bug. Round 1 pulled
-        // attenuationStartDistance in from the exact minimum wall
-        // distance (see below). Round 2/3: Eddie's A/B test (same cell,
-        // only turning left, so distance never changed) proved a plain
-        // distance-boundary fix wasn't enough — the cap wall (immune,
-        // .constant-lit) was fine, the ordinary side wall at the same
-        // distance still washed out — so the raw peak intensity (170,
-        // then 90) attacks the ceiling directly instead. Still not
-        // enough per Eddie's next report, and the extra detail he gave
-        // pins down why: it's not just close range, it's close range
-        // AND looking straight-on at the wall (fine from an angle at
-        // the screen's edge, washes out once you turn to face it
-        // dead-on). That's the geometric worst case for ANY light
-        // riding on the camera: when you're pointed straight at
-        // something nearby, its surface directly faces both the light
-        // and your eye at once — the single brightest configuration
-        // this setup can ever produce, by construction, not a fluke.
-        // A real flashlight does the same thing pointed point-blank at
-        // a close wall.
-        //
-        // Rather than keep hunting for one intensity number that
-        // survives that worst case (two guesses down), rebalancing the
-        // MIX is more robust: shrink the directional/spiking part
-        // (headlamp) hard, and lean more on the flat ambient term below
-        // instead, since ambient can't spike — it's the same everywhere
-        // regardless of distance or viewing angle. Less of the scene's
-        // total light comes from the one component capable of blowing
-        // out at point-blank-and-square-on; more comes from the one
-        // that structurally can't.
-        let headlamp = SCNLight()
-        headlamp.type = .omni
-        headlamp.intensity = 30
-        headlamp.color = UIColor.white
-        // Keeps every wall solidly past the "flat, undimmed" boundary
-        // (see history above) instead of sitting right at its edge;
-        // attenuationEndDistance reaches a couple of cells out, giving a
-        // near-brighter/far-dimmer depth cue for free, from real falloff.
-        headlamp.attenuationStartDistance = distance(Double(cellSize) * 0.15)
-        headlamp.attenuationEndDistance = distance(Double(cellSize) * 2.2)
-        let headlampNode = SCNNode()
-        headlampNode.light = headlamp
-        cameraNode.addChildNode(headlampNode)
-
-        // Carries more of the baseline visibility now that the headlamp
-        // above is intentionally weak (see its comment) — raised from
-        // 70 so the far end of a hallway doesn't just go dark instead of
-        // washing out. Still flat/angle-independent, so it can't
-        // reproduce the point-blank-and-square-on spike no matter how
-        // high it goes; if the hallway still reads too dim at a normal
-        // walking distance, raise this rather than the headlamp.
-        let ambient = SCNLight()
-        ambient.type = .ambient
-        ambient.intensity = 110
-        ambient.color = UIColor(white: 0.6, alpha: 1)
-        let ambientNode = SCNNode()
-        ambientNode.light = ambient
-        root.addChildNode(ambientNode)
+        // Sept 19 (Eddie, source-based lighting model, step 1): the
+        // camera-mounted omni "headlamp" and the scene-wide flat
+        // ambient light that used to live here are REMOVED, not just
+        // dimmed. New rule going forward: if there is no physical light
+        // source in the scene, there should be no light -- a hallway
+        // with nothing placed in it should now render fully black.
+        // TapNavigationController still looks for lights of these
+        // types/parents (camera-child .omni, scene-root .ambient) via
+        // headlampLight/ambientLight -- with neither one added here,
+        // those just resolve to nil and every use of them is already
+        // optional-chained, so this is a safe removal, not a rename.
+        // Do NOT re-add a flat ambient/headlamp here; a real light
+        // source (ceiling fixture, sconce, etc.) is the only thing
+        // that should ever illuminate a hallway again.
 
         // The end cell's marker used to be a floating glowing ball
         // here (a placeholder before there was a real elevator to
@@ -3881,7 +4123,7 @@ enum HallwayScene {
         // marks the spot, and reads a lot more like "the mechanism
         // that takes you to the next floor" than a stray ball did.
 
-        return (scene, cameraNode, walkableRects, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes)
+        return (scene, cameraNode, walkableRects, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, exitSignNodes, floorMapPlaneNodes, pictureMaterials)
     }
 
     // MARK: - Materials (unchanged from Prototype 1)
@@ -3946,7 +4188,11 @@ enum HallwayScene {
     /// loaded as "<name>.jpg", same Bundle.main.path(forResource:ofType:)
     /// lookup every other bundled photo here already uses). Eddie, Sept
     /// 9's first batch of 9.
-    private static let pictureAssetNames: [String] = [
+    // Sept 20: no longer `private` -- the "Choose Hallways Art…"
+    // picker (ContentView) needs this exact list to build its grid, and
+    // this stays the single source of truth for it rather than a
+    // second, hand-duplicated copy that could drift.
+    static let pictureAssetNames: [String] = [
         "IMG_7416", "IMG_7439", "IMG_7487", "IMG_7598", "IMG_7604",
         "IMG_7605", "IMG_7606", "IMG_7607", "IMG_7608",
     ]
@@ -3954,7 +4200,12 @@ enum HallwayScene {
     /// CSS-cover equivalent for the 0.6 × 0.85 portrait picture opening.
     /// Scale uniformly to fill it, center the image, and clip the overflow.
     /// Both bundled and camera-roll photos use the same frame and crop.
-    private static func framedPhoto(_ image: UIImage) -> UIImage {
+    // Sept 20 (picture-teleport fix): no longer `private` -- the live
+    // in-place picture-update path in ContentView's Coordinator
+    // (applyLivePictureSelection) needs this exact same crop/frame
+    // logic the initial build already uses, so a live-updated picture
+    // matches a freshly-built one pixel for pixel.
+    static func framedPhoto(_ image: UIImage) -> UIImage {
         let size = CGSize(width: 512, height: 512 * 0.85 / 0.6)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -3969,10 +4220,26 @@ enum HallwayScene {
         }
     }
 
-    private static func randomPictureImage(caller: String) -> UIImage? {
+    // Sept 21 (3D Decorator wall authoring): no longer `private` --
+    // DecoratorState.addPicture (DecoratorMode.swift) needs this same
+    // default picture-image picker for a live-added Picture with no
+    // explicit selection, exactly the fallback build(fromMaze:...)
+    // itself already uses. No behavior change to this function itself.
+    static func randomPictureImage(caller: String) -> UIImage? {
         guard let name = pictureAssetNames.randomElement(),
               let path = Bundle.main.path(forResource: name, ofType: "jpg") else { return nil }
         navLog("PHOTO-PATH-V1 caller=\(caller) BUNDLED FALLBACK USED (configured bundled mode) file=\(name).jpg")
+        return UIImage(contentsOfFile: path)
+    }
+
+    /// One specific bundled Hallways Art image by name (no extension,
+    /// e.g. "IMG_7416") -- same bundle lookup randomPictureImage uses,
+    /// but for the "Choose Hallways Art…" / "Random Hallways Art"
+    /// Change Picture actions, which know exactly which one they want
+    /// rather than any random one. Not `private`: the same reason
+    /// pictureAssetNames above isn't.
+    static func namedPictureImage(_ name: String) -> UIImage? {
+        guard let path = Bundle.main.path(forResource: name, ofType: "jpg") else { return nil }
         return UIImage(contentsOfFile: path)
     }
 
@@ -4980,13 +5247,140 @@ enum HallwayScene {
                       emissionColor: UIColor(red: 0.45, green: 0.25, blue: 0.05, alpha: 1))
     }
 
-    private static let trashCanPathData = "M135.2 17.7C140.6 6.8 151.7 0 163.8 0L284.2 0c12.1 0 23.2 6.8 28.6 17.7L320 32l96 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 96C14.3 96 0 81.7 0 64S14.3 32 32 32l96 0 7.2-14.3zM32 128l384 0 0 320c0 35.3-28.7 64-64 64L96 512c-35.3 0-64-28.7-64-64l0-320zm96 64c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16zm96 0c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16zm96 0c-8.8 0-16 7.2-16 16l0 224c0 8.8 7.2 16 16 16s16-7.2 16-16l0-224c0-8.8-7.2-16-16-16z"
     private static let envelopePathData = "M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48L48 64zM0 176L0 384c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-208L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z"
 
+    // Sept 21 visual pass: the trash can is no longer an extruded/
+    // emitting Font-Awesome glyph (that's makeIconNode -- still shared
+    // by every OTHER pickup kind, untouched). It's real SceneKit
+    // geometry sized like an actual office wastebasket, sitting still
+    // on the floor. Ignores the incoming `size` (the shared "on-screen
+    // icon height" convention used by the glyph-based kinds) in favor
+    // of fixed real-world dimensions. Kept centered at its own local
+    // origin -- NOT base-anchored -- so the destination-chute reveal
+    // icon call site (addDestinationDoor, which expects a center-
+    // pivoted node) keeps working unchanged; the "sits on the floor"
+    // vertical offset is applied by the caller in the per-cell object
+    // placement loop instead. No addRandomSpin call -- this object no
+    // longer spins to attract attention. Every material's emission is
+    // explicitly black: it is not a light source, per the "if you can
+    // see where light comes from, give it a real source" rule -- its
+    // look comes entirely from the scene's real hallway lighting.
+    private static let trashCanHeight: CGFloat = 0.51 // 1.5x (Sept 21 -- Eddie, on device: too small, reads as a bathroom bin from one cell away)
+    private static let trashCanTopRadius: CGFloat = 0.2025
+    private static let trashCanBottomRadius: CGFloat = 0.1575
+    /// Air gap kept between the can's outer top edge and the wall for
+    /// LEFT/RIGHT Floor Object placement (Sept 21) -- "near the wall
+    /// but with a small believable clearance, not intersecting or
+    /// mathematically glued to it," per spec. ~20in (Sept 21, take 3 --
+    /// Eddie, on device: even 0.40 still read as slightly too close to
+    /// the edge of the screen from normal viewing positions -- 0.50
+    /// pulls both LEFT and RIGHT the same further ~0.10m toward hallway
+    /// center, symmetric by construction since trashCanFloorOffset
+    /// below applies this one shared magnitude to both signs).
+    private static let trashCanWallClearance: CGFloat = 0.50
+
+    /// The X/Z offset (world units, relative to the CELL's own center)
+    /// a trash can's authored LEFT/CENTER/RIGHT position becomes, given
+    /// its authored hallway axis -- shared by build-time placement
+    /// (the per-cell object loop in build(fromMaze:) below) and
+    /// Decorator's live node movement (DecoratorState.
+    /// changeFloorPosition/changeFloorOrientation), so the two can
+    /// never drift apart.
+    ///
+    /// This is a fixed, AUTHORED convention, not derived from the
+    /// player's facing direction (the task's own "not absolute world
+    /// north/east/south/west" -- but it still has to be *some* fixed
+    /// mapping to be deterministic): for a north-south hallway (the
+    /// object's own axis == .northSouth), LEFT/RIGHT sit across the
+    /// E-W width, i.e. offset X -- LEFT is -X (west side), RIGHT is +X
+    /// (east side). For an east-west hallway (.eastWest), LEFT/RIGHT
+    /// rotate 90 degrees onto the N-S width, i.e. offset Z -- LEFT is
+    /// -Z (north side), RIGHT is +Z (south side). CENTER is always
+    /// (0, 0), regardless of axis.
+    ///
+    /// First pass (Sept 21): trash cans only, so this reads the trash
+    /// can's own fixed radius/clearance constants directly rather than
+    /// taking them as parameters -- naming is kept general (not
+    /// trashCan-prefixed in its own doc concept, just its current only
+    /// caller) so a later generalized Floor Object system can lift this
+    /// same shape without renaming the underlying idea.
+    static func trashCanFloorOffset(position: FloorPosition, orientation: FluorescentOrientation, cellSize: CGFloat) -> (dx: CGFloat, dz: CGFloat) {
+        guard position != .center else { return (0, 0) }
+        let half = cellSize / 2
+        let magnitude = half - trashCanTopRadius - trashCanWallClearance
+        let signed = position == .left ? -magnitude : magnitude
+        return orientation == .northSouth ? (signed, 0) : (0, signed)
+    }
+
+    /// Sept 21 (Floor Object current-cell authoring): the SAME trash-can
+    /// construction (body/rim/liner via makeObjectNode, floor-resting Y,
+    /// the LEFT/CENTER/RIGHT offset via trashCanFloorOffset just above,
+    /// the .floorObject Decorator tag, and its selection hit proxy) the
+    /// per-cell loop below already runs for every build-time trash can
+    /// -- pulled out here, mirrored on buildPictureNode's own precedent
+    /// (see DecoratorState.addPicture's doc comment), so
+    /// DecoratorState.addFloorObject can build a LIVE trash can node the
+    /// same way, with no second implementation and no scene rebuild.
+    /// Purely construction + positioning + tagging -- does NOT add the
+    /// node to any parent or register it into objectNodes/objectKinds;
+    /// the caller owns where it ends up and what bookkeeping tracks it.
+    static func buildTrashCanNode(at coord: GridCoordinate, cellSize: CGFloat, floorNumber: Int, placement: FloorObjectPlacement) -> SCNNode {
+        let node = makeObjectNode(.trashCan, size: cellSize * 0.22, floorNumber: floorNumber)
+        let objectY = trashCanHeight / 2
+        let offset = trashCanFloorOffset(position: placement.position, orientation: placement.orientation, cellSize: cellSize)
+        DecoratorTarget(floor: floorNumber, coord: coord, kind: .floorObject).tag(node)
+        node.addChildNode(makeDecoratorHitProxy(cellSize: cellSize))
+        let x = CGFloat(coord.col) * cellSize
+        let z = CGFloat(coord.row) * cellSize
+        node.position = SCNVector3(Float(x + offset.dx), Float(objectY), Float(z + offset.dz))
+        return node
+    }
+
+
     private static func makeTrashCanNode(size: CGFloat) -> SCNNode {
-        makeIconNode(pathData: trashCanPathData, nativeWidth: 448, nativeHeight: 512, size: size,
-                      diffuseColor: UIColor(red: 0.95, green: 0.95, blue: 0.97, alpha: 1),
-                      emissionColor: UIColor(red: 0.4, green: 0.4, blue: 0.42, alpha: 1))
+        let node = SCNNode()
+        node.name = "trashCan"
+
+        let bodyMaterial = SCNMaterial()
+        bodyMaterial.lightingModel = .physicallyBased
+        bodyMaterial.diffuse.contents = UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
+        bodyMaterial.metalness.contents = 0.55
+        bodyMaterial.roughness.contents = 0.55
+        bodyMaterial.emission.contents = UIColor.black
+
+        let body = SCNCone(topRadius: trashCanTopRadius, bottomRadius: trashCanBottomRadius, height: trashCanHeight)
+        body.materials = [bodyMaterial]
+        let bodyNode = SCNNode(geometry: body)
+        node.addChildNode(bodyNode)
+
+        let rimMaterial = SCNMaterial()
+        rimMaterial.lightingModel = .physicallyBased
+        rimMaterial.diffuse.contents = UIColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 1)
+        rimMaterial.metalness.contents = 0.6
+        rimMaterial.roughness.contents = 0.45
+        rimMaterial.emission.contents = UIColor.black
+
+        let rimThickness: CGFloat = 0.012
+        let rim = SCNTube(innerRadius: trashCanTopRadius - rimThickness, outerRadius: trashCanTopRadius + rimThickness * 0.5, height: rimThickness * 2)
+        rim.materials = [rimMaterial]
+        let rimNode = SCNNode(geometry: rim)
+        rimNode.position = SCNVector3(0, Float(trashCanHeight / 2), 0)
+        node.addChildNode(rimNode)
+
+        let linerMaterial = SCNMaterial()
+        linerMaterial.lightingModel = .physicallyBased
+        linerMaterial.diffuse.contents = UIColor(red: 0.03, green: 0.03, blue: 0.035, alpha: 1)
+        linerMaterial.metalness.contents = 0.05
+        linerMaterial.roughness.contents = 0.9
+        linerMaterial.emission.contents = UIColor.black
+
+        let liner = SCNCylinder(radius: trashCanTopRadius - rimThickness, height: 0.009)
+        liner.materials = [linerMaterial]
+        let linerNode = SCNNode(geometry: liner)
+        linerNode.position = SCNVector3(0, Float(trashCanHeight / 2) - 0.015, 0)
+        node.addChildNode(linerNode)
+
+        return node
     }
 
     private static func makeEnvelopeNode(size: CGFloat) -> SCNNode {
@@ -5358,5 +5752,6 @@ enum HallwayScene {
         m.emission.contents = UIColor(red: 0.5, green: 0.32, blue: 0.05, alpha: 1)
         m.lightingModel = .physicallyBased
         return m
-    }
-}
+            }
+        }
+

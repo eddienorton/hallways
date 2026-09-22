@@ -191,8 +191,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// of those coordinates with the actual 3D node
     /// HallwayScene.build(fromMaze:) built for it, so pickup knows both
     /// WHAT to add to the carried list and WHICH node to hide.
-    private let objectKinds: [GridCoordinate: ObjectKind]
-    private let objectNodes: [GridCoordinate: SCNNode]
+    private var objectKinds: [GridCoordinate: ObjectKind]
+    private var objectNodes: [GridCoordinate: SCNNode]
     /// Which ObjectKind completes THIS floor's mission, or nil for a
     /// floor with no mission gate at all -- see isMissionComplete's own
     /// doc comment for the full completion rule. Floor 1 sets this to
@@ -214,6 +214,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private let ticTacToeDirections: [GridCoordinate: Direction]
     /// Non-nil while the aptitude-test overlay is on screen -- same
     /// shape as activePhotoBooth/handheldMapVisible.
+    /// The Picture (coord in `pictures`) the player just tapped while
+    /// standing at/against it, if any -- drives ContentView's "Change
+    /// Picture" confirmationDialog. Same one-active-thing-at-a-time
+    /// shape as activeTicTacToeTerminal, but there is no persisted
+    /// board state to hold here: the menu itself is stateless, and the
+    /// actual mutation happens in MazeStore, not here (Sept 20).
+    @Published var activePictureMenu: GridCoordinate?
     @Published private(set) var activeTicTacToeTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER wins a round -- see
     /// isMissionComplete. At most one terminal per floor for now, so
@@ -310,6 +317,22 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// starts the floor over instead of leaving already-picked-up
     /// objects permanently missing.
     private var collectedCoords: Set<GridCoordinate> = []
+    /// Sept 21 (DECORATE one-cell movement): mirrors DecoratorState's
+    /// `enabled` flag, kept in sync by ContentView's HallwaySceneView
+    /// (see its updateUIView wiring block) rather than importing
+    /// DecoratorState itself here. advance() reads this alone to cap a
+    /// queued walk to a single cell -- no other DECORATE awareness
+    /// exists in this controller. Defaults false so a navigation
+    /// controller created/used before that wiring runs behaves exactly
+    /// as before (full multi-cell PLAY-mode walking).
+    var decorateModeEnabled = false
+    /// Sept 21 (present-once-then-allow-pass): the pickup object
+    /// coordinate advance() most recently stopped one cell short of --
+    /// see that function's own doc comment for the full Choice A/B
+    /// shape. Cleared on rotate()/stepBackward()/reset() so a fresh
+    /// approach (after turning away or backing up) presents the object
+    /// again instead of silently reusing a stale "already declined."
+    private var presentedPickupCoord: GridCoordinate? = nil
     @Published private(set) var paintedCells: Set<GridCoordinate> = []
     @Published private(set) var hasPaintBucket = false
     private var wallPainter: WallPainter?
@@ -605,8 +628,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // elevator all day... feel free"). !elevatorInUse is the real
     // remaining concern -- don't let the player walk off mid-slide
     // while the doors are actually open/animating.
-    var canGoForward: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && forwardConnectionIsOpen }
-    var canRotate: Bool { activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
+    var canGoForward: Bool { activePictureMenu == nil && activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && forwardConnectionIsOpen }
+    var canRotate: Bool { activePictureMenu == nil && activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
 
     private enum SegmentPhase {
         case pivot      // rotating in place, position unchanged
@@ -684,7 +707,24 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// are aesthetic only ("nothing that has to be solved - just
     /// looked at"), but still need a forced pause -- "you will have to
     /// force a pause by a picture so we can stop and see it."
-    private let pictureCoords: Set<GridCoordinate>
+    // Sept 21 (3D Decorator wall authoring): `var`, not `let` --
+    // registerPicture(_:at:) below needs to add a live Decorator-added
+    // Picture into this same bookkeeping after this controller already
+    // exists, so the ordinary in-world "walk up, force a pause, Change
+    // Picture" behavior works on it immediately too, with no rebuild.
+    private var pictureCoords: Set<GridCoordinate>
+
+    /// Coord -> mounted-wall direction for ordinary framed pictures
+    /// ONLY (never mirrors) -- pictureCoords just above deliberately
+    /// unions pictures with mirrors for the "force a pause" walk-stop,
+    /// but the Change Picture menu (Sept 20) must never trigger for a
+    /// mirror, per Eddie's spec ("bathroom/lobby mirrors must NOT
+    /// trigger this menu"). Backs pictureAtCurrentCell/
+    /// activatePictureMenu below. NOTE: `pictures`, the init parameter
+    /// with the same shape, is NOT itself a stored property -- it only
+    /// lives for the duration of init, which is why this exists as its
+    /// own retained copy rather than reusing that name directly.
+    private var pictureDirections: [GridCoordinate: Direction]
 
     /// Every "You Are Here" map's picture plane for this floor, straight
     /// from HallwayScene.build(fromMaze:)'s own floorMapPlaneNodes --
@@ -840,6 +880,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.woidleTerminalCoords = Set(woidleTerminals.keys)
         self.missionSignCoords = Set(missionSigns.keys)
         self.pictureCoords = Set(pictures.keys).union(mirrors.keys)
+        self.pictureDirections = pictures
         self.floorMapPlaneNodes = floorMapPlaneNodes
 
         let foundLight = cameraNode.childNodes.compactMap { $0.light }.first { $0.type == .omni }
@@ -1076,6 +1117,55 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             current = candidate.parent
         }
         return nil
+    }
+
+    /// True when the player is standing in a Picture's own cell,
+    /// facing the wall it's mounted on -- same "standing at/against
+    /// it" shape every mini-game terminal already uses for
+    /// ticTacToeTerminalAtCurrentCell and friends, reused here rather
+    /// than inventing a hit-test-on-the-3D-node approach (Sept 20).
+    var pictureAtCurrentCell: GridCoordinate? {
+        guard pictureDirections[currentCell] == facing else { return nil }
+        return currentCell
+    }
+
+    /// Opens the Change Picture menu for the Picture at `coord` --
+    /// same guard shape as activateTicTacToeTerminal, minus the
+    /// terminal-specific canRotate/won checks a decorative picture has
+    /// no equivalent of.
+    func activatePictureMenu(at coord: GridCoordinate) {
+        guard activePictureMenu == nil, coord == currentCell, pictureDirections[coord] == facing else { return }
+        activePictureMenu = coord
+    }
+
+    /// Sept 21 (3D Decorator wall authoring): registers a Picture added
+    /// live via Decorator (DecoratorState.addPicture) into the same
+    /// bookkeeping every build-time Picture already has here, so the
+    /// ordinary gameplay "walk up to it, force a pause, Change Picture"
+    /// behavior works on it immediately -- no floor reload needed.
+    func registerPicture(_ direction: Direction, at coord: GridCoordinate) {
+        pictureCoords.insert(coord)
+        pictureDirections[coord] = direction
+    }
+
+    /// Sept 21 (Picture Decorator complete pass, Goal 4): the reverse of
+    /// registerPicture above -- after DecoratorState.deletePicture
+    /// removes a live Picture, this removes it from the SAME
+    /// bookkeeping, so walking up to that now-empty wall no longer
+    /// offers the "Change Picture" menu. Safe to unconditionally remove
+    /// from pictureCoords (shared with mirrors -- see that property's
+    /// own doc comment) because a coordinate can never hold both a
+    /// Picture and a Mirror at once (MazeStore.canPlacePicture already
+    /// requires mirrors[coord] == nil, and vice versa).
+    func unregisterPicture(at coord: GridCoordinate) {
+        pictureCoords.remove(coord)
+        pictureDirections.removeValue(forKey: coord)
+    }
+
+    /// Stepping away or dismissing without choosing anything -- same
+    /// "cancel, don't punish" shape as cancelTicTacToeTerminal.
+    func cancelPictureMenu() {
+        activePictureMenu = nil
     }
 
     var ticTacToeTerminalAtCurrentCell: GridCoordinate? {
@@ -1693,6 +1783,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// D-pad buttons. Pure pivot, no movement, and doesn't touch
     /// currentCell/history at all.
     func rotate(toward direction: Direction) {
+        if activePictureMenu != nil { cancelPictureMenu() }
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
         if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
         if activeShellGameTerminal != nil { cancelShellGameTerminal() }
@@ -1722,6 +1813,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// the finger now drives the camera's yaw directly until it lifts.
     /// Refuses if a walk/rotate/another drag is already in progress.
     func beginDragRotate() {
+        if activePictureMenu != nil { cancelPictureMenu() }
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
         if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
         if activeShellGameTerminal != nil { cancelShellGameTerminal() }
@@ -1864,6 +1956,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// rotation is unaffected by it (canRotate alone), but a manual
     /// position drag is refused entirely until it clears.
     func beginDragMove() {
+        if activePictureMenu != nil { cancelPictureMenu() }
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
         if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
         if activeShellGameTerminal != nil { cancelShellGameTerminal() }
@@ -2269,6 +2362,83 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
         }
 
+        // Sept 21 (stop-before-tap-pickup-object): whatever produced
+        // runSteps above -- an early truncation from the stopIndex scan,
+        // OR the untouched natural end of the walk (dead end/fork/
+        // destination), which that scan's own `stopIndex < steps.count - 1`
+        // guard deliberately does NOT cover -- if the walk's last step
+        // would land ON an uncollected object that now requires a
+        // deliberate tap (everything except cash, see
+        // ObjectKind.requiresTapToCollect), back off one cell instead of
+        // entering it. Because the player was traveling toward that
+        // cell, this leaves them facing it -- PLAYER -> OBJECT -- ready
+        // for isWithinTapRange/collectByTap. Checked as a single
+        // post-processing step against runSteps.last, rather than
+        // reworked into the stopIndex math above, so both cases (early
+        // truncation and natural end) are handled uniformly without
+        // duplicating the scan. Cash is untouched here:
+        // kind.requiresTapToCollect is false for cash100, so it keeps
+        // its existing walk-into-instant-absorb behavior exactly as
+        // before. Pictures/wall displays are untouched too -- they're
+        // never in objectKinds, so this check never fires for them.
+        //
+        // Sept 21 (present-once-then-allow-pass -- fixes the "pickup
+        // object becomes a locked door" bug Eddie found on device): the
+        // FIRST time a walk stops short of a given object, presentedPickupCoord
+        // remembers that coordinate. If the very next advance() call's
+        // walk would ALSO stop at that exact same coordinate -- i.e. the
+        // player tapped forward again without collecting it or turning
+        // away -- that is Choice B: a deliberate decision to walk past
+        // rather than collect. This one time, skip the back-off (the
+        // existing stopIndex truncation above already caps the walk at
+        // the object's own cell, never beyond it -- same "hand control
+        // back, wait for the next tap" idiom every other stop in this
+        // function already uses), consume the flag, and mark it
+        // .steppedForward (a plain manual step -- nothing was picked
+        // up, so .pickedUpObject would be misleading here). Choice A
+        // (tapping the physical object) never goes through advance() at
+        // all -- it's collectByTap, entirely separate -- so it's
+        // unaffected by any of this. Cleared on rotate()/stepBackward()/
+        // reset() so turning away or backing up re-presents the object
+        // fresh rather than leaving a stale "already declined" memory.
+        if let lastCoord = runSteps.last?.cell, let kind = objectKinds[lastCoord],
+           !collectedCoords.contains(lastCoord), kind.requiresTapToCollect {
+            if presentedPickupCoord == lastCoord {
+                presentedPickupCoord = nil
+                runOutcome = .steppedForward
+            } else {
+                presentedPickupCoord = lastCoord
+                runSteps.removeLast()
+                guard !runSteps.isEmpty else {
+                    navLog("advance() from \(currentCell) facing \(facing) -- already one cell short of pickup object at \(lastCoord), nothing to walk")
+                    return
+                }
+            }
+        } else {
+            presentedPickupCoord = nil
+        }
+
+        // Sept 21 (DECORATE one-cell movement): DECORATE never
+        // auto-walks -- a single forward tap advances at most one grid
+        // cell, however many steps walkToNextDecision (and the trim
+        // just above) would otherwise have queued, so Eddie can stop
+        // exactly one cell short of whatever he's about to decorate
+        // (a ceiling light, a picture, anything ahead) without a
+        // "Current Cell" concept or new UI. Reuses .steppedForward --
+        // the existing outcome for a manual one-cell hop (endDragMove's
+        // drag-commit case) -- so this doesn't fire the .intersection-only
+        // "you now have a direction to choose" haptic, and doesn't
+        // invent a new outcome case. Turning/vertical scout/object
+        // selection/ADD/SETTINGS/DELETE/inspectors are all untouched --
+        // this is the one place DECORATE constrains the shared
+        // movement planner, not a parallel navigation system. When OFF,
+        // decorateModeEnabled is false and this is a no-op; PLAY mode's
+        // multi-cell walking (and the trim above) is exactly as before.
+        if decorateModeEnabled, runSteps.count > 1 {
+            runSteps = Array(runSteps.prefix(1))
+            runOutcome = .steppedForward
+        }
+
         let stepList = runSteps.map { "\($0.cell) via \($0.heading)" }.joined(separator: ", ")
         navLog("advance() from \(currentCell) facing \(facing) queued \(runSteps.count) step(s): [\(stepList)] outcome=\(runOutcome)")
 
@@ -2289,6 +2459,22 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         segmentStart = cameraNode.position
         segmentTarget = worldPosition(for: runSteps.last!.cell)
         segmentProgress = 0
+        // Floor 1 polish pass (Sept 21): the ceremonial front-door ->
+        // elevator walk only -- reuses the exact same self-resetting
+        // translateDurationScale multiplier the drag-move settle glide
+        // already uses (see its own Sept 17 comment just above in this
+        // file), just the other direction (slower, not faster). Scoped
+        // to isCeremonialEntrance alone, so ordinary walking speed
+        // (travelSpeed) and every other glide are untouched -- this
+        // one queued run divides its duration by 1.7 less, i.e. takes
+        // ~1.7x as long, then the .translate case's own existing
+        // "reset to 1.0 once this glide's final step completes" logic
+        // (unconditional, not conditioned on this flag) puts it right
+        // back to normal for the very next walk. Eddie: "noticeably
+        // slower so the opening reveal has time to breathe."
+        if isCeremonialEntrance {
+            translateDurationScale = 1.7
+        }
         phase = .translate
         isAnimating = true
         // Eddie, Sept 9: "use 'walking.mp3' for normal walking down
@@ -2306,6 +2492,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard canRotate, openDirections.contains(facing.opposite) else { return }
         setWalkingHeld(false)
         continuousRun = false
+        // Sept 21 (present-once-then-allow-pass): backing away from a
+        // just-presented object shouldn't silently count as declining
+        // it -- see presentedPickupCoord's own doc comment.
+        presentedPickupCoord = nil
         let delta = facing.opposite.delta
         let target = GridCoordinate(row: currentCell.row + delta.row, col: currentCell.col + delta.col)
         animationSteps = [NavigationStep(cell: target, heading: facing)]
@@ -2456,6 +2646,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             collectedCoords.removeAll()
             collectedObjects.removeAll()
         }
+        presentedPickupCoord = nil
 
         carriedMail.removeAll()
         deliveredMail.removeAll()
@@ -2524,21 +2715,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
     }
 
-    /// Called whenever a walk lands on a cell -- both mid-walk and on the
-    /// final step. If that cell has an object that hasn't been picked up
-    /// yet, this is the pick-up moment: hide the node, record it as
-    /// collected (for both the "already got this one" check and the HUD
-    /// strip in ContentView), and fire an immediate confirmation haptic.
-    /// This is also the exact spot a pickup sound effect will play once
-    /// there are sound assets to play -- deliberately left as a plain
-    /// comment rather than a stub, since there's nothing meaningful to
-    /// call yet.
-    private func collectObjectIfPresent(at coord: GridCoordinate) {
-        defer {
-            paintIfCarryingBucket(at: coord)
-            refreshFloorMapTexture()
-        }
-        guard let kind = objectKinds[coord], !collectedCoords.contains(coord) else { return }
+    /// The actual pickup: kind-specific side effects (mail's room
+    /// check, paint bucket's flag), collectedCoords/objectNodes
+    /// bookkeeping, the confirmation haptic, and cash/trash's own
+    /// sound+callback branches -- unchanged from before Sept 21
+    /// (deliberate tap-to-pick-up), just pulled out of
+    /// collectObjectIfPresent's body so BOTH entry points below (cell
+    /// arrival, for cash; a direct tap, for everything else -- see
+    /// ObjectKind.requiresTapToCollect) can share it. This is
+    /// deliberately the only place that does the actual collecting --
+    /// it doesn't re-decide WHETHER this pickup should count (that's
+    /// each caller's own job), only WHAT happens once it does.
+    private func performPickup(kind: ObjectKind, at coord: GridCoordinate) {
         if kind == .envelope {
             guard let room = itemRooms[coord], roomDoors.values.contains(where: { $0.roomNumber == room }) else {
                 showMessage("This letter needs a valid room address in the editor.")
@@ -2577,6 +2765,112 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 onCollectTrash?()
             }
         }
+    }
+
+    /// Called whenever a walk lands on a cell -- both mid-walk and on
+    /// the final step. Sept 21 (deliberate tap-to-pick-up): this is now
+    /// ONLY the arrival-triggers-collection path for kinds that don't
+    /// require a tap -- i.e. cash (ObjectKind.requiresTapToCollect ==
+    /// false), which keeps its original "walk into it, instantly
+    /// absorbed" design untouched. Every other kind's actual pickup now
+    /// happens through collectByTap below instead; simply walking onto
+    /// their cell here is a no-op for the pickup itself, but
+    /// paintIfCarryingBucket/refreshFloorMapTexture (unrelated to
+    /// picking THIS cell's object up) still run on every arrival
+    /// exactly as before, via the same defer.
+    private func collectObjectIfPresent(at coord: GridCoordinate) {
+        defer {
+            paintIfCarryingBucket(at: coord)
+            refreshFloorMapTexture()
+        }
+        guard let kind = objectKinds[coord], !collectedCoords.contains(coord), !kind.requiresTapToCollect else { return }
+        performPickup(kind: kind, at: coord)
+    }
+
+    /// Sept 21 (facing-aware pickup revision -- supersedes this
+    /// function's original Chebyshev-distance version from earlier the
+    /// same day): true only when `coord` is the SINGLE cardinal cell
+    /// directly in front of the player's current facing --
+    /// PLAYER -> OBJECT, nothing else. Eddie, after seeing Floor Object
+    /// placement on device: no diagonal pickup, no pickup of an object
+    /// behind the player, no pickup merely because an object is beside
+    /// the player -- the player must turn to face it first. Unlike
+    /// canReachFireFixture just below in this file, deliberately does
+    /// NOT accept `coord == currentCell` -- standing ON the object's
+    /// cell is not "one cell ahead," and normal walking no longer ever
+    /// enters a tap-required object's cell anyway (see advance()'s
+    /// post-processing trim). Pure grid-coordinate math -- no
+    /// wall/reachability awareness, same as canReachFireFixture itself.
+    private func isWithinTapRange(of coord: GridCoordinate) -> Bool {
+        let delta = facing.delta
+        return coord == GridCoordinate(row: currentCell.row + delta.row, col: currentCell.col + delta.col)
+    }
+
+    /// Maps a hit-tested SceneKit node back to the object's cell, if
+    /// any -- same "walk node.parent looking for an identity match"
+    /// shape fireCoordinate/extinguisherCoordinate use further down in
+    /// this file. Matches on the object's own root node or its real
+    /// visible parts (e.g. the trash can's SCNCone/SCNTube/SCNCylinder
+    /// body), since objectNodes stores exactly the root
+    /// HallwayScene.build(fromMaze:) parents to the scene.
+    ///
+    /// Sept 21 (gameplay hit-area fix): deliberately does NOT match
+    /// through makeDecoratorHitProxy -- that child is a generously
+    /// sized (cellSize * 0.9) invisible floor plate meant for easy
+    /// DECORATE *selection* (DecoratorState.select(at:in:), which walks
+    /// this exact same node.parent shape and is untouched by this
+    /// guard). On device, tapping almost anywhere on the floor near a
+    /// trash can -- well beyond its visible geometry -- was triggering
+    /// gameplay pickup through that same oversized proxy. Rejecting a
+    /// hit that lands ON the proxy itself (never on a deeper descendant
+    /// -- it's a leaf node) forces gameplay pickup to require an actual
+    /// tap on the object's own visible geometry, while leaving DECORATE
+    /// selection exactly as forgiving as it already was.
+    func objectCoordinate(for node: SCNNode) -> GridCoordinate? {
+        if node.name == "decoratorHitProxy" { return nil }
+        var candidate: SCNNode? = node
+        while let current = candidate {
+            if let match = objectNodes.first(where: { $0.value === current }) {
+                return match.key
+            }
+            candidate = current.parent
+        }
+        return nil
+    }
+
+    /// Sept 21 (Floor Object current-cell authoring): registers a Floor
+    /// Object added live via Decorator (DecoratorState.addFloorObject)
+    /// into the SAME objectKinds/objectNodes bookkeeping every
+    /// build-time object already has here -- same shape registerPicture
+    /// just above uses for pictureCoords/pictureDirections -- so
+    /// ordinary gameplay pickup (isWithinTapRange/collectByTap,
+    /// objectCoordinate above) and the stop-before/present-once-then-
+    /// pass walk logic in advance() both see it immediately, no floor
+    /// reload needed. objectKinds/objectNodes were changed from `let`
+    /// to `var` to allow this.
+    func registerFloorObject(_ kind: ObjectKind, at coord: GridCoordinate, node: SCNNode) {
+        objectKinds[coord] = kind
+        objectNodes[coord] = node
+    }
+
+    /// Sept 21 (deliberate tap-to-pick-up): the tap-driven counterpart
+    /// of collectObjectIfPresent's cell-arrival path, for every kind
+    /// that requires a tap (everything except cash). Called from
+    /// ContentView's Coordinator.handleTap when a hit-test lands on a
+    /// pickup-able object's own node -- see that call site's own
+    /// comment for why DECORATE mode can never reach this. canRotate
+    /// mirrors pickUpExtinguisher/extinguishFire's own precondition
+    /// (no menu/terminal open, not mid-animation, etc.); isWithinTapRange
+    /// is the "within one grid cell" rule. Delegates the actual pickup
+    /// to performPickup, unchanged -- this function's only job is
+    /// deciding WHETHER a tap counts, never what happens once it does.
+    @discardableResult
+    func collectByTap(at coord: GridCoordinate) -> Bool {
+        guard canRotate, let kind = objectKinds[coord], kind.requiresTapToCollect,
+              !collectedCoords.contains(coord), isWithinTapRange(of: coord) else { return false }
+        performPickup(kind: kind, at: coord)
+        refreshFloorMapTexture()
+        return true
     }
 
     private func collectExtinguisherIfPresent(at coord: GridCoordinate) {
@@ -4392,6 +4686,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 DispatchQueue.main.async { [weak self] in
                     self?.applyNavigationUpdate { [weak self] in
                         self?.facing = newFacing
+                        // Sept 21 (present-once-then-allow-pass): a turn
+                        // re-presents whatever's ahead fresh next time --
+                        // see presentedPickupCoord's own doc comment.
+                        self?.presentedPickupCoord = nil
                         self?.isAnimating = false
                         if let self {
                             self.activatePhotoBooth(at: self.currentCell)

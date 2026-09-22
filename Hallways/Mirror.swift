@@ -22,20 +22,35 @@ extension HallwayScene {
         }
     }
 
-    static func makeMirrorNode(at coord: GridCoordinate, direction: Direction, cellSize: CGFloat) -> SCNNode {
+    static func makeMirrorNode(at coord: GridCoordinate, direction: Direction, cellSize: CGFloat, frameLightingModel: SCNMaterial.LightingModel = .blinn) -> SCNNode {
         let root = SCNNode()
         root.name = "mirror"
         let frame = SCNBox(width: 0.86, height: 1.16, length: 0.055, chamferRadius: 0.018)
         let silver = SCNMaterial()
         silver.diffuse.contents = UIColor(white: 0.7, alpha: 1)
-        silver.specular.contents = UIColor.white
-        silver.shininess = 0.9
-        silver.lightingModel = .blinn
+        // Eddie, Sept 20: the frame was reading as if it emitted its
+        // own light -- there's no .emission set here and never was, but
+        // a pure-white specular (UIColor.white) at shininess 0.9 under
+        // .blinn throws a small, very hot, tightly-focused highlight
+        // wherever a nearby fixture (wall light, spotlight) catches it,
+        // which reads exactly like a glow on a physical iPhone screen
+        // even though nothing here is technically emissive. Toning the
+        // specular down to a dim gray and pulling shininess way back
+        // keeps the frame reading as brushed metal -- still reflective,
+        // still responds to real scene lights -- without ever flaring
+        // into what looks like its own light source. Diffuse, geometry,
+        // the live mirror surface, and every other material are
+        // untouched.
+        silver.specular.contents = UIColor(white: 0.35, alpha: 1)
+        silver.shininess = 0.25
+        silver.lightingModel = frameLightingModel
         frame.materials = [silver]
         root.addChildNode(SCNNode(geometry: frame))
         let plane = SCNPlane(width: 0.75, height: 1.05)
         let surface = SCNMaterial()
-        surface.lightingModel = .constant
+        surface.lightingModel = .physicallyBased // mirror surface -- needs real illumination to be usefully visible
+        surface.metalness.contents = 0.0
+        surface.roughness.contents = 0.6
         surface.diffuse.contents = mirrorPlaceholder()
         plane.materials = [surface]
         let node = SCNNode(geometry: plane)

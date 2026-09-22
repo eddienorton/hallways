@@ -117,29 +117,24 @@ enum SoundEffects {
     }
 
     /// Eddie, Sept 9, wiring up the first real music/sfx from
-    /// Archive.zip (9 files -- these 3 in use now, the other 6 --
-    /// elevator-arrived-ding-dong x2, walking-giant, walking-heels,
-    /// walking-in-grass, walking-in-water -- dropped into Audio/ for
-    /// later, "we'll prob use them later"): "use 'walking.mp3' for
-    /// normal walking down hallway. so its only when there is forward
-    /// movement." A footstep loop, not a one-shot like everything
-    /// above -- start/stop rather than play-from-zero, so
-    /// startWalking()/stopWalking() below are called from
-    /// TapNavigationController right as a forward glide begins/ends
-    /// (advance()'s .translate phase), never fired directly by a UI
-    /// action the way playCashPickup() etc. are. numberOfLoops = -1
-    /// loops indefinitely for however long a single glide lasts;
-    /// stopWalking() uses pause() (not stop()) so a footstep cut off
-    /// mid-stride resumes from that same point on the next glide
-    /// instead of always restarting at 0.
-    private static let walkingPlayer: AVAudioPlayer? = {
-        let player = loadPlayer("walking.mp3")
+    // One existing footstep loop; the preference changes only its source file.
+    private static var loadedFeet = PlayerFeet.current
+    private static var walkingPlayer: AVAudioPlayer? = makeWalkingPlayer(loadedFeet)
+
+    private static func makeWalkingPlayer(_ feet: PlayerFeet) -> AVAudioPlayer? {
+        let player = loadPlayer(feet.filename)
         player?.numberOfLoops = -1
         player?.enableRate = true
         return player
-    }()
+    }
 
     static func startWalking() {
+        let selected = PlayerFeet.current
+        if selected != loadedFeet {
+            walkingPlayer?.pause()
+            walkingPlayer = makeWalkingPlayer(selected)
+            loadedFeet = selected
+        }
         guard let player = walkingPlayer, !player.isPlaying else { return }
         player.rate = walkingRate
         player.play()

@@ -20,6 +20,10 @@
       {
         "row": 14,
         "col": 7
+      },
+      {
+        "row": 15,
+        "col": 7
       }
     ],
     "destinations": [],
@@ -42,6 +46,10 @@
       },
       {
         "row": 14,
+        "col": 7
+      },
+      {
+        "row": 15,
         "col": 7
       }
     ],
@@ -599,50 +607,257 @@
   {
     "cells": [
       {
-        "row": 10,
+        "row": 3,
+        "col": 2
+      },
+      {
+        "row": 3,
+        "col": 3
+      },
+      {
+        "row": 3,
+        "col": 4
+      },
+      {
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
         "col": 7
       },
       {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
         "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
         "col": 7
       },
       {
         "row": 10,
         "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 4,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "Pick up the blue paint bucket. Walk through every hallway to paint its walls. Use the wall maps to find unfinished areas, then return to the elevator.",
     "missionHeading": "4th Floor \u2014 A Fresh Coat",
     "missionObjectKind": "paintBucket",
     "missionSigns": [
       {
         "coord": {
-          "row": 11,
-          "col": 7
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 5,
     "objects": [
       {
         "coord": {
-          "row": 10,
-          "col": 6
+          "row": 11,
+          "col": 12
         },
         "kind": "paintBucket"
       }
@@ -650,16 +865,205 @@
     "pictures": [],
     "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "spotlights": []
+    "spotlights": [],
+    "itemRooms": []
   },
   {
     "cells": [
       {
-        "row": 10,
+        "row": 3,
+        "col": 2
+      },
+      {
+        "row": 3,
+        "col": 3
+      },
+      {
+        "row": 3,
+        "col": 4
+      },
+      {
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
         "col": 7
       },
       {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
         "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
         "col": 7
       },
       {
@@ -668,26 +1072,24 @@
       },
       {
         "row": 10,
-        "col": 5
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [
+    "exitSigns": [
       {
         "coord": {
-          "row": 10,
-          "col": 6
+          "row": 3,
+          "col": 7
         },
-        "direction": "north"
-      }
-    ],
-    "fires": [
+        "direction": "south"
+      },
       {
         "coord": {
           "row": 10,
-          "col": 5
-        }
+          "col": 7
+        },
+        "direction": "west"
       }
     ],
     "floorMaps": [
@@ -696,22 +1098,22 @@
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 5,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "Unscheduled flames are not a team-building exercise.\nFind an extinguisher. Put out every fire.\nThen return to the elevator.",
     "missionHeading": "5th Floor \u2014 Fire Safety",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "row": 11,
-          "col": 7
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 6,
@@ -719,423 +1121,1574 @@
     "pictures": [],
     "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "spotlights": []
+    "spotlights": [],
+    "itemRooms": [],
+    "fires": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        }
+      }
+    ],
+    "extinguishers": [
+      {
+        "coord": {
+          "row": 14,
+          "col": 5
+        },
+        "direction": "north"
+      }
+    ]
   },
   {
     "cells": [
       {
-        "row": 10,
+        "row": 3,
+        "col": 2
+      },
+      {
+        "row": 3,
+        "col": 3
+      },
+      {
+        "row": 3,
+        "col": 4
+      },
+      {
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
         "col": 7
       },
       {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
         "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
         "col": 7
       },
       {
         "row": 10,
         "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 6,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "YOUR FACE IS REQUIRED FOR OUR RECORDS.\nFind the photo station and smile for your employee ID.\nOne photo. Then return to the elevator.",
     "missionHeading": "6th Floor \u2014 Employee ID",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "row": 11,
-          "col": 7
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 7,
     "objects": [],
-    "photoBooths": [
-      {
-        "coord": {
-          "row": 10,
-          "col": 6
-        },
-        "direction": "west",
-        "expression": "smile"
-      }
-    ],
     "pictures": [],
     "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "spotlights": []
+    "spotlights": [],
+    "itemRooms": [],
+    "photoBooths": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        },
+        "direction": "east",
+        "expression": "smile"
+      }
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 11
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 8,
-        "row": 11
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 8,
-        "row": 12
+        "row": 3,
+        "col": 5
       },
       {
-        "col": 8,
-        "row": 13
+        "row": 3,
+        "col": 6
       },
       {
-        "col": 7,
-        "row": 13
+        "row": 3,
+        "col": 7
       },
       {
-        "col": 7,
-        "row": 14
+        "row": 3,
+        "col": 8
       },
       {
-        "col": 8,
-        "row": 14
+        "row": 3,
+        "col": 9
       },
       {
-        "col": 9,
-        "row": 14
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
       },
       {
         "row": 14,
         "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 7,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "EMPLOYEE APTITUDE TEST\n\nEvery new hire takes one. Find the terminal down the hall and pass it.\n\nThen return to the elevator.",
     "missionHeading": "7th Floor \u2014 Employee Aptitude Test",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 11
-        },
-        "direction": "south"
-      }
-    ],
-    "nextMazeID": 8,
-    "objects": [],
-    "photoBooths": [],
-    "pictures": [],
-    "picturesUseCameraRoll": false,
-    "roomDoors": [],
-    "spotlights": [],
-    "ticTacToeTerminals": [
-      {
-        "coord": {
-          "col": 9,
-          "row": 14
+          "row": 10,
+          "col": 8
         },
         "direction": "east"
       }
     ],
-    "windowRooms": [
+    "nextMazeID": 8,
+    "objects": [],
+    "pictures": [],
+    "picturesUseCameraRoll": true,
+    "roomDoors": [],
+    "spotlights": [],
+    "itemRooms": [],
+    "ticTacToeTerminals": [
       {
         "coord": {
-          "row": 14,
-          "col": 7
+          "row": 11,
+          "col": 12
         },
-        "direction": "west",
-        "windowDirection": "south",
-        "viewAssetID": "nycPlaceholder"
+        "direction": "east"
       }
     ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 11
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 8,
-        "row": 11
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 8,
-        "row": 12
+        "row": 3,
+        "col": 5
       },
       {
-        "col": 7,
-        "row": 13
+        "row": 3,
+        "col": 6
       },
       {
-        "col": 8,
-        "row": 13
+        "row": 3,
+        "col": 7
       },
       {
-        "col": 9,
-        "row": 13
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 8,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BREAK ROOM DIVERSION\n\nSomeone set up a shell game down the hall. Watch closely, then pick a cup.\n\nThen return to the elevator.",
     "missionHeading": "8th Floor \u2014 Break Room Diversion",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 11
-        },
-        "direction": "south"
-      }
-    ],
-    "nextMazeID": 9,
-    "objects": [],
-    "photoBooths": [],
-    "pictures": [],
-    "picturesUseCameraRoll": false,
-    "roomDoors": [],
-    "shellGameStations": [
-      {
-        "coord": {
-          "col": 9,
-          "row": 13
+          "row": 10,
+          "col": 8
         },
         "direction": "east"
       }
     ],
+    "nextMazeID": 9,
+    "objects": [],
+    "pictures": [],
+    "picturesUseCameraRoll": true,
+    "roomDoors": [],
     "spotlights": [],
-    "ticTacToeTerminals": []
+    "itemRooms": [],
+    "shellGameStations": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        },
+        "direction": "east"
+      }
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 11
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 8,
-        "row": 11
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 8,
-        "row": 12
+        "row": 3,
+        "col": 5
       },
       {
-        "col": 8,
-        "row": 13
+        "row": 3,
+        "col": 6
       },
       {
-        "col": 7,
-        "row": 13
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 9,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nThe building wants a rematch. Rock, paper, scissors -- beat it, then return to the elevator.",
     "missionHeading": "9th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 11
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 10,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
+    "picturesUseCameraRoll": true,
+    "roomDoors": [],
+    "spotlights": [],
+    "itemRooms": [],
     "rockPaperScissorsTerminals": [
       {
         "coord": {
-          "col": 7,
-          "row": 13
+          "row": 11,
+          "col": 12
         },
-        "direction": "south"
+        "direction": "east"
       }
-    ],
-    "roomDoors": [],
-    "shellGameStations": [],
-    "spotlights": [],
-    "ticTacToeTerminals": []
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 11
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 8,
-        "row": 11
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 8,
-        "row": 12
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
-      }
-    ],
-    "higherLowerTerminals": [
-      {
-        "coord": {
-          "col": 8,
-          "row": 12
-        },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 10,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nHigher or lower, three correct in a row. Then return to the elevator.",
     "missionHeading": "10th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 11
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 11,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
     "spotlights": [],
-    "ticTacToeTerminals": []
+    "itemRooms": [],
+    "higherLowerTerminals": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        },
+        "direction": "east"
+      }
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 11
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 8,
-        "row": 11
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 8,
-        "row": 12
+        "row": 3,
+        "col": 5
       },
       {
-        "col": 7,
-        "row": 13
+        "row": 3,
+        "col": 6
       },
       {
-        "col": 8,
-        "row": 13
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
-    "fiveCardDrawTerminals": [
+    "exitSigns": [
       {
         "coord": {
-          "col": 8,
-          "row": 13
+          "row": 3,
+          "col": 7
         },
-        "direction": "east"
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
       }
     ],
     "floorMaps": [
@@ -1144,381 +2697,1363 @@
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
-    "higherLowerTerminals": [],
     "id": 11,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nFive-Card Draw. Pair or better passes. Then return to the elevator.",
     "missionHeading": "11th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 11
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 12,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
     "spotlights": [],
-    "ticTacToeTerminals": []
+    "itemRooms": [],
+    "fiveCardDrawTerminals": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        },
+        "direction": "east"
+      }
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 11
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 8,
-        "row": 11
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 8,
-        "row": 12
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
-    "fiveCardDrawTerminals": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
-      }
-    ],
-    "higherLowerTerminals": [],
-    "hangmanTerminals": [
-      {
-        "coord": {
-          "col": 8,
-          "row": 12
-        },
-        "direction": "east"
+        "direction": "south"
       }
     ],
     "id": 12,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nWord Assessment. Guess the 5-letter word. Then return to the elevator.",
     "missionHeading": "12th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 11
+          "row": 10,
+          "col": 8
         },
-        "direction": "south"
+        "direction": "east"
       }
     ],
     "nextMazeID": 13,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
     "spotlights": [],
-    "ticTacToeTerminals": []
+    "itemRooms": [],
+    "hangmanTerminals": [
+      {
+        "coord": {
+          "row": 11,
+          "col": 12
+        },
+        "direction": "east"
+      }
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 9
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 6,
-        "row": 9
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 6,
-        "row": 8
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
-    "fiveCardDrawTerminals": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
-    "higherLowerTerminals": [],
     "id": 13,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nMemory Assessment. Watch the pattern, then repeat it. Sequence length 5 to pass. Then return to the elevator.",
     "missionHeading": "13th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 9
+          "row": 10,
+          "col": 8
         },
-        "direction": "north"
+        "direction": "east"
       }
     ],
     "nextMazeID": 14,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
+    "spotlights": [],
+    "itemRooms": [],
     "simonTerminals": [
       {
         "coord": {
-          "col": 6,
-          "row": 8
+          "row": 11,
+          "col": 12
         },
-        "direction": "north"
+        "direction": "east"
       }
-    ],
-    "spotlights": [],
-    "ticTacToeTerminals": []
+    ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 9
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 6,
-        "row": 9
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 6,
-        "row": 8
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
-    "fiveCardDrawTerminals": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
-    "higherLowerTerminals": [],
     "id": 14,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nStrategy Assessment. Win a game of Connect Four. Then return to the elevator.",
     "missionHeading": "14th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 9
+          "row": 10,
+          "col": 8
         },
-        "direction": "north"
+        "direction": "east"
       }
     ],
     "nextMazeID": 15,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
-    "simonTerminals": [],
     "spotlights": [],
-    "ticTacToeTerminals": [],
+    "itemRooms": [],
     "connectFourTerminals": [
       {
         "coord": {
-          "col": 6,
-          "row": 8
+          "row": 11,
+          "col": 12
         },
-        "direction": "west"
+        "direction": "east"
       }
     ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 9
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 6,
-        "row": 9
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 6,
-        "row": 8
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
-    "fiveCardDrawTerminals": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
-    "higherLowerTerminals": [],
     "id": 15,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nStrategy Assessment. Win a game of Checkers. Then return to the elevator.",
     "missionHeading": "15th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 9
+          "row": 10,
+          "col": 8
         },
-        "direction": "north"
+        "direction": "east"
       }
     ],
     "nextMazeID": 16,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
-    "simonTerminals": [],
     "spotlights": [],
-    "ticTacToeTerminals": [],
+    "itemRooms": [],
     "checkersTerminals": [
       {
         "coord": {
-          "col": 6,
-          "row": 8
+          "row": 11,
+          "col": 12
         },
-        "direction": "west"
+        "direction": "east"
       }
     ]
   },
   {
     "cells": [
       {
-        "col": 7,
-        "row": 10
+        "row": 3,
+        "col": 2
       },
       {
-        "col": 7,
-        "row": 9
+        "row": 3,
+        "col": 3
       },
       {
-        "col": 6,
-        "row": 9
+        "row": 3,
+        "col": 4
       },
       {
-        "col": 6,
-        "row": 8
+        "row": 3,
+        "col": 5
+      },
+      {
+        "row": 3,
+        "col": 6
+      },
+      {
+        "row": 3,
+        "col": 7
+      },
+      {
+        "row": 3,
+        "col": 8
+      },
+      {
+        "row": 3,
+        "col": 9
+      },
+      {
+        "row": 3,
+        "col": 10
+      },
+      {
+        "row": 3,
+        "col": 11
+      },
+      {
+        "row": 3,
+        "col": 12
+      },
+      {
+        "row": 14,
+        "col": 2
+      },
+      {
+        "row": 14,
+        "col": 3
+      },
+      {
+        "row": 14,
+        "col": 4
+      },
+      {
+        "row": 14,
+        "col": 5
+      },
+      {
+        "row": 14,
+        "col": 6
+      },
+      {
+        "row": 14,
+        "col": 7
+      },
+      {
+        "row": 14,
+        "col": 8
+      },
+      {
+        "row": 14,
+        "col": 9
+      },
+      {
+        "row": 14,
+        "col": 10
+      },
+      {
+        "row": 14,
+        "col": 11
+      },
+      {
+        "row": 14,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 2
+      },
+      {
+        "row": 5,
+        "col": 2
+      },
+      {
+        "row": 6,
+        "col": 2
+      },
+      {
+        "row": 7,
+        "col": 2
+      },
+      {
+        "row": 8,
+        "col": 2
+      },
+      {
+        "row": 9,
+        "col": 2
+      },
+      {
+        "row": 10,
+        "col": 2
+      },
+      {
+        "row": 11,
+        "col": 2
+      },
+      {
+        "row": 12,
+        "col": 2
+      },
+      {
+        "row": 13,
+        "col": 2
+      },
+      {
+        "row": 4,
+        "col": 12
+      },
+      {
+        "row": 5,
+        "col": 12
+      },
+      {
+        "row": 6,
+        "col": 12
+      },
+      {
+        "row": 7,
+        "col": 12
+      },
+      {
+        "row": 8,
+        "col": 12
+      },
+      {
+        "row": 9,
+        "col": 12
+      },
+      {
+        "row": 10,
+        "col": 12
+      },
+      {
+        "row": 11,
+        "col": 12
+      },
+      {
+        "row": 12,
+        "col": 12
+      },
+      {
+        "row": 13,
+        "col": 12
+      },
+      {
+        "row": 4,
+        "col": 7
+      },
+      {
+        "row": 5,
+        "col": 7
+      },
+      {
+        "row": 6,
+        "col": 7
+      },
+      {
+        "row": 7,
+        "col": 7
+      },
+      {
+        "row": 8,
+        "col": 7
+      },
+      {
+        "row": 9,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 7
+      },
+      {
+        "row": 10,
+        "col": 6
+      },
+      {
+        "row": 10,
+        "col": 8
       }
     ],
     "destinations": [],
-    "exitSigns": [],
-    "extinguishers": [],
-    "fires": [],
-    "fiveCardDrawTerminals": [],
+    "exitSigns": [
+      {
+        "coord": {
+          "row": 3,
+          "col": 7
+        },
+        "direction": "south"
+      },
+      {
+        "coord": {
+          "row": 10,
+          "col": 7
+        },
+        "direction": "west"
+      }
+    ],
     "floorMaps": [
       {
         "coord": {
           "row": 10,
           "col": 7
         },
-        "direction": "east"
+        "direction": "south"
       }
     ],
-    "higherLowerTerminals": [],
     "id": 16,
-    "itemRooms": [],
     "mirrors": [],
+    "bathroomDoors": [],
     "missionBody": "BUILDING CHALLENGE\n\nVerbal Assessment. Guess the five-letter word within six tries. Then return to the elevator.",
     "missionHeading": "16th Floor \u2014 Building Challenge",
     "missionObjectKind": null,
     "missionSigns": [
       {
         "coord": {
-          "col": 7,
-          "row": 9
+          "row": 10,
+          "col": 8
         },
-        "direction": "north"
+        "direction": "east"
       }
     ],
     "nextMazeID": null,
     "objects": [],
-    "photoBooths": [],
     "pictures": [],
-    "picturesUseCameraRoll": false,
-    "rockPaperScissorsTerminals": [],
+    "picturesUseCameraRoll": true,
     "roomDoors": [],
-    "shellGameStations": [],
-    "simonTerminals": [],
     "spotlights": [],
-    "ticTacToeTerminals": [],
+    "itemRooms": [],
     "woidleTerminals": [
       {
         "coord": {
-          "col": 6,
-          "row": 8
+          "row": 11,
+          "col": 12
         },
-        "direction": "west"
+        "direction": "east"
       }
     ]
   }

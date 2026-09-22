@@ -25,6 +25,7 @@
 //
 
 import SwiftUI
+import Combine
 
 /// UI-only presentation details for each object kind, kept here rather
 /// than on ObjectKind itself since that enum lives in MazeStore.swift
@@ -90,7 +91,199 @@ private extension ObjectKind {
     }
 }
 
+/// Which placement-tool family the editor's lower bar currently shows
+/// (Suzanimator pass, Sept 19). Purely presentational routing -- it does
+/// NOT replace objectKindToPlace / destinationKindToPlace /
+/// exitDirectionToPlace and friends; those @State vars stay the source of
+/// truth that paint(at:) reads. selectedTool is kept in sync with whatever
+/// placement mode is active by every placement button and selectTool(_:).
+private enum EditorTool: String, CaseIterable, Identifiable {
+    case walls
+    case delete
+    case pickup
+    case chute
+    case exit
+    case map
+    case picture
+    case mirror
+    case door
+    case windowRoom
+    case light
+    case photoBooth
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .delete: return "Delete"
+        case .walls: return "Pencil"
+        case .pickup: return "Pickup / Object"
+        case .chute: return "Chute / Destination"
+        case .exit: return "Exit Sign"
+        case .map: return "Floor Map"
+        case .picture: return "Picture"
+        case .mirror: return "Mirror"
+        case .door: return "Door"
+        case .windowRoom: return "Window Room"
+        case .light: return "Light"
+        case .photoBooth: return "Photo Booth"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .delete: return "trash"
+        case .walls: return "pencil"
+        case .pickup: return "cube.fill"
+        case .chute: return "arrow.down.square.fill"
+        case .exit: return "location.north.fill"
+        case .map: return "map.fill"
+        case .picture: return "photo.fill"
+        case .mirror: return "person.crop.rectangle"
+        case .door: return "door.left.hand.closed"
+        case .windowRoom: return "macwindow"
+        case .light: return "lightbulb.fill"
+        case .photoBooth: return "camera.fill"
+        }
+    }
+}
+
+/// Which EXISTING physical light source the Light tool paints
+/// (Suzanimator lighting pass, Sept 19). Every case maps to a real
+/// runtime source -- nothing invented here: ceiling is the omni fixture
+/// hung from the ceiling slab, fire is the animated flame + omni glow.
+/// Both sit centered in their cell (no wall to mount on), so this is a
+/// plain enum with no direction axis, exactly like the previous single
+/// "spotlight" on/off toggle.
+fileprivate enum EditorLightType: String, CaseIterable, Identifiable {
+    case ceiling
+    case fluorescent
+    case wall
+    case picture
+    case fire
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .fluorescent: return "Fluorescent"
+        case .ceiling: return "Ceiling"
+        case .wall: return "Wall Light"
+        case .fire: return "Fire"
+        case .picture: return "Picture Light"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .fluorescent: return "light.panel.fill"
+        case .ceiling: return "lightbulb.fill"
+        case .wall: return "lamp.table.fill"
+        case .fire: return "flame.fill"
+        case .picture: return "photo.fill"
+        }
+    }
+
+    /// Sept 21 (1-10 brightness expansion): the Floor Editor's brightness
+    /// picker range is per-kind now (ceiling/fluorescent go to 10, the
+    /// rest stay at 5) -- this is the one place EditorLightType maps to
+    /// the shared AuthoredLightKind range, so the picker doesn't need its
+    /// own copy of which kinds got the wider range.
+    var authoredKind: AuthoredLightKind {
+        switch self {
+        case .fluorescent: return .fluorescent
+        case .ceiling: return .ceiling
+        case .wall: return .wall
+        case .fire: return .fire
+        case .picture: return .picture
+        }
+    }
+}
+
+/// Authoring controls only: retained for this process, never saved as floor data.
+private final class SuzanimatorSession: ObservableObject {
+    static let shared = SuzanimatorSession()
+    @Published var objectKindToPlace: ObjectKind? = nil
+    @Published var destinationKindToPlace: ObjectKind? = nil
+    @Published var exitDirectionToPlace: Direction? = nil
+    @Published var floorMapDirectionToPlace: Direction? = nil
+    @Published var pictureDirectionToPlace: Direction? = nil
+    @Published var mirrorDirectionToPlace: Direction? = nil
+    @Published var wallLightDirectionToPlace: Direction? = nil
+    @Published var doorDirectionToPlace: Direction? = nil
+    @Published var windowRoomDirectionToPlace: Direction? = nil
+    @Published var mailRoomToPlace: Int? = nil
+    @Published var lightTypeToPlace: EditorLightType? = nil
+    @Published var selectedTool: EditorTool = .walls
+    @Published var pictureLightDirection: Direction? = nil
+    @Published var fluorescentOrientation: FluorescentOrientation = .northSouth
+    @Published var brightnessToPlace = 3
+    @Published var photoBoothDirectionToPlace: Direction? = nil
+    @Published var photoBoothExpressionToPlace: PhotoBoothExpression = .smile
+    @Published var pictureSizeToPlace: PictureSize = .standard
+}
+
+private struct CellDeletionRequest: Identifiable {
+    let id = UUID()
+    let floorID: Int
+    let coord: GridCoordinate
+    let items: [EditorCellContent]
+}
+
+private struct CellDeletionSheet: View {
+    let request: CellDeletionRequest
+    let onDelete: (Set<EditorContentKind>) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedDeletions: Set<EditorContentKind> = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(request.items) { item in
+                    if request.items.count == 1 {
+                        Text(item.title)
+                    } else {
+                        Button {
+                            if selectedDeletions.contains(item.id) {
+                                selectedDeletions.remove(item.id)
+                            } else {
+                                selectedDeletions.insert(item.id)
+                            }
+                        } label: {
+                            HStack {
+                                Image(systemName: selectedDeletions.contains(item.id) ? "checkmark.square.fill" : "square")
+                                Text(item.title)
+                                Spacer()
+                            }
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedDeletions.contains(item.id) ? .isSelected : [])
+                    }
+                }
+            }
+            .navigationTitle(request.items.count == 1 ? "Delete Item?" : "Delete Cell Content")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(request.items.count == 1 ? "Delete" : "Delete Selected", role: .destructive) {
+                        let chosen = request.items.count == 1 ? Set(request.items.map(\.id)) : selectedDeletions
+                        onDelete(chosen)
+                        dismiss()
+                    }
+                    .disabled(request.items.count > 1 && selectedDeletions.isEmpty)
+                }
+            }
+        }
+    }
+}
+
 struct GridEditorView: View {
+    @ObservedObject private var session = SuzanimatorSession.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var mazeStore: MazeStore
     /// Where the player currently is in the 3D maze, if that's even
@@ -135,20 +328,33 @@ struct GridEditorView: View {
     // paints or erases; every cell the finger crosses afterward follows
     // that same mode. A tap is just a one-cell drag, so this handles both.
     @State private var paintMode = true
-    @State private var dragActive = false
+    @State private var gridZoom: CGFloat = 1
+    @State private var gridOffset = CGSize.zero
+    @State private var zoomStart: CGFloat? = nil
+    @State private var panStart: CGSize? = nil
+    @State private var pinchCentroid: CGPoint? = nil
+    @State private var transformingGrid = false
+    @State private var pendingGridPoints: [CGPoint] = []
+    @State private var deletionRequest: CellDeletionRequest? = nil
     /// Two different things a drag can do to a cell now: paint/erase
     /// walls (nil, the default), or place/remove a specific kind of
     /// object on an already-open cell. One toggle button per ObjectKind
     /// in the bottom bar switches which, mutually exclusive with each
     /// other and with wall painting; the drag gesture itself is
     /// unchanged either way, just branches on this.
-    @State private var objectKindToPlace: ObjectKind? = nil
+    private var objectKindToPlace: ObjectKind? {
+        get { session.objectKindToPlace }
+        nonmutating set { session.objectKindToPlace = newValue }
+    }
     /// Same idea, for placing a DESTINATION on a cell instead of a
     /// critter -- mutually exclusive with objectKindToPlace (and with
     /// wall painting): picking a destination kind clears any active
     /// critter kind and vice versa, so there's only ever one placement
     /// mode active at a time.
-    @State private var destinationKindToPlace: ObjectKind? = nil
+    private var destinationKindToPlace: ObjectKind? {
+        get { session.destinationKindToPlace }
+        nonmutating set { session.destinationKindToPlace = newValue }
+    }
     /// Same idea again, for placing an Exit Sign -- mutually exclusive
     /// with the other two placement modes and with wall painting.
     /// Eddie, Sept 5 (round 5): "let me lay the exit signs down
@@ -160,7 +366,10 @@ struct GridEditorView: View {
     /// direction toggle buttons below double as both the mode switch
     /// AND the direction picker: whichever one is active is also the
     /// direction the next placed/repointed sign gets.
-    @State private var exitDirectionToPlace: Direction? = nil
+    private var exitDirectionToPlace: Direction? {
+        get { session.exitDirectionToPlace }
+        nonmutating set { session.exitDirectionToPlace = newValue }
+    }
     /// Same idea once more, for placing a "You Are Here" floor map --
     /// mutually exclusive with all 3 other placement modes and with
     /// wall painting. Eddie, Sept 5: "let me control that and put maps
@@ -169,7 +378,10 @@ struct GridEditorView: View {
     /// the wall now, same split as Exit Signs above. Unlike an Exit
     /// Sign, the wall a map hangs on has to actually BE a wall --
     /// paint(at:) checks that before ever calling placeFloorMap.
-    @State private var floorMapDirectionToPlace: Direction? = nil
+    private var floorMapDirectionToPlace: Direction? {
+        get { session.floorMapDirectionToPlace }
+        nonmutating set { session.floorMapDirectionToPlace = newValue }
+    }
     /// Same idea once more, for placing a decorative Picture --
     /// mutually exclusive with every other placement mode and with
     /// wall painting. Eddie, Sept 9: "make the picture appear as a
@@ -180,23 +392,67 @@ struct GridEditorView: View {
     /// those, no image is picked here -- HallwayScene.build(fromMaze:)
     /// grabs a random one from the bundled Pictures folder at build
     /// time, so this screen only ever decides where, never which photo.
-    @State private var pictureDirectionToPlace: Direction? = nil
-    @State private var mirrorDirectionToPlace: Direction? = nil
-    @State private var doorDirectionToPlace: Direction? = nil
+    private var pictureDirectionToPlace: Direction? {
+        get { session.pictureDirectionToPlace }
+        nonmutating set { session.pictureDirectionToPlace = newValue }
+    }
+    private var mirrorDirectionToPlace: Direction? {
+        get { session.mirrorDirectionToPlace }
+        nonmutating set { session.mirrorDirectionToPlace = newValue }
+    }
+    private var wallLightDirectionToPlace: Direction? {
+        get { session.wallLightDirectionToPlace }
+        nonmutating set { session.wallLightDirectionToPlace = newValue }
+    }
+    private var photoBoothDirectionToPlace: Direction? {
+        get { session.photoBoothDirectionToPlace }
+        nonmutating set { session.photoBoothDirectionToPlace = newValue }
+    }
+    private var photoBoothExpressionToPlace: PhotoBoothExpression {
+        get { session.photoBoothExpressionToPlace }
+        nonmutating set { session.photoBoothExpressionToPlace = newValue }
+    }
+    private var pictureSizeToPlace: PictureSize {
+        get { session.pictureSizeToPlace }
+        nonmutating set { session.pictureSizeToPlace = newValue }
+    }
+    private var doorDirectionToPlace: Direction? {
+        get { session.doorDirectionToPlace }
+        nonmutating set { session.doorDirectionToPlace = newValue }
+    }
     /// Which wall a NEW Window Room door will be placed on next tap
     /// -- same shape as doorDirectionToPlace (a whole extra
     /// generalized Room abstraction wasn't warranted for one new
     /// fixture, so this is its own small parallel tool, mirroring
     /// the door tool's own UI/state pattern instead).
-    @State private var windowRoomDirectionToPlace: Direction? = nil
-    @State private var mailRoomToPlace: Int? = nil
-    /// Same idea once more, for placing a ceiling spotlight -- mutually
-    /// exclusive with all 4 other placement modes and with wall
-    /// painting. Eddie, Sept 6: "how difficult to have a spotlight that
-    /// we could place on the ceiling of a box?" No direction to pick
-    /// (it hangs dead-center in the ceiling), so this is a plain on/off
-    /// toggle like the Chute one, not a 4-direction row like Exit/Map.
-    @State private var placingSpotlight = false
+    private var windowRoomDirectionToPlace: Direction? {
+        get { session.windowRoomDirectionToPlace }
+        nonmutating set { session.windowRoomDirectionToPlace = newValue }
+    }
+    private var mailRoomToPlace: Int? {
+        get { session.mailRoomToPlace }
+        nonmutating set { session.mailRoomToPlace = newValue }
+    }
+    /// Arming state for the Light tool (Suzanimator lighting pass,
+    /// Sept 19): WHICH existing physical light source the next tap will
+    /// place. Mutually exclusive with every other placement mode and
+    /// with wall painting, exactly like the single ceiling-spotlight
+    /// toggle it replaces (Eddie, Sept 6: "how difficult to have a
+    /// spotlight that we could place on the ceiling of a box?"). Neither
+    /// fire nor a ceiling light mounts on a wall, so there's no
+    /// direction to pick -- this stays a plain on/off arming toggle.
+    private var lightTypeToPlace: EditorLightType? {
+        get { session.lightTypeToPlace }
+        nonmutating set { session.lightTypeToPlace = newValue }
+    }
+    /// Which tool family the lower bar currently shows (see EditorTool).
+    /// Derived UI, not a placement mode -- paint(at:) keeps reading only
+    /// the real per-mode @State vars above; every placement button and
+    /// selectTool(_:) keep selectedTool in sync with those.
+    private var selectedTool: EditorTool {
+        get { session.selectedTool }
+        nonmutating set { session.selectedTool = newValue }
+    }
     /// Same idea once more, for placing a Floor Mission sign --
     /// mutually exclusive with all 5 other placement modes and with
     /// Drives the mission-editor sheet -- the "pop open a text input
@@ -211,92 +467,204 @@ struct GridEditorView: View {
     @State private var missionHeadingDraft = ""
     @State private var missionBodyDraft = ""
 
+    /// Drives the RESET confirmation dialog -- a lightweight native
+    /// action sheet (same "ask before doing the destructive thing"
+    /// idea as Clear's reliance on Undo, but RESET also discards a
+    /// SAVEd local override, which Undo alone can't bring back once
+    /// the editor's moved on, so this gets an explicit confirm instead).
+    @State private var showResetConfirmation = false
+
+    // MARK: - Fixed grid + independently scrolling controls (Sept 19,
+    // 3rd usability pass)
+    //
+    // Replaces BOTH earlier passes' attempts at making room for the
+    // controls (a free-floating drag-anywhere tray, then a sliding
+    // bottom drawer) -- Eddie, after device-testing the drawer: "we
+    // are solving a problem we do not need to solve." The layout is
+    // now the simplest possible two-region stack: the grid is a
+    // fixed-size square pinned at the top (it never scrolls, never
+    // moves), and controlBar -- completely untouched, same as every
+    // prior pass -- sits directly below it in its own independent
+    // ScrollView. No open/closed state, no offsets, no drag gesture,
+    // no snapping animation, nothing to manage: scrolling the controls
+    // can't move the grid because they're just two ordinary sibling
+    // views in a VStack, not an overlay of any kind.
+
     var body: some View {
-        VStack(spacing: 0) {
-            gridArea
-            controlBar
+        GeometryReader { screenGeo in
+            VStack(spacing: 0) {
+                gridArea(width: screenGeo.size.width)
+
+                ScrollView(.vertical, showsIndicators: true) {
+                    controlBar
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .statusBarHidden()
-        .onChange(of: mazeStore.version) { _ in
-            // Persist committed edits while the editor stays open, too.
-            mazeStore.save()
+        .sheet(item: $deletionRequest) { request in
+            CellDeletionSheet(request: request) { selected in
+                guard request.floorID == mazeStore.currentMazeID else { return }
+                mazeStore.deleteContent(selected, at: request.coord)
+            }
+        }
+        .onChange(of: mazeStore.version) { newVersion in
+            // TEMPORARY DIAGNOSTIC (Eddie, Sept 20, object-placement trace) -- remove after root cause is found.
+            NSLog("%@", "[PLACEDIAG] onChange(version) fired: newVersion=\(newVersion) versionChangeIsFloorLoad=\(mazeStore.versionChangeIsFloorLoad) objects.count=\(mazeStore.objects.count) BEFORE autosave")
+            // Sept 20 (autosave pass): every completed edit now
+            // persists AND survives an app relaunch on its own --
+            // see MazeStore.autosaveAfterVersionChange()'s own
+            // comment for how it tells a real edit apart from merely
+            // switching floors or resetting one to default. This
+            // replaces the old plain mazeStore.save() here, which
+            // kept in-progress work alive for the rest of the running
+            // session but never survived quitting the app unless the
+            // (now-removed) manual SAVE button was also tapped.
+            mazeStore.autosaveAfterVersionChange()
+            NSLog("%@", "[PLACEDIAG] onChange(version): objects.count=\(mazeStore.objects.count) AFTER autosave")
         }
         .sheet(isPresented: $showMissionEditor) {
             missionEditorSheet
         }
+        .confirmationDialog(
+            "Reset Floor \(mazeStore.currentMazeID) to Default?",
+            isPresented: $showResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Floor \(mazeStore.currentMazeID)", role: .destructive) {
+                mazeStore.resetCurrentFloorToDefault()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This discards Floor \(mazeStore.currentMazeID)'s saved local edits and reloads it from the bundled default. Other floors are not affected.")
+        }
     }
 
     /// The grid itself and nothing else — no controls drawn over any
-    /// part of it anymore. cellSize is computed fresh from whatever
-    /// space GeometryReader reports (so it also handles rotation with
-    /// no extra plumbing), rather than tracked in @State — with columns
-    /// and rows now fixed, there's no longer anything that needs
-    /// freezing mid-drag the way the old cellSize @State did.
-    private var gridArea: some View {
-        GeometryReader { geo in
-            let cellSize = min(geo.size.width / CGFloat(columns), geo.size.height / CGFloat(rows))
-            let gridItems = Array(repeating: GridItem(.fixed(cellSize), spacing: 0), count: columns)
+    /// part of it anymore, and (3rd usability pass) no longer wrapped
+    /// in its own GeometryReader/ScrollView either: body's outer
+    /// GeometryReader already knows the screen's own width, which
+    /// is all a fixed-size square grid needs, so it's passed straight
+    /// in. cellSize = width / 15 fills the available width edge to
+    /// edge; since columns == rows == 15, gridHeight comes out equal
+    /// to width -- a plain square, explicitly frame()'d to exactly
+    /// that size so it never grows, shrinks, or scrolls regardless of
+    /// what the controls below it do. Not wrapping this in
+    /// .ignoresSafeArea keeps the earlier fix from the 2nd pass:
+    /// body's GeometryReader reports its normal, safe-area-respecting
+    /// size, so the grid (the VStack's first child) naturally starts
+    /// right below the top safe area / Dynamic Island rather than
+    /// running underneath it.
+    private func gridArea(width: CGFloat) -> some View {
+        let cellSize = width / CGFloat(columns)
+        let gridItems = Array(repeating: GridItem(.fixed(cellSize), spacing: 0), count: columns)
+        let gridHeight = cellSize * CGFloat(rows)
 
-            // How far the grid's own top-left corner sits from geo's,
-            // in whichever dimension ISN'T the constraining one --
-            // real letterbox margin, not a rounding fudge. On iPhone
-            // the fixed 15x20 ratio is close enough to the screen's
-            // own tall, narrow shape that cellSize ends up width-
-            // constrained and this is ~0 (no horizontal margin at
-            // all). iPad's screen is much less tall relative to its
-            // width, so cellSize goes height-constrained instead,
-            // leaving real empty space on both left and right --
-            // exactly the situation Eddie hit, Sept 5: "in the ipad
-            // version... when you tap in a box it affects the box to
-            // the right of it," never wrong on iPhone. The previous
-            // code assumed attaching the gesture directly to the
-            // LazyVGrid meant SwiftUI would report value.location
-            // already adjusted for however it centered a smaller grid
-            // inside a bigger GeometryReader -- true on iPhone (no
-            // adjustment was ever needed there to look right), but not
-            // reliably true once there's real horizontal letterboxing
-            // to account for. Computing the margin explicitly and
-            // subtracting it before ever dividing by cellSize doesn't
-            // depend on that assumption at all.
-            let gridWidth = cellSize * CGFloat(columns)
-            let gridHeight = cellSize * CGFloat(rows)
-            let offsetX = (geo.size.width - gridWidth) / 2
-            let offsetY = (geo.size.height - gridHeight) / 2
-
-            ZStack {
-                Color.white.ignoresSafeArea(edges: .top)
-
-                LazyVGrid(columns: gridItems, spacing: 0) {
-                    ForEach(0..<(rows * columns), id: \.self) { index in
-                        let coord = GridCoordinate(row: index / columns, col: index % columns)
-                        cellView(coord, cellSize: cellSize)
-                    }
+        NSLog("%@", "[PLACEDIAG] GRID RENDER floor=\(mazeStore.currentMazeID) version=\(mazeStore.version) tool=\(selectedTool.rawValue) object=\(String(describing: objectKindToPlace)) picture=\(String(describing: pictureDirectionToPlace)) objects=\(mazeStore.objects) pictures=\(mazeStore.pictures)")
+        let grid = ZStack {
+            Color.white
+            LazyVGrid(columns: gridItems, spacing: 0) {
+                ForEach(0..<(rows * columns), id: \.self) { index in
+                    let coord = GridCoordinate(row: index / columns, col: index % columns)
+                    cellView(coord, cellSize: cellSize)
                 }
             }
-            .contentShape(Rectangle())
-            .gesture(
-                // Attached to the ZStack, not the LazyVGrid -- Color.white
-                // above is what makes the ZStack itself fill geo's FULL
-                // size unambiguously, so value.location here is reliably
-                // relative to geo's own top-left corner, (0, 0), full
-                // stop. offsetX/offsetY above are then subtracted before
-                // ever dividing by cellSize, rather than assuming
-                // SwiftUI already did that adjustment.
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if !dragActive {
-                            mazeStore.snapshotForUndo()
-                        }
-                        let adjusted = CGPoint(x: value.location.x - offsetX, y: value.location.y - offsetY)
-                        paint(at: adjusted, cellSize: cellSize, isStart: !dragActive)
-                        dragActive = true
-                    }
-                    .onEnded { _ in
-                        dragActive = false
-                    }
-            )
         }
-        .ignoresSafeArea(edges: .top)
+        .frame(width: width, height: gridHeight)
+        return ZStack(alignment: .topLeading) {
+            grid
+                .scaleEffect(gridZoom, anchor: .topLeading)
+                .offset(gridOffset)
+        }
+        .frame(width: width, height: gridHeight)
+        .clipped()
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if value.translation == .zero {
+                        pendingGridPoints = []
+                        if zoomStart == nil && panStart == nil { transformingGrid = false }
+                    }
+                    guard !transformingGrid else { return }
+                    pendingGridPoints.append(value.location)
+                }
+                .onEnded { value in
+                    defer { pendingGridPoints = [] }
+                    guard !transformingGrid else { return }
+                    let points = pendingGridPoints.isEmpty ? [value.startLocation, value.location] : pendingGridPoints + [value.location]
+                    commitGridStroke(points, width: width, cellSize: cellSize)
+                }
+        )
+        .simultaneousGesture(
+            MagnifyGesture()
+                .onChanged { value in
+                    transformingGrid = true
+                    pendingGridPoints = []
+                    if zoomStart == nil { zoomStart = gridZoom }
+                    let centroid = pinchCentroid ?? value.startLocation
+                    let nextZoom = min(4, max(1, (zoomStart ?? 1) * value.magnification))
+                    // screen = content * scale + offset. Preserve the content
+                    // point currently underneath the actual two-finger centroid.
+                    let ratio = nextZoom / gridZoom
+                    let anchoredOffset = CGSize(
+                        width: centroid.x - (centroid.x - gridOffset.width) * ratio,
+                        height: centroid.y - (centroid.y - gridOffset.height) * ratio)
+                    gridZoom = nextZoom
+                    gridOffset = boundedGridOffset(anchoredOffset, width: width)
+                }
+                .onEnded { _ in
+                    zoomStart = nil
+                    if panStart == nil { pinchCentroid = nil }
+                }
+        )
+        .gesture(EditorTwoFingerPan { translation, centroid, ended in
+            transformingGrid = true
+            pendingGridPoints = []
+            pinchCentroid = centroid
+            // Apply only the new pan delta; an absolute pan-start offset would
+            // overwrite the translation correction made by simultaneous zoom.
+            let previous = panStart ?? .zero
+            gridOffset = boundedGridOffset(CGSize(width: gridOffset.width + translation.width - previous.width,
+                                                  height: gridOffset.height + translation.height - previous.height), width: width)
+            panStart = ended ? nil : translation
+            if ended && zoomStart == nil { pinchCentroid = nil }
+        })
+    }
+
+    private func boundedGridOffset(_ offset: CGSize, width: CGFloat) -> CGSize {
+        let minimum = width * (1 - gridZoom)
+        return CGSize(width: min(0, max(minimum, offset.width)),
+                      height: min(0, max(minimum, offset.height)))
+    }
+
+    private func commitGridStroke(_ screenPoints: [CGPoint], width: CGFloat, cellSize: CGFloat) {
+        // Wait for a completed one-finger stroke so the first finger of a
+        // pinch/pan cannot accidentally modify floor data or create Undo entries.
+        let points = screenPoints.map { CGPoint(x: ($0.x - gridOffset.width) / gridZoom,
+                                                y: ($0.y - gridOffset.height) / gridZoom) }
+        guard let first = points.first else { return }
+        NSLog("%@", "[PLACEDIAG] NATIVE STROKE points=\(points.count) zoom=\(gridZoom) tool=\(selectedTool.rawValue)")
+        if selectedTool == .delete {
+            inspectForDeletion(at: first, cellSize: cellSize)
+            return
+        }
+        mazeStore.snapshotForUndo()
+        var visited: Set<GridCoordinate> = []
+        var previous = first
+        for to in points {
+            let steps = max(1, Int(ceil(hypot(to.x - previous.x, to.y - previous.y) / (cellSize * 0.25))))
+            for step in 1...steps {
+                let fraction = CGFloat(step) / CGFloat(steps)
+                let point = CGPoint(x: previous.x + (to.x - previous.x) * fraction,
+                                    y: previous.y + (to.y - previous.y) * fraction)
+                guard point.x >= 0, point.y >= 0, point.x < width, point.y < width else { continue }
+                let coord = GridCoordinate(row: Int(point.y / cellSize), col: Int(point.x / cellSize))
+                guard visited.insert(coord).inserted else { continue }
+                paint(at: point, cellSize: cellSize, isStart: visited.count == 1)
+            }
+            previous = to
+        }
     }
 
     @ViewBuilder
@@ -329,8 +697,19 @@ struct GridEditorView: View {
                         .fill(Color.cyan.opacity(0.35))
                         .overlay(Rectangle().stroke(Color.cyan, lineWidth: 2))
                 }
+                if let direction = wallLightDirectionToPlace, mazeStore.canPlaceWallLight(direction, at: coord) {
+                    Rectangle()
+                        .fill(Color.orange.opacity(0.35))
+                        .overlay(Rectangle().stroke(Color.orange, lineWidth: 2))
+                }
+                if let direction = photoBoothDirectionToPlace, mazeStore.canPlacePhotoBooth(direction, at: coord) {
+                    Rectangle()
+                        .fill(Color.cyan.opacity(0.35))
+                        .overlay(Rectangle().stroke(Color.cyan, lineWidth: 2))
+                }
             }
             .overlay {
+                pictureLightCellOverlay(coord, cellSize: cellSize)
                 // Same eligibility preview as the Map row above, for
                 // Picture placement -- pink to match that toolbar row.
                 if let direction = pictureDirectionToPlace, mazeStore.isOpen(coord) {
@@ -342,175 +721,8 @@ struct GridEditorView: View {
                     }
                 }
             }
-            .overlay {
-                // "You are here" — bright red, drawn under the S/E
-                // labels so both can show if they ever land on the same
-                // cell (fresh spawn, or standing right at the end
-                // marker).
-                if coord == youAreHere && youAreHereMazeID == mazeStore.currentMazeID {
-                    Rectangle()
-                        .fill(Color.red.opacity(0.55))
-                        .overlay(Rectangle().stroke(Color.red, lineWidth: 3))
-                    if let youAreHereFacing {
-                        Image(systemName: "location.north.fill")
-                            .font(.system(size: cellSize * 0.5, weight: .heavy))
-                            .foregroundStyle(.white)
-                            .shadow(color: .black.opacity(0.6), radius: 1.5)
-                            .rotationEffect(.degrees(facingRotationDegrees(youAreHereFacing)))
-                    }
-                }
-            }
-            .overlay {
-                if let kind = mazeStore.object(at: coord) {
-                    // Eddie, Sept 5: the trash can was "sooooo faint" here
-                    // -- same root cause as the ORIGINAL 3D-scene report
-                    // from earlier tonight, just never fixed on this
-                    // screen: the wastebasket emoji itself renders pale
-                    // gray/silver, and openColor (this cell's own fill)
-                    // is a medium slate-blue-gray -- two similar tones
-                    // with almost no contrast, and emoji ignore
-                    // foregroundStyle so there's no tint to fix. Same
-                    // white backing chip the destination marker just
-                    // below already uses for exactly this reason, just
-                    // applied here too now.
-                    objectGlyph(kind, active: true, size: cellSize * 0.45)
-                        .padding(3)
-                        .background(Color.white.opacity(0.85), in: Circle())
-                        .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                }
-            }
-            .overlay {
-                if let kind = mazeStore.destination(at: coord) {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            objectGlyph(kind, active: true, size: cellSize * 0.3)
-                                .padding(2)
-                                .background(Color.white.opacity(0.85), in: RoundedRectangle(cornerRadius: 4))
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.4), lineWidth: 1))
-                        }
-                        Spacer()
-                    }
-                    .padding(3)
-                }
-            }
-            .overlay {
-                if let direction = mazeStore.exitSignDirection(at: coord) {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Image(systemName: "location.north.fill")
-                                .font(.system(size: cellSize * 0.32, weight: .heavy))
-                                .foregroundStyle(Color.red)
-                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                                .padding(2)
-                                .background(Color.white.opacity(0.85), in: Circle())
-                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                            Spacer()
-                        }
-                    }
-                    .padding(3)
-                }
-            }
-            .overlay {
-                // "You Are Here" wall map -- bottom-right corner, the
-                // one spot destination (top-right) and exit sign
-                // (bottom-left) leave free.
-                if let direction = mazeStore.floorMapDirection(at: coord) {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Image(systemName: "map.fill")
-                                .font(.system(size: cellSize * 0.3, weight: .heavy))
-                                .foregroundStyle(Color.blue)
-                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                                .padding(2)
-                                .background(Color.white.opacity(0.85), in: Circle())
-                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                        }
-                    }
-                    .padding(3)
-                }
-            }
-            .overlay {
-                // Mirror uses the picture marker position; the fixtures are mutually exclusive.
-                if let direction = mazeStore.mirrorDirection(at: coord) {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Image(systemName: "person.crop.rectangle")
-                                .font(.system(size: cellSize * 0.3, weight: .heavy))
-                                .foregroundStyle(Color.cyan)
-                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                                .padding(2)
-                                .background(Color.white.opacity(0.85), in: Circle())
-                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                            Spacer()
-                        }
-                        Spacer()
-                    }
-                    .padding(3)
-                }
-            }
-            .overlay {
-                // Decorative Picture -- top-center, the one spot still
-                // free once destination/exit-sign/floor-map/spotlight
-                // claim all 4 corners and the mission sign claims dead
-                // center.
-                if let direction = mazeStore.pictureDirection(at: coord) {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Image(systemName: "photo.fill")
-                                .font(.system(size: cellSize * 0.3, weight: .heavy))
-                                .foregroundStyle(Color.pink)
-                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                                .padding(2)
-                                .background(Color.white.opacity(0.85), in: Circle())
-                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                            Spacer()
-                        }
-                        Spacer()
-                    }
-                    .padding(3)
-                }
-            }
-            .overlay {
-                // Floor Mission sign -- dead center, since all 4
-                // corners are already spoken for (destination top-right,
-                // exit sign bottom-left, floor map bottom-right,
-                // spotlight top-left). Eddie, Sept 7.
-                if let direction = mazeStore.missionSignDirection(at: coord) {
-                    Image(systemName: "signpost.right.fill")
-                        .font(.system(size: cellSize * 0.32, weight: .heavy))
-                        .foregroundStyle(Color.purple)
-                        .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                        .padding(2)
-                        .background(Color.white.opacity(0.85), in: Circle())
-                        .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                }
-            }
-            .overlay {
-                // Ceiling spotlight -- top-left corner, the one spot
-                // destination (top-right), exit sign (bottom-left), and
-                // floor map (bottom-right) leave free.
-                if mazeStore.hasSpotlight(coord) {
-                    VStack {
-                        HStack {
-                            Image(systemName: "lightbulb.fill")
-                                .font(.system(size: cellSize * 0.3, weight: .heavy))
-                                .foregroundStyle(Color(red: 0.95, green: 0.75, blue: 0.15))
-                                .padding(2)
-                                .background(Color.white.opacity(0.85), in: Circle())
-                                .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                            Spacer()
-                        }
-                        Spacer()
-                    }
-                    .padding(3)
-                }
-            }
+            
+            .overlay { EditorSpatialMarkers(store: mazeStore, coord: coord, cellSize: cellSize) }
             .overlay { roomAndMailBadge(at: coord, cellSize: cellSize) }
             .overlay {
                 // The building's one elevator -- MazeStore.startCoordinate
@@ -550,30 +762,32 @@ struct GridEditorView: View {
                         .shadow(color: .black.opacity(0.6), radius: 1.5)
                 }
             }
+            .overlay {
+                // "You are here" — white circle + red directional arrow.
+                // Deliberately the LAST overlay in the chain, so the
+                // marker renders on top of every other marker that can
+                // share its cell (elevator, start door, light, objects,
+                // signs, badges) and stays clearly visible regardless.
+                // No cell fill/highlight here: the cell keeps its normal
+                // background; this is the marker alone.
+                if coord == youAreHere && youAreHereMazeID == mazeStore.currentMazeID {
+                    if let youAreHereFacing {
+                        Image(systemName: "location.north.fill")
+                            .font(.system(size: cellSize * 0.5, weight: .heavy))
+                            .foregroundStyle(Color.red)
+                            .shadow(color: .black.opacity(0.6), radius: 1.5)
+                            .rotationEffect(.degrees(facingRotationDegrees(youAreHereFacing)))
+                            .padding(3)
+                            .background(Color.white, in: Circle())
+                            .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
+                    }
+                }
+            }
     }
 
     @ViewBuilder
     private func roomAndMailBadge(at coord: GridCoordinate, cellSize: CGFloat) -> some View {
-        if let door = mazeStore.roomDoors[coord] {
-            VStack(spacing: 0) {
-                Image(systemName: "door.left.hand.closed")
-                    .rotationEffect(.degrees(facingRotationDegrees(door.direction)))
-                Text("\(door.roomNumber)")
-            }
-            .font(.system(size: max(8, cellSize * 0.25), weight: .bold))
-            .foregroundStyle(.white)
-            .padding(2)
-            .background(Color.brown, in: RoundedRectangle(cornerRadius: 3))
-        } else if mazeStore.object(at: coord) == .envelope || mazeStore.object(at: coord) == .key {
-            VStack {
-                Spacer()
-                Text(mazeStore.itemRooms[coord].map { "\($0)" } ?? "?")
-                    .font(.system(size: max(8, cellSize * 0.28), weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 2)
-                    .background(.white)
-            }
-        } else if let direction = doorDirectionToPlace, mazeStore.isOpen(coord) {
+        if let direction = doorDirectionToPlace, mazeStore.isOpen(coord) {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             if !mazeStore.isOpen(neighbor), coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate,
                mazeStore.floorMaps[coord] == nil, mazeStore.pictures[coord] == nil, mazeStore.mirrors[coord] == nil, mazeStore.destinations[coord] == nil {
@@ -674,121 +888,73 @@ struct GridEditorView: View {
                         .background(.ultraThinMaterial, in: Circle())
                 }
 
-                Divider().frame(height: 28)
+                // SAVE button removed (Sept 20 autosave pass): every
+                // completed edit now persists itself automatically --
+                // see MazeStore.autosaveAfterVersionChange() -- so the
+                // manual "flush + mark as override" action this button
+                // used to perform on demand now happens on its own
+                // after every edit. saveCurrentFloorAsOverride() itself
+                // is kept; autosave calls it now instead of this button.
 
-                // One toggle per object kind — tapping one turns
-                // object-placing mode on for that kind (and off for any
-                // other kind, and off for wall painting); tapping the
-                // active one again goes back to wall painting. A
-                // filled/colored glyph shows which mode (if any) is
-                // active.
+                // RESET: discards this floor's saved local override (if
+                // any) and reloads it from the bundled DefaultMazes.json
+                // -- confirmed first since it can undo a SAVE, not just
+                // in-session edits. See resetCurrentFloorToDefault()'s
+                // own doc comment.
                 Button {
-                    objectKindToPlace = (objectKindToPlace == .trashCan) ? nil : .trashCan
-                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
+                    showResetConfirmation = true
                 } label: {
-                    // Was green -- Eddie, Sept 5, twice now: "extremely
-                    // difficult to see" against this same
-                    // .ultraThinMaterial circle every other toggle sits
-                    // on. White is what already reads fine everywhere
-                    // else in this app on that exact material (see
-                    // ContentView's own top-bar icon buttons), same fix
-                    // already applied to the 3D trash can pickup itself.
-                    Image(systemName: objectKindToPlace == .trashCan ? "trash.fill" : "trash")
+                    Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(objectKindToPlace == .trashCan ? Color.white : .black)
+                        .foregroundStyle(.black)
                         .frame(width: 36, height: 36)
                         .background(.ultraThinMaterial, in: Circle())
                 }
 
-                // Second Hallway Activity, Sept 5: instant-absorb cash
-                // -- same toggle mechanism as trash, just a different
-                // ObjectKind, since MazeStore.objects already supports
-                // placing any kind at any open cell with no new data
-                // model needed.
-                Button {
-                    objectKindToPlace = (objectKindToPlace == .cash100) ? nil : .cash100
-                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
-                } label: {
-                    Image(systemName: objectKindToPlace == .cash100 ? "dollarsign.circle.fill" : "dollarsign.circle")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(objectKindToPlace == .cash100 ? Color(red: 0.8, green: 0.6, blue: 0.1) : .black)
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-
-                // Fourth Hallway Activity, Sept 7: the Mail Mission --
-                // a floating envelope, picked up and delivered exactly
-                // like trash (same shared objectKindToPlace var, same
-                // paint(at:) logic below -- nothing kind-specific to
-                // add there at all).
-                Button {
-                    objectKindToPlace = (objectKindToPlace == .envelope) ? nil : .envelope
-                    if objectKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
-                } label: {
-                    Image(systemName: objectKindToPlace == .envelope ? "envelope.fill" : "envelope")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(objectKindToPlace == .envelope ? Color.white : .black)
-                        .frame(width: 36, height: 36)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
             }
 
-            // Second row, same 8 kinds -- but placing THIS toggles
-            // where a critter of that kind gets DELIVERED (a destination
-            // mounted on one of the cell's walls, chosen automatically by
-            // HallwayScene.build(fromMaze:)), not another critter to pick
-            // up. Square badge instead of a circle so the two rows read
-            // as different modes at a glance.
-            HStack(spacing: 8) {
-                Button {
-                    objectKindToPlace = objectKindToPlace == .paintBucket ? nil : .paintBucket
-                    if objectKindToPlace != nil {
-                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil
-                        destinationKindToPlace = nil; exitDirectionToPlace = nil
-                        floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
-                    }
-                } label: {
-                    Label("Paint", systemImage: "paintbrush.fill")
-                        .foregroundStyle(objectKindToPlace == .paintBucket ? Color.blue : .black)
+            HStack(spacing: 12) {
+                Button { selectTool(.walls) } label: {
+                    Label("Pencil", systemImage: "pencil")
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 12)
+                        .background(selectedTool == .walls ? Color.orange.opacity(0.25) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                 }
-                .accessibilityLabel("Place blue paint bucket")
-                Button {
-                    objectKindToPlace = objectKindToPlace == .key ? nil : .key
-                    if objectKindToPlace != nil {
-                        mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil
-                        floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false
-                    }
-                } label: {
-                    Label("Key", systemImage: "key.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(objectKindToPlace == .key ? Color.orange : .black)
+                .accessibilityAddTraits(selectedTool == .walls ? .isSelected : [])
+                Button { selectTool(.delete) } label: {
+                    Label("Delete", systemImage: "trash")
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, 12)
+                        .background(selectedTool == .delete ? Color.red.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
                 }
+                .accessibilityAddTraits(selectedTool == .delete ? .isSelected : [])
+            }
+            toolSelector
+            if selectedTool == .walls {
+                HStack(spacing: 6) {
+                    Image(systemName: "hand.draw.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.black.opacity(0.5))
+                    Text("Wall paint: drag to open cells, drag across an open cell to erase it.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(selectedTool == .delete
+                     ? "Tap a cell to choose which contents to delete. Floor geometry stays unchanged."
+                     : "Tool stays active — tap more cells to place. Choose Pencil to edit floor geometry.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
-                Text("Chute:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                Button {
-                    destinationKindToPlace = (destinationKindToPlace == .trashCan) ? nil : .trashCan
-                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
-                } label: {
-                    Image(systemName: destinationKindToPlace == .trashCan ? "arrow.down.square.fill" : "arrow.down.square")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(destinationKindToPlace == .trashCan ? Color.blue : .black)
-                        .frame(width: 32, height: 32)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                }
-                Button {
-                    destinationKindToPlace = (destinationKindToPlace == .envelope) ? nil : .envelope
-                    if destinationKindToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
-                } label: {
-                    Image(systemName: destinationKindToPlace == .envelope ? "envelope.fill" : "envelope")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(destinationKindToPlace == .envelope ? Color(red: 0.55, green: 0.42, blue: 0.22) : .black)
-                        .frame(width: 32, height: 32)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
-                }
+            if selectedTool == .pickup {
+                pickupControls
+            }
+
+            if selectedTool == .chute {
+                chuteControls
             }
 
             // Exit Sign placement -- manual now (see exitDirectionToPlace's
@@ -797,21 +963,25 @@ struct GridEditorView: View {
             // that gets placed," so picking a different direction while
             // already in placement mode just repoints future taps without
             // a separate on/off toggle to fuss with.
-            HStack(spacing: 8) {
-                Text("Exit:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                ForEach(Direction.allCases, id: \.self) { direction in
-                    Button {
-                        exitDirectionToPlace = (exitDirectionToPlace == direction) ? nil : direction
-                        if exitDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
-                    } label: {
-                        Image(systemName: "location.north.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(exitDirectionToPlace == direction ? Color.red : .black)
-                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                            .frame(width: 28, height: 28)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+            if selectedTool == .exit {
+                HStack(spacing: 8) {
+                    Text("Exit:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(Direction.allCases, id: \.self) { direction in
+                        Button {
+                            let wasActive = exitDirectionToPlace == direction
+                            clearPlacementModes()
+                            exitDirectionToPlace = wasActive ? nil : direction
+                            selectedTool = exitDirectionToPlace == nil ? .walls : .exit
+                        } label: {
+                            Image(systemName: "location.north.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(exitDirectionToPlace == direction ? Color.red : .black)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
                     }
                 }
             }
@@ -823,21 +993,25 @@ struct GridEditorView: View {
             // different modes at a glance. Unlike an Exit Sign the wall
             // it hangs on has to actually BE a wall -- paint(at:) below
             // checks that before ever calling placeFloorMap.
-            HStack(spacing: 8) {
-                Text("Map:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                ForEach(Direction.allCases, id: \.self) { direction in
-                    Button {
-                        floorMapDirectionToPlace = (floorMapDirectionToPlace == direction) ? nil : direction
-                        if floorMapDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; pictureDirectionToPlace = nil; placingSpotlight = false }
-                    } label: {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(floorMapDirectionToPlace == direction ? Color.blue : .black)
-                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                            .frame(width: 28, height: 28)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+            if selectedTool == .map {
+                HStack(spacing: 8) {
+                    Text("Map:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(Direction.allCases, id: \.self) { direction in
+                        Button {
+                            let wasActive = floorMapDirectionToPlace == direction
+                            clearPlacementModes()
+                            floorMapDirectionToPlace = wasActive ? nil : direction
+                            selectedTool = floorMapDirectionToPlace == nil ? .walls : .map
+                        } label: {
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(floorMapDirectionToPlace == direction ? Color.blue : .black)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
                     }
                 }
             }
@@ -852,72 +1026,111 @@ struct GridEditorView: View {
             // No kind/image to pick -- HallwayScene.build(fromMaze:)
             // grabs a random bundled photo at build time, this row only
             // ever decides where.
-            HStack(spacing: 8) {
-                Text("Picture:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                ForEach(Direction.allCases, id: \.self) { direction in
-                    Button {
-                        pictureDirectionToPlace = (pictureDirectionToPlace == direction) ? nil : direction
-                        if pictureDirectionToPlace != nil { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false }
-                    } label: {
-                        Image(systemName: "photo.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(pictureDirectionToPlace == direction ? Color.pink : .black)
-                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                            .frame(width: 28, height: 28)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+            if selectedTool == .picture {
+                HStack(spacing: 8) {
+                    Text("Picture:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(Direction.allCases, id: \.self) { direction in
+                        Button {
+                            let wasActive = pictureDirectionToPlace == direction
+                            clearPlacementModes()
+                            pictureDirectionToPlace = wasActive ? nil : direction
+                            selectedTool = pictureDirectionToPlace == nil ? .walls : .picture
+                        } label: {
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(pictureDirectionToPlace == direction ? Color.pink : .black)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                    Toggle(isOn: Binding(
+                        get: { mazeStore.picturesUseCameraRoll },
+                        set: { mazeStore.setPicturesUseCameraRoll($0) }
+                    )) {
+                        Text(mazeStore.picturesUseCameraRoll ? "Camera roll" : "Folder")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.black)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .toggleStyle(.switch)
+                    .tint(.pink)
+                    .fixedSize()
+                    .accessibilityLabel("Use camera roll for this floor's pictures")
+
+                }
+                // Picture Size (Sept 21) -- Small/Standard/Poster/Full
+                // Length only; Mural is deliberately not offered here
+                // yet (see PictureSize's own doc comment). Re-painting
+                // an already-placed picture with a different size
+                // selected here re-authors it in place, same
+                // "whatever's currently selected wins" convention the
+                // Light tool's brightnessControls already uses.
+                HStack(spacing: 8) {
+                    Text("Size:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(PictureSize.allCases, id: \.self) { size in
+                        Button {
+                            session.pictureSizeToPlace = size
+                        } label: {
+                            Text(size.displayName)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(pictureSizeToPlace == size ? Color.pink : .black)
+                                .frame(minWidth: 44, minHeight: 28)
+                                .padding(.horizontal, 6)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .accessibilityLabel("Picture size \(size.displayName)")
                     }
                 }
-                Toggle(isOn: Binding(
-                    get: { mazeStore.picturesUseCameraRoll },
-                    set: { mazeStore.setPicturesUseCameraRoll($0) }
-                )) {
-                    Text(mazeStore.picturesUseCameraRoll ? "Camera roll" : "Folder")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.black)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .toggleStyle(.switch)
-                .tint(.pink)
-                .fixedSize()
-                .accessibilityLabel("Use camera roll for this floor's pictures")
-
             }
 
-            mirrorControls
+            if selectedTool == .mirror {
+                mirrorControls
+            }
 
-            HStack(spacing: 8) {
-                Text("Door:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                ForEach(Direction.allCases, id: \.self) { direction in
-                    Button {
-                        doorDirectionToPlace = doorDirectionToPlace == direction ? nil : direction
-                        if doorDirectionToPlace != nil {
-                            mirrorDirectionToPlace = nil; windowRoomDirectionToPlace = nil
-                            objectKindToPlace = nil; destinationKindToPlace = nil
-                            exitDirectionToPlace = nil; floorMapDirectionToPlace = nil
-                            pictureDirectionToPlace = nil; placingSpotlight = false
+            if selectedTool == .light && lightTypeToPlace == .wall {
+                wallLightControls
+            }
+
+            // Photo Booth placement (authoring only -- see MazeStore's
+            // canPlacePhotoBooth/placePhotoBooth). Same two-stage shape as
+            // the Light tool: a direction row picks the wall the booth
+            // mounts on and activates the tool (mirrors mirrorControls'
+            // toggle-button pattern), then, once active, a second row
+            // picks which of the three EXISTING PhotoBoothExpression cases
+            // the booth prompts for -- no new expressions added here.
+            if selectedTool == .photoBooth {
+                photoBoothControls
+            }
+            if selectedTool == .photoBooth {
+                photoBoothExpressionControls
+            }
+
+            if selectedTool == .door {
+                HStack(spacing: 8) {
+                    Text("Door:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(Direction.allCases, id: \.self) { direction in
+                        Button {
+                            let wasActive = doorDirectionToPlace == direction
+                            clearPlacementModes()
+                            doorDirectionToPlace = wasActive ? nil : direction
+                            selectedTool = doorDirectionToPlace == nil ? .walls : .door
+                        } label: {
+                            Image(systemName: "door.left.hand.closed")
+                                .foregroundStyle(doorDirectionToPlace == direction ? Color.brown : .black)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                         }
-                    } label: {
-                        Image(systemName: "door.left.hand.closed")
-                            .foregroundStyle(doorDirectionToPlace == direction ? Color.brown : .black)
-                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                            .frame(width: 28, height: 28)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        .accessibilityLabel("Place door facing \(direction.rawValue)")
                     }
-                    .accessibilityLabel("Place door facing \(direction.rawValue)")
-                }
-                if objectKindToPlace == .envelope || objectKindToPlace == .key {
-                    Picker("To room", selection: $mailRoomToPlace) {
-                        Text("Auto address").tag(Int?.none)
-                        ForEach(mazeStore.roomNumbers, id: \.self) { room in
-                            Text("Rm \(room)").tag(Int?.some(room))
-                        }
-                    }
-                    .tint(.brown)
                 }
             }
 
@@ -930,48 +1143,82 @@ struct GridEditorView: View {
             // on an interior cell -- the preview outline above is
             // what actually surfaces that rejection to the person
             // painting, same as every other placement mode here).
-            HStack(spacing: 8) {
-                Text("Window Room:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                ForEach(Direction.allCases, id: \.self) { direction in
-                    Button {
-                        windowRoomDirectionToPlace = windowRoomDirectionToPlace == direction ? nil : direction
-                        if windowRoomDirectionToPlace != nil {
-                            mirrorDirectionToPlace = nil; doorDirectionToPlace = nil
-                            objectKindToPlace = nil; destinationKindToPlace = nil
-                            exitDirectionToPlace = nil; floorMapDirectionToPlace = nil
-                            pictureDirectionToPlace = nil; placingSpotlight = false
+            if selectedTool == .windowRoom {
+                HStack(spacing: 8) {
+                    Text("Window Room:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(Direction.allCases, id: \.self) { direction in
+                        Button {
+                            let wasActive = windowRoomDirectionToPlace == direction
+                            clearPlacementModes()
+                            windowRoomDirectionToPlace = wasActive ? nil : direction
+                            selectedTool = windowRoomDirectionToPlace == nil ? .walls : .windowRoom
+                        } label: {
+                            Image(systemName: "macwindow")
+                                .foregroundStyle(windowRoomDirectionToPlace == direction ? Color.blue : .black)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                         }
-                    } label: {
-                        Image(systemName: "macwindow")
-                            .foregroundStyle(windowRoomDirectionToPlace == direction ? Color.blue : .black)
-                            .rotationEffect(.degrees(facingRotationDegrees(direction)))
-                            .frame(width: 28, height: 28)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        .accessibilityLabel("Place Window Room door facing \(direction.rawValue)")
                     }
-                    .accessibilityLabel("Place Window Room door facing \(direction.rawValue)")
                 }
             }
 
-            // Ceiling spotlight placement (Eddie, Sept 6). Plain on/off
-            // toggle, same shape as the Chute row above -- no direction
-            // to pick since this hangs dead-center in the ceiling, not
-            // on a wall.
-            HStack(spacing: 8) {
-                Text("Light:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.6))
-                Button {
-                    placingSpotlight.toggle()
-                    if placingSpotlight { mirrorDirectionToPlace = nil; doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; objectKindToPlace = nil; destinationKindToPlace = nil; exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; pictureDirectionToPlace = nil }
-                } label: {
-                    Image(systemName: placingSpotlight ? "lightbulb.fill" : "lightbulb")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(placingSpotlight ? Color(red: 0.95, green: 0.75, blue: 0.15) : .black)
-                        .frame(width: 32, height: 32)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+            // Light source placement (Suzanimator lighting pass, Sept 19) --
+            // pick WHICH existing physical light to paint, then tap
+            // cells to place it. Only REAL runtime sources are listed:
+            // ceiling (the omni fixture under the ceiling slab, the
+            // original Sept 6 spotlight) and fire (the animated flame +
+            // omni glow). Both sit centered in their cell, so there's
+            // no direction axis -- the type choice IS the whole
+            // configuration, per the What/How/Where editor rule.
+            if selectedTool == .light {
+                HStack(spacing: 8) {
+                    Text("Light:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(EditorLightType.allCases, id: \.self) { lightType in
+                        Button {
+                            let wasActive = lightTypeToPlace == lightType
+                            clearPlacementModes()
+                            lightTypeToPlace = wasActive ? nil : lightType
+                            selectedTool = lightTypeToPlace == nil ? .walls : .light
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: lightType.iconName)
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text(lightType.displayName)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(lightTypeToPlace == lightType ? Color.orange : .black)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .padding(.horizontal, 6)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .accessibilityLabel("Place \(lightType.displayName) light")
+                    }
                 }
+            }
+
+            if selectedTool == .light && lightTypeToPlace == .fluorescent {
+                Picker("Orientation", selection: $session.fluorescentOrientation) {
+                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                        Text(orientation.title).tag(orientation)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 300)
+            }
+
+            if selectedTool == .light && lightTypeToPlace == .picture {
+                pictureLightDirectionControls
+            }
+
+            if selectedTool == .light {
+                brightnessControls
             }
 
             // Floor Mission sign -- Eddie, Sept 7: "you no longer have to
@@ -1024,7 +1271,7 @@ struct GridEditorView: View {
     /// nothing new was built for any of that); then dismiss(), so the map
     /// screen closes and the 3D scene is what's on screen right after.
     private var devFloorJumpRow: some View {
-        HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Menu {
                 ForEach(1...mazeStore.floorCount, id: \.self) { floor in
                     Button("Floor \(floor)") {
@@ -1058,6 +1305,105 @@ struct GridEditorView: View {
     }
     #endif
 
+    private func inspectForDeletion(at location: CGPoint, cellSize: CGFloat) {
+        let col = Int(location.x / cellSize)
+        let row = Int(location.y / cellSize)
+        guard col >= 0, col < columns, row >= 0, row < rows else { return }
+        let coord = GridCoordinate(row: row, col: col)
+        let items = mazeStore.removableContent(at: coord)
+        guard !items.isEmpty else { return }
+        deletionRequest = CellDeletionRequest(floorID: mazeStore.currentMazeID, coord: coord, items: items)
+    }
+
+
+    private var pictureLightDirectionControls: some View {
+        HStack(spacing: 8) {
+            Text("Direction:").font(.caption)
+            ForEach([Direction.north, .east, .south, .west], id: \.self) { direction in
+                Button {
+                    session.pictureLightDirection = direction
+                } label: {
+                    Text(String(direction.rawValue.prefix(1)).uppercased())
+                        .frame(width: 36, height: 36)
+                        .foregroundStyle(session.pictureLightDirection == direction ? Color.orange : .primary)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .accessibilityLabel("Picture Light \(direction.rawValue)")
+                .accessibilityAddTraits(session.pictureLightDirection == direction ? .isSelected : [])
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pictureLightCellOverlay(_ coord: GridCoordinate, cellSize: CGFloat) -> some View {
+        if selectedTool == .light, lightTypeToPlace == .picture,
+           let direction = session.pictureLightDirection,
+           mazeStore.canPlacePictureLight(direction, at: coord) {
+            Rectangle().fill(Color.orange.opacity(0.3))
+                .overlay(Rectangle().stroke(Color.orange, lineWidth: 2))
+        }
+    }
+
+
+    private var brightnessControls: some View {
+        // Sept 21 (0-10 brightness expansion): ceiling/fluorescent now
+        // author over 0...10 (0 = OFF), wall/fire/picture stay at 1...5 --
+        // the range shown here follows whichever light type is currently
+        // selected (AuthoredLightKind.levelRange is the single source of
+        // truth for that split; see LightBrightness.swift). No type picked
+        // yet falls back to the original 1...5, same as before this change.
+        let range = lightTypeToPlace?.authoredKind.levelRange ?? 1...5
+        return HStack(spacing: 8) {
+            Text("Brightness:")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.6))
+            // 10-wide (ceiling/fluorescent) no longer reliably fits every
+            // device width the way the original 5-wide row always did --
+            // horizontal scroll keeps every level reachable without
+            // changing how this looks anywhere it already fit.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(range), id: \.self) { level in
+                        Button {
+                            session.brightnessToPlace = level
+                        } label: {
+                            Text(String(level))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(session.brightnessToPlace == level ? Color.orange : .black)
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .accessibilityLabel("Brightness \(level)")
+                        .accessibilityAddTraits(session.brightnessToPlace == level ? .isSelected : [])
+                    }
+                }
+            }
+        }
+    }
+
+    private var wallLightControls: some View {
+        HStack(spacing: 8) {
+            Text("Direction:")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.6))
+            ForEach([Direction.north, .east, .south, .west], id: \.self) { direction in
+                Button {
+                    clearPlacementModes()
+                    wallLightDirectionToPlace = direction
+                    lightTypeToPlace = .wall
+                    selectedTool = .light
+                } label: {
+                    Text(String(direction.rawValue.prefix(1)).uppercased())
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(wallLightDirectionToPlace == direction ? Color.orange : .black)
+                        .frame(width: 28, height: 28)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .accessibilityLabel("Place wall light facing \(direction.rawValue)")
+            }
+        }
+    }
+
     private var mirrorControls: some View {
         HStack(spacing: 8) {
             Text("Mirror:")
@@ -1065,12 +1411,10 @@ struct GridEditorView: View {
                 .foregroundStyle(.black.opacity(0.6))
             ForEach(Direction.allCases, id: \.self) { direction in
                 Button {
-                    mirrorDirectionToPlace = mirrorDirectionToPlace == direction ? nil : direction
-                    if mirrorDirectionToPlace != nil {
-                        doorDirectionToPlace = nil; windowRoomDirectionToPlace = nil; pictureDirectionToPlace = nil
-                        objectKindToPlace = nil; destinationKindToPlace = nil
-                        exitDirectionToPlace = nil; floorMapDirectionToPlace = nil; placingSpotlight = false
-                    }
+                    let wasActive = mirrorDirectionToPlace == direction
+                    clearPlacementModes()
+                    mirrorDirectionToPlace = wasActive ? nil : direction
+                    selectedTool = mirrorDirectionToPlace == nil ? .walls : .mirror
                 } label: {
                     Image(systemName: "person.crop.rectangle")
                         .foregroundStyle(mirrorDirectionToPlace == direction ? Color.cyan : .black)
@@ -1079,6 +1423,246 @@ struct GridEditorView: View {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .accessibilityLabel("Place mirror facing \(direction.rawValue)")
+            }
+        }
+    }
+
+    private var photoBoothControls: some View {
+        HStack(spacing: 8) {
+            Text("Photo Booth:")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.6))
+            ForEach(Direction.allCases, id: \.self) { direction in
+                Button {
+                    let wasActive = photoBoothDirectionToPlace == direction
+                    clearPlacementModes()
+                    photoBoothDirectionToPlace = wasActive ? nil : direction
+                    selectedTool = photoBoothDirectionToPlace == nil ? .walls : .photoBooth
+                } label: {
+                    Image(systemName: "camera.fill")
+                        .foregroundStyle(photoBoothDirectionToPlace == direction ? Color.cyan : .black)
+                        .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                        .frame(width: 28, height: 28)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .accessibilityLabel("Place photo booth facing \(direction.rawValue)")
+            }
+        }
+    }
+
+    /// Second-stage row, shown only once a direction has been picked above
+    /// (same "pick what, then pick how" shape as the Light tool's type row
+    /// + brightness row). Only the three EXISTING PhotoBoothExpression
+    /// cases are offered -- this is authoring which existing prompt the
+    /// booth uses, not adding new prompts.
+    private var photoBoothExpressionControls: some View {
+        HStack(spacing: 8) {
+            Text("Expression:")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.6))
+            ForEach([PhotoBoothExpression.smile, .mouthOpen, .eyebrowsRaised], id: \.self) { expression in
+                Button {
+                    photoBoothExpressionToPlace = expression
+                } label: {
+                    Text(photoBoothExpressionShortLabel(expression))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(photoBoothExpressionToPlace == expression ? Color.cyan : .black)
+                        .frame(minWidth: 44, minHeight: 28)
+                        .padding(.horizontal, 6)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .accessibilityLabel("Photo booth expression \(expression.rawValue)")
+            }
+        }
+    }
+
+    private func photoBoothExpressionShortLabel(_ expression: PhotoBoothExpression) -> String {
+        switch expression {
+        case .smile: return "Smile"
+        case .mouthOpen: return "Mouth Open"
+        case .eyebrowsRaised: return "Eyebrows"
+        }
+    }
+
+    /// The single tool switcher for the lower bar: a compact chip showing
+    /// the current placement tool; tapping it opens a menu of every tool
+    /// family. Picking a DIFFERENT tool clears any in-progress placement
+    /// mode and shows that tool's panel; picking the same tool again is a
+    /// no-op, so an active brush survives an accidental re-pick.
+    private var toolSelector: some View {
+        Menu {
+            ForEach(EditorTool.allCases.filter { $0 != .walls && $0 != .delete }) { tool in
+                Button {
+                    selectTool(tool)
+                } label: {
+                    if tool == selectedTool {
+                        Label(tool.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(tool.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: selectedTool.iconName)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(selectedTool == .walls || selectedTool == .delete ? "Choose Object" : "Object: \(selectedTool.displayName)")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(.black)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.black.opacity(0.55), lineWidth: 1.5))
+        }
+    }
+
+    /// Clears every placement mode at once -- the mutually-exclusive
+    /// cascade each tool-toggle used to hand-roll inline. Still the same
+    /// @State vars paint(at:) reads; selectedTool is synced separately by
+    /// the callers so the two can never disagree.
+    private func clearPlacementModes() {
+        NSLog("%@", "[PLACEDIAG] CLEAR BRUSH tool=\(selectedTool.rawValue) object=\(String(describing: objectKindToPlace))")
+        objectKindToPlace = nil
+        destinationKindToPlace = nil
+        exitDirectionToPlace = nil
+        floorMapDirectionToPlace = nil
+        pictureDirectionToPlace = nil
+        mirrorDirectionToPlace = nil
+        wallLightDirectionToPlace = nil
+        doorDirectionToPlace = nil
+        windowRoomDirectionToPlace = nil
+        lightTypeToPlace = nil
+        session.pictureLightDirection = nil
+        photoBoothDirectionToPlace = nil
+    }
+
+    /// Switches which tool panel the lower bar shows. Moving to a
+    /// different tool also clears any in-progress placement mode; picking
+    /// the currently-visible tool does nothing, so a brush stays armed.
+    private func selectTool(_ tool: EditorTool) {
+        guard tool != selectedTool else { return }
+        clearPlacementModes()
+        selectedTool = tool
+    }
+
+    /// Pickup-object placement: the former trash/cash/envelope/Paint/Key
+    /// toggles, consolidated under one tool. Envelope/Key additionally
+    /// show the destination-room picker so a placed letter carries an
+    /// address exactly as before.
+    private var pickupControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Button {
+                    let wasActive = objectKindToPlace == .trashCan
+                    clearPlacementModes()
+                    objectKindToPlace = wasActive ? nil : .trashCan
+                    selectedTool = objectKindToPlace == nil ? .walls : .pickup
+                } label: {
+                    Image(systemName: objectKindToPlace == .trashCan ? "trash.fill" : "trash")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(objectKindToPlace == .trashCan ? Color.white : .black)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+
+                Button {
+                    let wasActive = objectKindToPlace == .cash100
+                    clearPlacementModes()
+                    objectKindToPlace = wasActive ? nil : .cash100
+                    selectedTool = objectKindToPlace == nil ? .walls : .pickup
+                } label: {
+                    Image(systemName: objectKindToPlace == .cash100 ? "dollarsign.circle.fill" : "dollarsign.circle")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(objectKindToPlace == .cash100 ? Color(red: 0.8, green: 0.6, blue: 0.1) : .black)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+
+                Button {
+                    let wasActive = objectKindToPlace == .envelope
+                    clearPlacementModes()
+                    objectKindToPlace = wasActive ? nil : .envelope
+                    selectedTool = objectKindToPlace == nil ? .walls : .pickup
+                } label: {
+                    Image(systemName: objectKindToPlace == .envelope ? "envelope.fill" : "envelope")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(objectKindToPlace == .envelope ? Color.white : .black)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+
+                Button {
+                    let wasActive = objectKindToPlace == .paintBucket
+                    clearPlacementModes()
+                    objectKindToPlace = wasActive ? nil : .paintBucket
+                    selectedTool = objectKindToPlace == nil ? .walls : .pickup
+                } label: {
+                    Label("Paint", systemImage: "paintbrush.fill")
+                        .foregroundStyle(objectKindToPlace == .paintBucket ? Color.blue : .black)
+                }
+                .accessibilityLabel("Place blue paint bucket")
+
+                Button {
+                    let wasActive = objectKindToPlace == .key
+                    clearPlacementModes()
+                    objectKindToPlace = wasActive ? nil : .key
+                    selectedTool = objectKindToPlace == nil ? .walls : .pickup
+                } label: {
+                    Label("Key", systemImage: "key.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(objectKindToPlace == .key ? Color.orange : .black)
+                }
+            }
+
+            if objectKindToPlace == .envelope || objectKindToPlace == .key {
+                Picker("To room", selection: $session.mailRoomToPlace) {
+                    Text("Auto address").tag(Int?.none)
+                    ForEach(mazeStore.roomNumbers, id: \.self) { room in
+                        Text("Rm \(room)").tag(Int?.some(room))
+                    }
+                }
+                .frame(maxWidth: 280)
+                .tint(.brown)
+            }
+        }
+    }
+
+    /// Delivery-chute placement: the former Chute row, consolidated under
+    /// one tool -- place a surface a matching carried critter delivers
+    /// onto.
+    private var chuteControls: some View {
+        HStack(spacing: 8) {
+            Text("Chute:")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.6))
+            Button {
+                let wasActive = destinationKindToPlace == .trashCan
+                clearPlacementModes()
+                destinationKindToPlace = wasActive ? nil : .trashCan
+                selectedTool = destinationKindToPlace == nil ? .walls : .chute
+            } label: {
+                Image(systemName: destinationKindToPlace == .trashCan ? "arrow.down.square.fill" : "arrow.down.square")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(destinationKindToPlace == .trashCan ? Color.blue : .black)
+                    .frame(width: 32, height: 32)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+            }
+            Button {
+                let wasActive = destinationKindToPlace == .envelope
+                clearPlacementModes()
+                destinationKindToPlace = wasActive ? nil : .envelope
+                selectedTool = destinationKindToPlace == nil ? .walls : .chute
+            } label: {
+                Image(systemName: destinationKindToPlace == .envelope ? "envelope.fill" : "envelope")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(destinationKindToPlace == .envelope ? Color(red: 0.55, green: 0.42, blue: 0.22) : .black)
+                    .frame(width: 32, height: 32)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
             }
         }
     }
@@ -1134,6 +1718,7 @@ struct GridEditorView: View {
     }
 
     private func paint(at location: CGPoint, cellSize: CGFloat, isStart: Bool) {
+        NSLog("%@", "[PLACEDIAG] PAINT ENTER point=\(location) isStart=\(isStart) tool=\(selectedTool.rawValue) object=\(String(describing: objectKindToPlace)) picture=\(String(describing: pictureDirectionToPlace)) door=\(String(describing: doorDirectionToPlace)) window=\(String(describing: windowRoomDirectionToPlace))")
         guard cellSize > 0 else { return }
         let col = Int(location.x / cellSize)
         let row = Int(location.y / cellSize)
@@ -1163,23 +1748,33 @@ struct GridEditorView: View {
         }
 
         if let kind = objectKindToPlace {
+            // TEMPORARY DIAGNOSTIC (Eddie, Sept 20, object-placement trace) -- remove after root cause is found.
+            NSLog("%@", "[PLACEDIAG] paint(): objectKindToPlace branch ENTERED, kind=\(kind), coord=\(coord), isOpen=\(mazeStore.isOpen(coord)), isStart=\(isStart), currentObjectAtCoord=\(String(describing: mazeStore.object(at: coord)))")
             // Objects only make sense on real hallway cells — dragging
             // across a wall cell in this mode just does nothing there.
-            guard mazeStore.isOpen(coord) else { return }
+            guard mazeStore.isOpen(coord) else {
+                NSLog("%@", "[PLACEDIAG] paint(): coord \(coord) is NOT open -- rejected, nothing placed")
+                return
+            }
             if isStart {
                 // Starting on a cell that already holds exactly this
                 // kind begins an erase stroke; anything else (empty, or
                 // a different kind) begins a place-this-kind stroke.
                 paintMode = mazeStore.object(at: coord) != kind || ((kind == .envelope || kind == .key) && mailRoomToPlace != nil && mazeStore.itemRooms[coord] != mailRoomToPlace)
             }
+            NSLog("%@", "[PLACEDIAG] paint(): paintMode=\(paintMode) for coord=\(coord) kind=\(kind)")
             if paintMode {
                 if mazeStore.object(at: coord) != kind {
                     mazeStore.placeObject(kind, at: coord)
+                    NSLog("%@", "[PLACEDIAG] paint(): called mazeStore.placeObject(\(kind), at: \(coord)) -- now reads back as \(String(describing: mazeStore.object(at: coord)))")
+                } else {
+                    NSLog("%@", "[PLACEDIAG] paint(): SKIPPED placeObject because mazeStore.object(at: coord) already == kind")
                 }
                 if kind == .envelope || kind == .key, let room = mailRoomToPlace { mazeStore.setItemRoom(room, at: coord) }
             } else {
                 if mazeStore.object(at: coord) != nil {
                     mazeStore.removeObject(at: coord)
+                    NSLog("%@", "[PLACEDIAG] paint(): paintMode=false -- REMOVED object at \(coord)")
                 }
             }
             return
@@ -1277,7 +1872,56 @@ struct GridEditorView: View {
             return
         }
 
+        if let direction = wallLightDirectionToPlace {
+            // Paint and erase wall-top lights on solid walls, exactly like
+            // mirrors: the fixture hangs on the wall face, so the cell
+            // must be open and the neighbor in `direction` must be solid.
+            guard mazeStore.isOpen(coord) else { return }
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard !mazeStore.isOpen(neighbor) else { return }
+            if isStart {
+                paintMode = (mazeStore.wallLightDirection(at: coord) != direction || mazeStore.lightBrightnessLevel(.wall, at: coord) != session.brightnessToPlace)
+            }
+            if paintMode {
+                if (mazeStore.wallLightDirection(at: coord) != direction || mazeStore.lightBrightnessLevel(.wall, at: coord) != session.brightnessToPlace) {
+                    mazeStore.placeWallLight(direction, at: coord, brightness: session.brightnessToPlace)
+                }
+            } else {
+                if mazeStore.wallLightDirection(at: coord) != nil {
+                    mazeStore.removeWallLight(at: coord)
+                }
+            }
+            return
+        }
+
+        if let direction = photoBoothDirectionToPlace {
+            // Paint and erase photo booths on solid walls, exactly like
+            // wall lights above: the booth hangs on the wall face, so the
+            // cell must be open and the neighbor in `direction` must be
+            // solid. Re-authoring the expression at an already-placed
+            // coord (direction unchanged) goes through placePhotoBooth's
+            // own bypass; changing direction at an occupied coord is not
+            // supported here, matching placeWallLight's own limitation.
+            guard mazeStore.isOpen(coord) else { return }
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard !mazeStore.isOpen(neighbor) else { return }
+            if isStart {
+                paintMode = (mazeStore.photoBoothDirection(at: coord) != direction || mazeStore.photoBooths[coord]?.expression != photoBoothExpressionToPlace)
+            }
+            if paintMode {
+                if (mazeStore.photoBoothDirection(at: coord) != direction || mazeStore.photoBooths[coord]?.expression != photoBoothExpressionToPlace) {
+                    mazeStore.placePhotoBooth(direction, expression: photoBoothExpressionToPlace, at: coord)
+                }
+            } else {
+                if mazeStore.photoBoothDirection(at: coord) != nil {
+                    mazeStore.deleteContent([.photoBooths], at: coord)
+                }
+            }
+            return
+        }
+
         if let direction = pictureDirectionToPlace {
+            NSLog("%@", "[PLACEDIAG] PICTURE BRANCH coord=\(coord) direction=\(direction) open=\(mazeStore.isOpen(coord)) neighborOpen=\(mazeStore.isOpen(GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)))")
             // Same open-cell, place-vs-erase, wall-required shape as
             // floor maps above -- a picture hangs ON a wall too, so the
             // neighbor in `direction` has to actually be closed.
@@ -1285,11 +1929,12 @@ struct GridEditorView: View {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !mazeStore.isOpen(neighbor) else { return }
             if isStart {
-                paintMode = mazeStore.pictureDirection(at: coord) != direction
+                paintMode = (mazeStore.pictureDirection(at: coord) != direction || mazeStore.pictureSize(at: coord) != pictureSizeToPlace)
             }
             if paintMode {
-                if mazeStore.pictureDirection(at: coord) != direction {
-                    mazeStore.placePicture(direction, at: coord)
+                if (mazeStore.pictureDirection(at: coord) != direction || mazeStore.pictureSize(at: coord) != pictureSizeToPlace) {
+                    NSLog("%@", "[PLACEDIAG] CALL placePicture coord=\(coord) direction=\(direction)")
+                    mazeStore.placePicture(direction, at: coord, size: pictureSizeToPlace)
                 }
             } else {
                 if mazeStore.pictureDirection(at: coord) != nil {
@@ -1299,26 +1944,62 @@ struct GridEditorView: View {
             return
         }
 
-        if placingSpotlight {
+        if let lightType = lightTypeToPlace {
             // Same open-cell-only, place-vs-erase shape as the Chute
-            // toggle -- no direction/neighbor-wall check needed since a
-            // ceiling light doesn't mount on anything.
+            // toggle -- neither a ceiling light nor a fire mounts on a
+            // wall, so there's no direction/neighbor check. Ceiling =
+            // the existing omni fixture; fire = the existing flame +
+            // omni glow (both persisted through the same fires/spotlights
+            // fields the runtime already builds from).
             guard mazeStore.isOpen(coord) else { return }
-            if isStart {
-                paintMode = !mazeStore.hasSpotlight(coord)
-            }
-            if paintMode {
-                if !mazeStore.hasSpotlight(coord) {
-                    mazeStore.placeSpotlight(at: coord)
+            switch lightType {
+            case .wall:
+                return // The existing directional Wall Light placement branch above handles this.
+            case .picture:
+                guard let direction = session.pictureLightDirection,
+                      mazeStore.canPlacePictureLight(direction, at: coord) else { return }
+                mazeStore.placePictureLight(direction, at: coord, brightness: session.brightnessToPlace)
+            case .fluorescent:
+                let orientation = session.fluorescentOrientation
+                if isStart {
+                    paintMode = mazeStore.fluorescentLights[coord] != orientation || mazeStore.lightBrightnessLevel(.fluorescent, at: coord) != session.brightnessToPlace
                 }
-            } else {
-                if mazeStore.hasSpotlight(coord) {
-                    mazeStore.removeSpotlight(at: coord)
+                if paintMode {
+                    mazeStore.placeFluorescent(orientation, at: coord, brightness: session.brightnessToPlace)
+                } else {
+                    mazeStore.removeFluorescent(at: coord)
+                }
+            case .ceiling:
+                if isStart {
+                    paintMode = (!mazeStore.hasSpotlight(coord) || mazeStore.lightBrightnessLevel(.ceiling, at: coord) != session.brightnessToPlace)
+                }
+                if paintMode {
+                    if (!mazeStore.hasSpotlight(coord) || mazeStore.lightBrightnessLevel(.ceiling, at: coord) != session.brightnessToPlace) {
+                        mazeStore.placeSpotlight(at: coord, brightness: session.brightnessToPlace)
+                    }
+                } else {
+                    if mazeStore.hasSpotlight(coord) {
+                        mazeStore.removeSpotlight(at: coord)
+                    }
+                }
+            case .fire:
+                if isStart {
+                    paintMode = (!mazeStore.hasFire(coord) || mazeStore.lightBrightnessLevel(.fire, at: coord) != session.brightnessToPlace)
+                }
+                if paintMode {
+                    if (!mazeStore.hasFire(coord) || mazeStore.lightBrightnessLevel(.fire, at: coord) != session.brightnessToPlace) {
+                        mazeStore.placeFire(at: coord, brightness: session.brightnessToPlace)
+                    }
+                } else {
+                    if mazeStore.hasFire(coord) {
+                        mazeStore.removeFire(at: coord)
+                    }
                 }
             }
             return
         }
 
+        guard selectedTool == .walls else { return }
         if isStart {
             paintMode = !mazeStore.isOpen(coord)
         }

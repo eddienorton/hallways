@@ -115,7 +115,12 @@ struct MirrorSurfaceTarget {
 /// Owns only a live preview: no microphone input, still capture, or recording output.
 @MainActor
 final class MirrorCamera {
-    private let surfaces: [MirrorSurfaceTarget]
+    /// Sept 25 (Designer wall authoring, live Mirror ADD): `private(set)
+    /// var` (was `let`) so DecoratorState-authored mirrors can register
+    /// their surface into the live reflection feed via addSurface (and out
+    /// again via removeSurface) without a floor reload -- see
+    /// ContentView's decorator closure wiring.
+    private(set) var surfaces: [MirrorSurfaceTarget]
     private var active = false
     private var requestedPermission = false
     private var worker: MirrorCaptureWorker?
@@ -159,6 +164,21 @@ final class MirrorCamera {
     }
 
     func setExpressionAnalysisEnabled(_ enabled: Bool) { expressionAnalyzer?.setEnabled(enabled) }
+
+    /// Registers a mirror surface added live via the Designer (Decorator)
+    /// into the live reflection feed -- CenterContentView creates the
+    /// camera once per floor by enumerating "mirrorSurface"-named nodes,
+    /// so a newly-authored mirror needs this to show the player's face
+    /// without reloading the floor.
+    func addSurface(_ material: SCNMaterial, aspect: CGFloat) {
+        surfaces.append(MirrorSurfaceTarget(material: material, aspect: aspect))
+    }
+
+    /// Reverse of addSurface above -- drops the given surface (identity
+    /// match on the material) when its mirror is deleted in the Designer.
+    func removeSurface(_ material: SCNMaterial) {
+        surfaces.removeAll { $0.material === material }
+    }
 
     // Eddie, Sept 17: reverted to its original form -- routing the
     // startup permission gate through here (an onPermissionResolved

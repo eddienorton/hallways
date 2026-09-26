@@ -157,7 +157,7 @@ struct RecoveryBatchTests {
                 #expect(cells.contains(coord))
                 #expect(!cells.contains(GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)))
                 #expect(!(coord == MazeStore.elevatorCoordinate && direction == .north))
-                #expect(store.pictures[coord]?.direction != direction)
+                #expect(!store.hasPicture(direction, at: coord))
                 #expect(store.mirrors[coord] != direction)
                 #expect(store.missionSigns[coord] != direction)
                 #expect(store.roomDoors[coord]?.direction != direction)

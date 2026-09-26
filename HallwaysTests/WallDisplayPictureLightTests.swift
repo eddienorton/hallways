@@ -11,10 +11,10 @@ struct WallDisplayPictureLightTests {
         let scene = HallwayScene.build(fromMaze: [coord], cellSize: 3.2, wallHeight: 3,
             floorMaps: display == .map ? [coord: direction] : [:],
             missionSigns: display == .mission ? [coord: direction] : [:],
-            pictures: display == .picture ? [coord: (direction: direction, size: .standard)] : [:],
+            pictures: display == .picture ? [WallFace(coord: coord, direction: direction): .standard] : [:],
             missionHeading: "Test mission", missionBody: "Test instructions", floorNumber: 20,
             playerStart: coord, playerEnd: coord,
-            pictureLights: authoredDirection.map { [coord: $0] } ?? [:],
+            pictureLights: authoredDirection.map { Set([WallFace(coord: coord, direction: $0)]) } ?? [],
             lightBrightness: [LightBrightness(coord: coord, kind: .picture, level: level)]).scene
         var result: [SCNNode] = []
         scene.rootNode.enumerateChildNodes { node, _ in

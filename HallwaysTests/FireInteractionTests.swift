@@ -129,7 +129,10 @@ struct FireInteractionTests {
     }
 
     @Test func suppliedExtinguisherSoundDecodes() throws {
-        let url = try #require(Bundle.main.url(forResource: "fire_extinguisher", withExtension: "mp3"))
+        let url = try #require(
+            Bundle.main.url(forResource: "fire_extinguisher", withExtension: "mp3", subdirectory: "audio")
+                ?? Bundle.main.url(forResource: "fire_extinguisher", withExtension: "mp3")
+        )
         let player = try AVAudioPlayer(contentsOf: url)
         #expect(player.duration > 5 && player.duration < 5.2)
     }

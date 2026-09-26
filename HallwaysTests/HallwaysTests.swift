@@ -127,7 +127,10 @@ struct HallwaysTests {
 
     @Test func separateChuteSoundsAreBundledPreparedAndPlayable() async throws {
         for name in ["trash-chute-open", "trash-chute-close"] {
-            let url = try #require(Bundle.main.url(forResource: name, withExtension: "mp3"))
+            let url = try #require(
+                Bundle.main.url(forResource: name, withExtension: "mp3", subdirectory: "audio")
+                    ?? Bundle.main.url(forResource: name, withExtension: "mp3")
+            )
             let player = try AVAudioPlayer(contentsOf: url)
             #expect(player.duration > 0)
             #expect(player.prepareToPlay())
@@ -136,6 +139,49 @@ struct HallwaysTests {
         #expect(SoundEffects.playTrashChuteOpen())
         #expect(SoundEffects.playTrashChuteClose())
         #expect(AVAudioSession.sharedInstance().category == .playback)
+    }
+
+    // Sept 24 (knock audio ladder): all three knock MP3s must be bundled
+    // and decodable, and playKnock must climb soft -> medium -> hard
+    // inside a five-second window, stay hard for further knocks in it,
+    // and fall back to soft after a gap GREATER than five seconds. The
+    // injected-time form makes the reset deterministic in a unit test
+    // (the production call is the no-argument playKnock()).
+    @Test func knockLadderEscalatesSoftMediumHardAndResetsAfterFiveSeconds() async throws {
+        for name in ["knock-soft", "knock-medium", "knock-hard"] {
+            let url = try #require(
+                Bundle.main.url(forResource: name, withExtension: "mp3", subdirectory: "audio")
+                    ?? Bundle.main.url(forResource: name, withExtension: "mp3")
+            )
+            let player = try AVAudioPlayer(contentsOf: url)
+            #expect(player.duration > 0)
+            #expect(player.prepareToPlay())
+        }
+        // Every stage must resolve to its OWN file, never a substitute.
+        #expect(SoundEffects.knockFilename(forStage: 0) == "knock-soft.mp3")
+        #expect(SoundEffects.knockFilename(forStage: 1) == "knock-medium.mp3")
+        #expect(SoundEffects.knockFilename(forStage: 2) == "knock-hard.mp3")
+        #expect(SoundEffects.knockFilename(forStage: 3) == "knock-hard.mp3")
+
+        SoundEffects.resetKnockLadder()
+        await SoundEffects.prepareForGameplay()
+        let start = Date()
+        #expect(SoundEffects.playKnock(at: start))                                              // 1st: soft
+        #expect(SoundEffects.lastKnockFilename == "knock-soft.mp3")
+        #expect(SoundEffects.playKnock(at: start.addingTimeInterval(1)))                        // 2nd within 5s: medium
+        #expect(SoundEffects.lastKnockFilename == "knock-medium.mp3")
+        #expect(SoundEffects.playKnock(at: start.addingTimeInterval(2)))                        // 3rd within 5s: hard
+        #expect(SoundEffects.lastKnockFilename == "knock-hard.mp3")
+        #expect(SoundEffects.playKnock(at: start.addingTimeInterval(3)))                        // further within 5s: stays hard
+        #expect(SoundEffects.lastKnockFilename == "knock-hard.mp3")
+        // 3 + 5 = 8s is exactly five seconds since the last knock: still
+        // hard (reset needs GREATER than five).
+        #expect(SoundEffects.playKnock(at: start.addingTimeInterval(8)))
+        #expect(SoundEffects.lastKnockFilename == "knock-hard.mp3")
+        // 3 + 6 = 9s is a gap over five seconds: ladder resets to soft.
+        #expect(SoundEffects.playKnock(at: start.addingTimeInterval(9)))
+        #expect(SoundEffects.lastKnockFilename == "knock-soft.mp3")
+        SoundEffects.resetKnockLadder()
     }
 
     @Test func everyObjectKindHasSceneGeometry() {
@@ -149,7 +195,10 @@ struct HallwaysTests {
 
     @Test func mailAudioAssetsDecodeAndPlay() throws {
         for name in ["mail-pick-up", "mail-letter-drop-in-door-slot"] {
-            let url = try #require(Bundle.main.url(forResource: name, withExtension: "mp3"))
+            let url = try #require(
+                Bundle.main.url(forResource: name, withExtension: "mp3", subdirectory: "audio")
+                    ?? Bundle.main.url(forResource: name, withExtension: "mp3")
+            )
             let player = try AVAudioPlayer(contentsOf: url)
             #expect(player.duration > 0)
         }
@@ -246,14 +295,14 @@ struct HallwaysTests {
         store.switchTo(id: 2)
         let coord = GridCoordinate(row: 4, col: 0)
         store.placePicture(.west, at: coord)
-        #expect(store.pictureSize(at: coord) == .standard)
+        #expect(store.pictureSize(direction: .west, at: coord) == .standard)
         #expect(PictureSize.standard.scale == 1.0)
-        store.setPictureSize(.fullLength, at: coord)
-        #expect(store.pictureSize(at: coord) == .fullLength)
-        #expect(store.pictures[coord]?.direction == .west) // direction untouched by a size-only change
+        store.setPictureSize(.fullLength, direction: .west, at: coord)
+        #expect(store.pictureSize(direction: .west, at: coord) == .fullLength)
+        #expect(store.hasPicture(.west, at: coord)) // direction untouched by a size-only change
         store.switchTo(id: 3)
         store.switchTo(id: 2)
-        #expect(store.pictureSize(at: coord) == .fullLength)
+        #expect(store.pictureSize(direction: .west, at: coord) == .fullLength)
         let json = try #require(store.exportLibraryJSON()?.data(using: .utf8))
         let floors = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
         let exported = try #require(floors.first { $0["id"] as? Int == 2 })
@@ -282,10 +331,204 @@ struct HallwaysTests {
         // that same wall, matching canPlaceWallLight/canPlacePhotoBooth's
         // own mirrors[coord] exclusion.
         #expect(!store.canPlacePicture(.west, at: coord))
-        // The elevator cell is never a legal Picture wall, regardless
-        // of direction -- matches canPlaceMirror/canPlaceWallLight/
-        // canPlacePhotoBooth's own elevatorCoordinate exclusion.
+        // The REAL elevator cell on this floor is never a legal Picture
+        // wall, regardless of direction -- floor 2's elevator is at
+        // floor2ElevatorCoordinate (10,6) (floors 2+ moved off the
+        // original fixed elevatorCoordinate in the shared arrival-area
+        // design; .west is a genuine solid face there, not the floor-map
+        // face). Matches canPlaceMirror/canPlaceWallLight/
+        // canPlacePhotoBooth's own elevator-cell exclusion.
+        #expect(!store.canPlacePicture(.west, at: MazeStore.floor2ElevatorCoordinate))
+        // Sept 24 (Floor 2 Empty Wall repro): cell (10,7) is an ordinary
+        // hallway cell on floor 2 -- the breathing/buffer cell one step
+        // east of the real elevator at (10,6) -- NOT the elevator itself.
+        // Its south wall is a genuine empty ordinary wall (the only wall
+        // face that cell has), and Add Picture must be enabled there. The
+        // old floor-blind `coord != Self.elevatorCoordinate` check froze
+        // it with "Empty Wall" but Add Picture disabled.
+        #expect(store.canPlacePicture(.south, at: MazeStore.elevatorCoordinate))
+        // Floor 1 keeps the original fixed elevatorCoordinate: (10,7) is
+        // still its real elevator cell, so its walls stay refused.
+        store.switchTo(id: 1)
         #expect(!store.canPlacePicture(.north, at: MazeStore.elevatorCoordinate))
+    }
+
+    // Sept 24 (Empty Wall chooser, decorative room doors): RoomDoorPlacement
+    // gained an isDecorative flag, hand-written into the Codable -- legacy
+    // bundled/saved JSON authored before the flag (e.g. Floor 3's four
+    // 301-304 doors) carries no key and must decode as the default
+    // functional door it always was.
+    @Test func roomDoorPlacementWithoutTheDecorativeFlagDecodesAsFunctional() throws {
+        let data = Data(#"{"coord":{"row":3,"col":5},"direction":"north","roomNumber":301}"#.utf8)
+        let decoded = try #require(JSONDecoder().decode(RoomDoorPlacement.self, from: data))
+        #expect(decoded.roomNumber == 301)
+        #expect(!decoded.isDecorative)
+        // New-style JSON round-trips the flag both ways.
+        let encoded = try #require(JSONEncoder().encode(decoded))
+        let encodedDict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(encodedDict["isDecorative"] as? Bool == false)
+        let decorated = RoomDoorPlacement(coord: GridCoordinate(row: 4, col: 0), direction: .west,
+                                          roomNumber: 201, isDecorative: true)
+        let reencoded = try #require(JSONEncoder().encode(decorated))
+        let roundTripped = try #require(JSONDecoder().decode(RoomDoorPlacement.self, from: reencoded))
+        #expect(roundTripped.isDecorative)
+    }
+
+    // Sept 24: decorative doors are authored THROUGH the shared
+    // placeRoomDoor numbering -- they get real room numbers from the same
+    // floor sequence (Floor 2's first door is 201) and persist
+    // coordinate/direction/isDecorative through export exactly like any
+    // other authored fixture.
+    @Test func decorativeRoomDoorsAutoNumberAndPersistThroughExport() throws {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        let first = GridCoordinate(row: 4, col: 0)
+        let second = GridCoordinate(row: 10, col: 8)
+        store.placeRoomDoor(.west, at: first, decorative: true)
+        let door = try #require(store.roomDoors[first])
+        #expect(door.roomNumber == 201) // floor 2, no prior doors/rooms
+        #expect(door.isDecorative)
+        #expect(!store.canPlaceRoomDoor(.west, at: first)) // cell is occupied now
+        store.placeRoomDoor(.south, at: second, decorative: true)
+        #expect(store.roomDoors[second]?.roomNumber == door.roomNumber + 1)
+        let json = try #require(store.exportLibraryJSON()?.data(using: .utf8))
+        let floors = try #require(JSONSerialization.jsonObject(with: json) as? [[String: Any]])
+        let exported = try #require(floors.first { $0["id"] as? Int == 2 })
+        let doors = try #require(exported["roomDoors"] as? [[String: Any]])
+        #expect(doors.count == 2)
+        #expect(doors.allSatisfy { item in
+            let placed = item["coord"] as? [String: Int]
+            let direction = item["direction"] as? String
+            let isDecorative = item["isDecorative"] as? Bool
+            return (placed?["row"] == 4 && placed?["col"] == 0 && direction == "west" && isDecorative == true)
+                || (placed?["row"] == 10 && placed?["col"] == 8 && direction == "south" && isDecorative == true)
+        })
+    }
+
+    // Sept 24: canPlaceRoomDoor is the occupancy check behind the new
+    // Empty Wall -> ADD -> Door choice -- deliberately the same discipline
+    // as canPlacePicture on the very next branch of that chooser. (10,7)
+    // on Floor 2 is the ordinary breathing cell one east of the real
+    // elevator -- a genuinely legal door wall, this time by the same
+    // floor-aware endCoordinate logic the Sept 24 canPlacePicture fix
+    // introduced -- while the floor's TRUE elevator cell (10,6), a wall
+    // already holding a Mirror, and a wall whose neighbor is actually a
+    // cell (open side) are all refused.
+    @Test func canPlaceRoomDoorAcceptsGenuineEmptyWallsButRejectsClaimedElevatorAndOpenFaces() {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        let ordinary = GridCoordinate(row: 4, col: 0)
+        #expect(store.canPlaceRoomDoor(.west, at: ordinary))
+        #expect(!store.canPlaceRoomDoor(.east, at: ordinary)) // (4,1) is a cell -- open side, not a wall
+        store.placeMirror(.west, at: ordinary)
+        #expect(!store.canPlaceRoomDoor(.west, at: ordinary)) // claimed by a Mirror on that same face
+        #expect(!store.canPlaceRoomDoor(.west, at: MazeStore.floor2ElevatorCoordinate)) // real elevator cell
+        #expect(store.canPlaceRoomDoor(.south, at: MazeStore.elevatorCoordinate)) // breathing cell (10,7), legal like its Picture
+        #expect(!store.canPlaceRoomDoor(.north, at: GridCoordinate(row: 0, col: 7))) // Picture claims that wall
+    }
+
+    // Sept 24 (room-door knock interaction): ALL room doors are genuine
+    // stops -- functional/mail doors and decorative/architectural doors
+    // alike (Eddie closed the brief "decorative doors glide through"
+    // behavior so there's always a real tap-the-door moment stopped
+    // beside it). Functional vs decorative now differ only in what a tap
+    // does once stopped (mail flow vs knock), never in locomotion.
+    @Test func allRoomDoorsAreGenuineStopsWhetherFunctionalOrDecorative() async {
+        let scene = SCNScene()
+        let camera = SCNNode(); camera.position.y = 1.6
+        scene.rootNode.addChildNode(camera)
+        let start = GridCoordinate(row: 0, col: 0)
+        let doorCell = GridCoordinate(row: 0, col: 2)
+        let end = GridCoordinate(row: 0, col: 3)
+        let renderer = SCNRenderer(device: nil, options: nil)
+        var time = 1.0
+
+        let decorative = TapNavigationController(cameraNode: camera, scene: scene,
+            cells: Set((0...3).map { GridCoordinate(row: 0, col: $0) }), cellSize: 3.2,
+            startCell: start, startFacing: .east, endCell: end,
+            roomDoors: [doorCell: RoomDoorPlacement(coord: doorCell, direction: .north,
+                                                    roomNumber: 202, isDecorative: true)])
+        decorative.advance(); await finishMove(decorative, renderer: renderer, time: &time)
+        #expect(decorative.currentCell == doorCell)
+
+        let functional = TapNavigationController(cameraNode: camera, scene: scene,
+            cells: Set((0...3).map { GridCoordinate(row: 0, col: $0) }), cellSize: 3.2,
+            startCell: start, startFacing: .east, endCell: end,
+            roomDoors: [doorCell: RoomDoorPlacement(coord: doorCell, direction: .north, roomNumber: 302)])
+        time = 1.0
+        functional.advance(); await finishMove(functional, renderer: renderer, time: &time)
+        #expect(functional.currentCell == doorCell)
+    }
+
+    // Sept 24 (room-door knock interaction): the routing decision that
+    // ContentView.handleTap delegates to -- a tap on a DECORATIVE door
+    // plays the knock ladder (soft -> medium), while a tap on a
+    // FUNCTIONAL door keeps the existing mail flow and never knocks. The
+    // gesture layer is UI-level; this pins the controller-level routing
+    // that sits behind it, plus the one-tap-route-one-sound guarantee by
+    // asserting exactly one ladder step per interactWithRoomDoor call.
+    @Test func roomDoorTapRoutesDecorativeToKnockAndFunctionalToMailFlow() async {
+        let scene = SCNScene()
+        let camera = SCNNode(); camera.position.y = 1.6
+        scene.rootNode.addChildNode(camera)
+        let cells = Set((0...3).map { GridCoordinate(row: 0, col: $0) })
+        let decorativeCell = GridCoordinate(row: 0, col: 1)
+        let functionalCell = GridCoordinate(row: 0, col: 2)
+
+        // Decorative door: stopped at it, facing it, tap -> knock.
+        let decorative = TapNavigationController(cameraNode: camera, scene: scene, cells: cells, cellSize: 3.2,
+            startCell: decorativeCell, startFacing: .north, endCell: GridCoordinate(row: 0, col: 3),
+            roomDoors: [decorativeCell: RoomDoorPlacement(coord: decorativeCell, direction: .north,
+                                                          roomNumber: 201, isDecorative: true)])
+        SoundEffects.resetKnockLadder()
+        #expect(decorative.canRotate)
+        decorative.interactWithRoomDoor(at: decorativeCell)
+        #expect(SoundEffects.lastKnockFilename == "knock-soft.mp3")
+        // Second tap inside the five-second window escalates to medium.
+        decorative.interactWithRoomDoor(at: decorativeCell)
+        #expect(SoundEffects.lastKnockFilename == "knock-medium.mp3")
+        SoundEffects.resetKnockLadder()
+
+        // Functional door: tap routes to the mail flow, never knocks.
+        let functional = TapNavigationController(cameraNode: camera, scene: scene, cells: cells, cellSize: 3.2,
+            startCell: functionalCell, startFacing: .north, endCell: GridCoordinate(row: 0, col: 3),
+            roomDoors: [functionalCell: RoomDoorPlacement(coord: functionalCell, direction: .north, roomNumber: 302)])
+        functional.interactWithRoomDoor(at: functionalCell)
+        #expect(SoundEffects.lastKnockFilename == nil)
+        #expect(functional.carriedMail.isEmpty)
+        SoundEffects.resetKnockLadder()
+    }
+
+    // Sept 24: a decorative room's number can never be a mail address.
+    // mailableRoomNumbers excludes it, setItemRoom refuses it (so no
+    // envelope can be addressed to it), and assignUnassignedRoomItems
+    // (which runs behind functional door placement) always follows the
+    // mailable pool rather than handing an unaddressed letter to a
+    // decorative number.
+    @Test func decorativeRoomNumbersAreNeverMailableAddresses() {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        store.placeRoomDoor(.west, at: GridCoordinate(row: 4, col: 0), decorative: true)   // 201 decorative
+        store.placeRoomDoor(.south, at: GridCoordinate(row: 10, col: 8))                   // 202 functional
+        #expect(store.mailableRoomNumbers == [202])
+        #expect(store.roomNumbers == [201, 202])
+        let letter = GridCoordinate(row: 4, col: 3)
+        store.placeObject(.envelope, at: letter)
+        store.setItemRoom(201, at: letter)
+        #expect(store.itemRooms[letter] == nil)      // decorative numbers cannot be addressed
+        store.setItemRoom(202, at: letter)
+        #expect(store.itemRooms[letter] == 202)
+        let unaddressed = GridCoordinate(row: 4, col: 5)
+        store.placeObject(.envelope, at: unaddressed)
+        store.removeRoomDoor(at: GridCoordinate(row: 10, col: 8))
+        store.placeRoomDoor(.north, at: GridCoordinate(row: 0, col: 7))                    // 203 functional (editor path)
+        // The unaddressed letter was assigned from the MAILABLE pool -- the
+        // new functional 203 -- never the decorative 201. (Two functional
+        // doors in the same floor's sequence also prove decorative numbers
+        // occupy the numbering list without joining the mail pool.)
+        #expect(store.itemRooms[unaddressed] == 203)
+        #expect(store.mailableRoomNumbers == [203])
+        #expect(store.roomNumbers == [201, 203])
     }
 
     @Test func mirrorsStopWalkingOnReturnTrips() async {
@@ -374,6 +617,53 @@ struct HallwaysTests {
         #expect(controller.currentCell == junction)
         #expect(controller.facing == .north)
         #expect(!controller.isAnimating)
+    }
+
+    // Sept 24 (held-walk bypass): a continuously held walk must traverse an
+    // overridable stop cell (tap-to-collect object, picture, wall map)
+    // exactly like an empty cell -- one unbroken glide, no mid-run
+    // segment split or present-once back-off -- while a tap still stops at
+    // every one of them.
+    @Test func heldWalkGlidesThroughOverridableStopsButTapsStillStop() async {
+        let cells = Set((0...5).map { GridCoordinate(row: $0, col: 2) })
+        let start = GridCoordinate(row: 5, col: 2)
+        let end = GridCoordinate(row: 0, col: 2)
+        let object = GridCoordinate(row: 4, col: 2)
+        let picture = GridCoordinate(row: 3, col: 2)
+        let map = GridCoordinate(row: 2, col: 2)
+
+        let scene = SCNScene(), camera = SCNNode()
+        scene.rootNode.addChildNode(camera)
+        let controller = TapNavigationController(cameraNode: camera, scene: scene,
+            cells: cells, cellSize: 3.2, startCell: start, startFacing: .north, endCell: end,
+            objects: [object: .heart],
+            pictures: [WallFace(coord: picture, direction: .east)],
+            floorMaps: [map: .north])
+        let renderer = SCNRenderer(device: nil, options: nil)
+        var time = 1.0
+
+        // Held: one glide straight to the end cell. The object/picture/map
+        // cells must not split the segment, so a single advance() + finish
+        // lands on the far end with nothing picked up.
+        controller.setWalkingHeld(true)
+        controller.advance()
+        #expect(controller.isAnimating)
+        await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.currentCell == end)
+        #expect(!controller.isAnimating)
+        #expect(controller.collectedCoords.isEmpty)
+
+        // Tap: first tap presents the object (back off, no movement), the
+        // second lands ON its cell -- the object stop is intact.
+        controller.setWalkingHeld(false)
+        controller.reset()
+        time = 1.0
+        controller.advance()
+        #expect(!controller.isAnimating)
+        #expect(controller.currentCell == start)
+        controller.advance()
+        await finishMove(controller, renderer: renderer, time: &time)
+        #expect(controller.currentCell == object)
     }
 
     @Test func longPressFromWallChoosesOnlyUnambiguousSide() async {

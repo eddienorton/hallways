@@ -398,6 +398,7 @@ struct ContentView: View {
                 .onChange(of: navBridge.requestReturnToOpening) { _, value in
                     guard value else { return }
                     navBridge.requestReturnToOpening = false
+                    navLog("[LIGHTBUILD] rebuild trigger: entrance-door tap (return to opening) -- leaving floor \(mazeStore.currentMazeID), switching to floor 1")
                     mazeStore.switchTo(id: 1)
                     runtime.requestReset()
                     withAnimation(.easeOut(duration: 0.3)) {
@@ -474,14 +475,29 @@ struct ContentView: View {
                 // the scene or moves the player. See PictureChangeMenuHost's
                 // own doc comment.
                 PictureChangeMenuHost(controller: navController, mazeStore: mazeStore)
-                DecoratorOverlay(state: decorator, store: mazeStore)
-                    .zIndex(36)
-                if mazeStore.currentMazeID != 1 {
-                    HandheldMapButton(controller: navController)
-                        .zIndex(31)
+                // Sept 26 (intro-HUD leak fix): DECORATE and the
+                // handheld mini-map are gameplay/authoring controls
+                // that must never appear while the intro screen is up.
+                // This used to rely entirely on IntroScreenView's
+                // zIndex painting over them, which silently broke once
+                // later overlays (the card-game hosts, this pair)
+                // picked zIndex values higher than the intro's --
+                // gating them here, at the source, on showIntroScreen
+                // itself means they are simply never built while the
+                // intro is showing, independent of any zIndex. Grouped
+                // in one condition since both belong to the same
+                // "must not appear on the intro" set; PlayerSettingsButton
+                // wasn't reported affected and isn't part of that set,
+                // so it stays outside this gate, unchanged.
+                if !showIntroScreen {
+                    DecoratorOverlay(state: decorator, store: mazeStore)
+                        .zIndex(36)
+                    if mazeStore.currentMazeID != 1 {
+                        HandheldMapOverlay(controller: navController)
+                            .id(ObjectIdentifier(navController))
+                            .zIndex(30)
+                    }
                 }
-                HandheldMapOverlay(controller: navController)
-                    .zIndex(30)
                 PlayerSettingsButton()
             }
 
@@ -551,11 +567,19 @@ struct ContentView: View {
             }
 
             VStack {
-                HStack {
+                HStack(spacing: 8) {
                     moneyHUD
+                    // Sept 26 (intro-HUD leak fix): mission-progress
+                    // pills (e.g. "Painted 0/51") must not render on the
+                    // intro screen either -- same gate as DecoratorOverlay/
+                    // HandheldMapOverlay above.
+                    if let controller = navBridge.controller, !showIntroScreen {
+                        CarriedItemsPill(controller: controller)
+                    }
                     Spacer()
                     HStack(spacing: 8) {
                         Button {
+                            navLog("[LIGHTBUILD] rebuild trigger: Reset/\"Start From Beginning\" button pressed -- leaving floor \(mazeStore.currentMazeID), switching to floor 1")
                             mazeStore.switchTo(id: 1)
                             runtime.requestReset()
                             withAnimation(.easeOut(duration: 0.3)) {
@@ -617,6 +641,7 @@ struct ContentView: View {
             // as it was, no gap at all.
             mazeStore.save()
             if mazeStore.version != sceneVersion {
+                navLog("[LIGHTBUILD] rebuild trigger: Grid Editor dismissed with changes -- floor \(mazeStore.currentMazeID), sceneVersion \(sceneVersion)->\(mazeStore.version) -- this bump forces HallwaySceneView's .id() to change, which discards the current TouchTrackingSCNView + Coordinator and calls makeUIView fresh")
                 navBridge.controller = nil
                 sceneVersion = mazeStore.version
             }
@@ -637,6 +662,7 @@ struct ContentView: View {
         // fullScreenCover the player can't see anyway, so there's
         // nothing to hide.
         .onChange(of: mazeStore.currentMazeID) { _ in
+            navLog("[LIGHTBUILD] rebuild trigger: mazeStore.currentMazeID changed -> \(mazeStore.currentMazeID) (elevator arrival or grid-editor floor nav) -- sceneVersion \(sceneVersion)->\(mazeStore.version) -- this bump forces HallwaySceneView's .id() to change, which discards the current TouchTrackingSCNView + Coordinator and calls makeUIView fresh")
             sceneVersion = mazeStore.version
         }
         .onAppear {
@@ -724,8 +750,10 @@ struct ContentView: View {
     }
 }
 
-/// Status overlay: the collected-objects strip, a transient message
-/// line, and a "Dead end" label when you've backed into one. Used to
+/// Status overlay: a transient message line, and a "Dead end" label
+/// when you've backed into one, plus the FLOOR N pill at the bottom.
+/// The carried-objects strip no longer lives here -- it moved up into
+/// the top HUD row (see CarriedItemsPill), Sept 25. Used to
 /// also hold the D-pad (forward/left/right/back buttons) -- removed
 /// entirely, Eddie, Sept 6: "the tap/swipe is soo perfect why have the
 /// buttons? ... can we get away with none." Tap-to-walk, drag-to-turn,
@@ -741,10 +769,6 @@ private struct NavigationOverlay: View {
 
     var body: some View {
         VStack {
-            if !controller.collectedObjects.isEmpty || !controller.carriedMail.isEmpty || controller.paintProgress != nil || controller.carryingExtinguisher {
-                collectedStrip
-                    .padding(.top, 12)
-            }
             Spacer()
             // A short, transient status line -- "nothing to throw out"
             // and whatever else comes along later -- reusing the exact
@@ -770,21 +794,57 @@ private struct NavigationOverlay: View {
                 .padding(.top, 4)
                 .accessibilityIdentifier("gameplayFloorLabel")
         }
-        // Used to be the D-pad's own .padding(.bottom, 40) keeping it
-        // clear of the very bottom edge/home-indicator area -- kept
-        // here, smaller, now that a status capsule (not a big button
-        // cluster) is whatever ends up at the bottom of this VStack.
-        .padding(.bottom, 24)
+        // Sept 24 pass per Eddie (accepted on device): this pill has
+        // ONE fixed position -- bottom edge about 8pt above the
+        // PHYSICAL bottom edge of the screen -- and it never moves for
+        // map state. The outer ZStack here respects the safe area (only
+        // the SceneKit view inside ignores it), so without the line
+        // below this overlay's layout bottom was the safe-area bottom
+        // and the pill floated ~34-42pt above the real screen edge
+        // (the home-indicator inset riding under it). Ignoring the
+        // bottom safe area makes the pill's frame reach the physical
+        // bottom, so the 8pt padding below is measured from the actual
+        // screen edge. Same shared constant as the map's anchor math,
+        // which is untouched.
+//        .ignoresSafeArea(edges: .bottom)
+        .padding(.bottom, HandheldMapGeometry.hudPillToSafeGap)
+        .offset(y: 30)
+      
         .animation(.easeInOut(duration: 0.2), value: controller.transientMessage)
     }
 
-    // What you're currently carrying -- first slice of the pick-up
-    // mechanic: walking into an object removes it from the hallway and
-    // adds it here, oldest first. No delivery/matching logic yet -- this
-    // is purely "gobble it, show you have it," same "just enough to feel
-    // it out" scoping as the very first heart placement.
-    private var collectedStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+    private func label(_ text: String, systemImage: String) -> some View {
+        // A solid dark backing, not .ultraThinMaterial — a dead end
+        // puts the camera right up against close walls, which can read
+        // as a near-white wash of light, and a translucent blur
+        // background over that goes nearly invisible right when you
+        // most need to see this.
+        Label(text, systemImage: systemImage)
+            .font(.system(size: 16, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.7), in: Capsule())
+            .padding(.bottom, 12)
+    }
+}
+
+/// Sept 25 (HUD row fix): the carried/collected-objects pill that now
+/// lives in the TOP HUD row, between the cash pill (left) and the
+/// restart/map buttons (right). Moved here out of NavigationOverlay's
+/// old top-of-overlay strip, which stretched almost full width thanks to
+/// `.fixedSize(horizontal: false)` on a horizontal ScrollView and
+/// overlapped the orange Decorate controls. This pill is wrapped in
+/// `.fixedSize()` at the call site so it hugs its contents (a compact
+/// black pill, internal padding included) instead of eating the whole
+/// row. Same "separate @ObservedObject-holding view" reason as
+/// NavigationOverlay: ContentView.body never sees TapNavigationController's
+/// own @Published properties change, only navBridge.controller's identity.
+private struct CarriedItemsPill: View {
+    @ObservedObject var controller: TapNavigationController
+
+    var body: some View {
+        if !controller.collectedObjects.isEmpty || !controller.carriedMail.isEmpty || controller.paintProgress != nil || controller.carryingExtinguisher {
             HStack(spacing: 8) {
                 ForEach(Array(controller.collectedObjects.enumerated()), id: \.offset) { _, kind in
                     Text(kind.displayEmoji).font(.system(size: 22))
@@ -811,26 +871,9 @@ private struct NavigationOverlay: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Color.black.opacity(0.7), in: Capsule())
-        .padding(.top, 65)
-        .padding(.horizontal, 12)
-    }
-
-    private func label(_ text: String, systemImage: String) -> some View {
-        // A solid dark backing, not .ultraThinMaterial — a dead end
-        // puts the camera right up against close walls, which can read
-        // as a near-white wash of light, and a translucent blur
-        // background over that goes nearly invisible right when you
-        // most need to see this.
-        Label(text, systemImage: systemImage)
-            .font(.system(size: 16, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
             .background(Color.black.opacity(0.7), in: Capsule())
-            .padding(.bottom, 12)
+            .fixedSize()
+        }
     }
 }
 
@@ -1122,6 +1165,17 @@ private struct IntroScreenView: View {
     let onEnter: () -> Void
 
     private var buildingImage: UIImage? {
+        // Sept 26 (intro/lobby resource organization): BuildingIntro.jpg
+        // now lives in Hallways-Assets/intro, a folder reference bundled
+        // as the "intro" subdirectory -- the exact same mechanism
+        // Hallways-Assets/textures/hallway already uses and that is
+        // physically verified working. Tried first, then falls through
+        // to the original flat lookup for resilience (same defensive
+        // shape HallwayScene.resolveThemeImage already uses).
+        if let url = Bundle.main.url(forResource: "BuildingIntro", withExtension: "jpg", subdirectory: "intro"),
+           let image = UIImage(contentsOfFile: url.path) {
+            return image
+        }
         guard let path = Bundle.main.path(forResource: "BuildingIntro", ofType: "jpg") else { return nil }
         return UIImage(contentsOfFile: path)
     }
@@ -1470,6 +1524,25 @@ struct HallwaySceneView: UIViewRepresentable {
     func makeUIView(context: Context) -> TouchTrackingSCNView {
         let view = TouchTrackingSCNView()
 
+        // Sept 22 (Eddie: in-process rebuild-lifecycle investigation).
+        // Minted ONCE, right at the top of makeUIView, so every
+        // checkpoint this SAME rebuild logs below (EARLY / POST /
+        // NEXT-RUNLOOP) shares one [LIGHTBUILD #N] number, no matter
+        // how deep into this function -- or how much later on the main
+        // queue -- that checkpoint actually runs. nextBuildNumber() is
+        // process-lifetime and monotonic (see LightingDeterminismCheck.
+        // swift), so #1, #2, #3... are stable landmarks across however
+        // many rebuilds happen in one run of the app, launch or not.
+        // nil (not minted) for the empty-maze prototype branch and for
+        // any floor other than 2, matching this tool's existing
+        // Floor-2-only scope.
+        #if DEBUG
+        let lightBuildNumber: Int? = (mazeStore.currentMazeID == 2 && !mazeStore.cells.isEmpty) ? LightingDeterminismCheck.nextBuildNumber() : nil
+        if let lightBuildNumber {
+            navLog("[LIGHTBUILD #\(lightBuildNumber)] BEGIN makeUIView floor=\(mazeStore.currentMazeID) pendingElevatorArrival=\(navBridge.pendingElevatorArrival) -- a brand-new TouchTrackingSCNView + Coordinator are being constructed from scratch for this rebuild (SwiftUI's .id(sceneVersion) tears down the previous one entirely; see the [LIGHTBUILD] rebuild-trigger lines elsewhere in this file for WHY this rebuild started)")
+        }
+        #endif
+
         if mazeStore.cells.isEmpty {
             // Nothing drawn in the grid editor yet — fall back to the
             // hand-built L-shaped prototype, free-roam controls
@@ -1514,7 +1587,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // statement, instead of solving both at once. No behavior change --
             // same call, same arguments, same resulting bindings below.
             navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(mazeStore.currentMazeID)")
-            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements)
+            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements)
             navBridge.pendingElevatorArtwork = [:]
             let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, _, floorMapPlaneNodes, pictureMaterials) = hallwaySceneBuildResult
             navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) elapsed=\(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagBuildStart))s raw-spawn cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles) elevatorDoors-present=\(elevatorDoors != nil)")
@@ -1522,6 +1595,27 @@ struct HallwaySceneView: UIViewRepresentable {
             navLog("[ARRIVALDIAG] view.scene = scene assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970))")
             view.pointOfView = cameraNode
             navLog("[ARRIVALDIAG] view.pointOfView = cameraNode assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
+            #if DEBUG
+            // Sept 22 (Eddie): lighting-determinism instrumentation
+            // (see LightingDeterminismCheck.swift) -- the scene is now
+            // fully built AND attached to the view, so every
+            // fluorescent fixture/light below is in its final,
+            // as-rendered MODEL-space state. Floor-2-only per Eddie's
+            // request; #if DEBUG-gated, zero effect on Release builds.
+            // This is checkpoint 1 of 3 for this rebuild (EARLY) -- see
+            // the POST checkpoint near the end of makeUIView and the
+            // NEXT-RUNLOOP checkpoint scheduled on DispatchQueue.main
+            // below for the other two. NOTE: this checkpoint captures
+            // node.position/eulerAngles/rotation/transform (the MODEL),
+            // not node.presentation -- if the actual GPU-rendered frame
+            // ever diverges from the model (an uncommitted implicit
+            // SceneKit animation, for instance), this checkpoint alone
+            // cannot see it. Eddie: flagged in the report as a known
+            // blind spot, not yet closed.
+            if let lightBuildNumber {
+                LightingDeterminismCheck.run(scene: scene, floor: mazeStore.currentMazeID, mazeStore: mazeStore, buildNumber: lightBuildNumber, checkpoint: "EARLY (view.scene + view.pointOfView just assigned)")
+            }
+            #endif
             context.coordinator.wallMaterials = wallMaterials
             context.coordinator.floorMaterial = floorMaterial
             context.coordinator.ceilingMaterial = ceilingMaterial
@@ -1574,7 +1668,17 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
             }
             navLog("[ARRIVALDIAG] TapNavigationController(...) about to construct t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
-            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures.mapValues { $0.direction }, mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            #if DEBUG
+            // Sept 22 (Eddie: presentation-vs-model investigation).
+            // Hands this rebuild's LIGHTBUILD number (nil unless this
+            // is a Floor-2 rebuild) to the freshly-built navController,
+            // which is already this view's SCNSceneRendererDelegate --
+            // see its own renderer(_:didRenderScene:atTime:) for where
+            // this actually fires, once, on the first frame SceneKit
+            // truly renders for this scene.
+            navController.pendingPresentationCheckBuildNumber = lightBuildNumber
+            #endif
             // Eddie, Sept 16 (remove automatic step-out): this build
             // IS an elevator ride's destination floor -- passive or
             // player-controlled -- exactly when
@@ -1779,15 +1883,6 @@ struct HallwaySceneView: UIViewRepresentable {
         context.coordinator.lastResetToken = runtime.resetToken
         context.coordinator.lastTheme = themeStore.current
         context.coordinator.decorator = decorator
-        // Sept 21 (DECORATE one-cell movement): direct (non-closure)
-        // sync, same unconditional-per-update spot as the line just
-        // above -- runs on every updateUIView pass, including whenever
-        // decorator.enabled toggles (it's an @ObservedObject
-        // dependency), so the navigation controller's movement planner
-        // always reflects the current mode. navigationController is
-        // already non-nil here in steady state (set earlier in this
-        // method); optional chaining is defensive only.
-        context.coordinator.navigationController?.decorateModeEnabled = decorator.enabled
         decorator.attach(scene: view.scene, store: mazeStore)
         decorator.canEditCab = { [weak coordinator = context.coordinator] in
             coordinator?.navigationController?.canRotate == true
@@ -1806,7 +1901,7 @@ struct HallwaySceneView: UIViewRepresentable {
             return HallwayScene.effectiveWallImageName(floorNumber: coordinator.currentFloorNumber, theme: coordinator.lastTheme)
         }
         decorator.registerAddedPicture = { [weak coordinator = context.coordinator] coord, direction, material, newWallMaterials in
-            coordinator?.pictureMaterials[coord] = material
+            coordinator?.pictureMaterials[WallFace(coord: coord, direction: direction)] = material
             coordinator?.wallMaterials.append(contentsOf: newWallMaterials)
             coordinator?.navigationController?.registerPicture(direction, at: coord)
         }
@@ -1822,9 +1917,9 @@ struct HallwaySceneView: UIViewRepresentable {
         decorator.appendWallMaterials = { [weak coordinator = context.coordinator] newWallMaterials in
             coordinator?.wallMaterials.append(contentsOf: newWallMaterials)
         }
-        decorator.unregisterPicture = { [weak coordinator = context.coordinator] coord in
-            coordinator?.pictureMaterials.removeValue(forKey: coord)
-            coordinator?.navigationController?.unregisterPicture(at: coord)
+        decorator.unregisterPicture = { [weak coordinator = context.coordinator] coord, direction in
+            coordinator?.pictureMaterials.removeValue(forKey: WallFace(coord: coord, direction: direction))
+            coordinator?.navigationController?.unregisterPicture(direction, at: coord)
         }
         // Sept 21 (Floor Object current-cell authoring): same
         // weak-capture closure shape as every DecoratorState wiring
@@ -1852,10 +1947,129 @@ struct HallwaySceneView: UIViewRepresentable {
         decorator.currentPlayerFacing = { [weak coordinator = context.coordinator] in
             coordinator?.navigationController?.facing
         }
+        // Sept 25 (Designer wall authoring, live mission-object ADD):
+        // the mirror/extinguisher/photo-booth/fire registration closures
+        // -- same weak-capture shape as registerAddedPicture above.
+        // registerMirrorSurface/unregisterMirrorSurface talk to
+        // Coordinator.mirrorCamera (nil-safe: the camera is only created
+        // on floors that actually have mirrors); registerMirror/
+        // unregisterMirror, registerLiveFire/unregisterLiveFire,
+        // registerLiveExtinguisher/unregisterLiveExtinguisher and
+        // registerLivePhotoBooth/unregisterLivePhotoBooth all route
+        // through TapNavigationController's own register/unregister
+        // counterparts so live-authored objects join the real mission
+        // bookkeeping immediately (Eddie's Sept 25 direction).
+        decorator.registerMirrorSurface = { [weak coordinator = context.coordinator] material, aspect in
+            guard let coordinator else { return }
+            // Sept 25 (Designer wall authoring): on a floor whose build
+            // started with NO mirrors (makeUIView's surfaces scan found
+            // none, so coordinator.mirrorCamera was never created), a
+            // live-added mirror still needs the live feed -- create the
+            // camera lazily here. updateUIView's ongoing
+            // mirrorCamera?.setActive(cameraEnabled) pass picks it up on
+            // the very next update, so its active state is always right.
+            if coordinator.mirrorCamera == nil {
+                coordinator.mirrorCamera = MirrorCamera(surfaces: [], comments: mirrorComments)
+            }
+            coordinator.mirrorCamera?.addSurface(material, aspect: aspect)
+        }
+        decorator.unregisterMirrorSurface = { [weak coordinator = context.coordinator] material in
+            coordinator?.mirrorCamera?.removeSurface(material)
+        }
+        decorator.registerMirror = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.registerMirror(at: coord)
+        }
+        decorator.unregisterMirror = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterMirror(at: coord)
+        }
+        decorator.registerLiveFire = { [weak coordinator = context.coordinator] coord, node in
+            coordinator?.navigationController?.registerFire(at: coord, node: node)
+        }
+        decorator.unregisterLiveFire = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterFire(at: coord)
+        }
+        decorator.registerLiveExtinguisher = { [weak coordinator = context.coordinator] direction, coord, node in
+            coordinator?.navigationController?.registerExtinguisher(direction, node: node, at: coord)
+        }
+        decorator.unregisterLiveExtinguisher = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterExtinguisher(at: coord)
+        }
+        decorator.registerLivePhotoBooth = { [weak coordinator = context.coordinator] direction, coord, node in
+            coordinator?.navigationController?.registerPhotoBooth(direction, expression: .smile, node: node, at: coord)
+        }
+        decorator.unregisterLivePhotoBooth = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterPhotoBooth(at: coord)
+        }
+
+        // Sept 22 (Eddie: in-process rebuild-lifecycle investigation).
+        // Checkpoint 2 of 3 (POST) -- makeUIView is fully done: the
+        // TapNavigationController is built and installed as
+        // view.delegate, every DecoratorState closure above is wired,
+        // gesture recognizers are attached, decorator.attach(scene:
+        // store:) has already run (a few lines above the block that
+        // built navController -- see its own doc comment: it only sets
+        // self.scene/self.store/floor, confirmed not to touch any
+        // light). Comparing this against the EARLY checkpoint's
+        // fingerprint answers: does anything makeUIView itself does,
+        // AFTER attaching the scene to the view, go on to mutate a
+        // fluorescent fixture or its Area-light children? (Suspects
+        // ruled out by direct code reading so far: decorator.attach,
+        // the closures assigned to navController.onReachedEnd/
+        // onElevatorArrivedControlled -- registered here but not
+        // EXECUTED until a future elevator ride, so irrelevant to
+        // THIS rebuild's own POST state.)
+        #if DEBUG
+        if let lightBuildNumber, let scene = view.scene {
+            LightingDeterminismCheck.run(scene: scene, floor: mazeStore.currentMazeID, mazeStore: mazeStore, buildNumber: lightBuildNumber, checkpoint: "POST (makeUIView about to return -- navController installed, Decorator attached, gestures wired)")
+        }
+
+        // Checkpoint 3 of 3 (NEXT-RUNLOOP) -- deliberately a SEPARATE
+        // async hop from the existing "DispatchQueue.main.async {
+        // navBridge.controller = navController; ...; view.prepare(...)
+        // }" block a little further up (left completely untouched, per
+        // Eddie's "do not remove useful existing diagnostics/behavior"
+        // instruction) -- this schedules its own main-queue tick so it
+        // runs strictly AFTER makeUIView returns AND after SwiftUI's
+        // very next updateUIView pass has had a chance to run (theme
+        // sync, resetToken check, picture-selection sync are all in
+        // there -- see updateUIView below), which is exactly the
+        // "async work / delayed DispatchQueue work completing after
+        // the new scene is installed" category Eddie asked to be
+        // covered. Re-checks mazeStore.currentMazeID == 2 at execution
+        // time (not capture time), because by the time this tick
+        // actually runs a FURTHER rebuild could already be underway --
+        // if so this reports itself as skipped rather than silently
+        // comparing the wrong floor's state.
+        if let lightBuildNumber {
+            let buildNumberForAsync = lightBuildNumber
+            DispatchQueue.main.async { [weak view, mazeStore] in
+                guard let view, let scene = view.scene, mazeStore.currentMazeID == 2 else {
+                    navLog("[LIGHTBUILD #\(buildNumberForAsync)] NEXT-RUNLOOP checkpoint SKIPPED -- view deallocated or floor changed again before this main-queue tick ran")
+                    return
+                }
+                LightingDeterminismCheck.run(scene: scene, floor: 2, mazeStore: mazeStore, buildNumber: buildNumberForAsync, checkpoint: "NEXT-RUNLOOP (one main-queue tick after makeUIView returned)")
+            }
+        }
+        #endif
+
         return view
     }
 
     func updateUIView(_ uiView: TouchTrackingSCNView, context: Context) {
+        // Sept 22 (DECORATE sync fix): relocated from makeUIView, which
+        // only ever runs once (at initial scene build, when
+        // decorator.enabled is always still false) -- that placement
+        // was the actual reason every previous DECORATE one-cell-
+        // movement fix stayed dead on device: decorateModeEnabled got
+        // latched to false at construction and never updated again, no
+        // matter how many times the DECORATE button was toggled
+        // afterward. This is the one spot that genuinely runs on every
+        // update pass, including every decorator.enabled toggle (an
+        // @ObservedObject dependency), so the navigation controller's
+        // movement planner now actually reflects the live mode.
+        // navigationController is already non-nil here in steady state
+        // (set once in makeUIView); optional chaining is defensive only.
+        context.coordinator.navigationController?.decorateModeEnabled = decorator.enabled
         context.coordinator.mirrorCamera?.setActive(cameraEnabled)
         context.coordinator.mirrorCamera?.setExpressionAnalysisEnabled(cameraEnabled && mirrorComments.looking)
         if context.coordinator.lastResetToken != runtime.resetToken {
@@ -1897,8 +2111,8 @@ struct HallwaySceneView: UIViewRepresentable {
             let previous = context.coordinator.lastPictureImageSelections
             let current = mazeStore.pictureImageSelections
             context.coordinator.lastPictureImageSelections = current
-            for (coord, selection) in current {
-                guard previous[coord] != selection, let material = context.coordinator.pictureMaterials[coord] else { continue }
+            for (face, selection) in current {
+                guard previous[face] != selection, let material = context.coordinator.pictureMaterials[face] else { continue }
                 context.coordinator.applyLivePictureSelection(selection, to: material)
             }
         }
@@ -1943,8 +2157,8 @@ struct HallwaySceneView: UIViewRepresentable {
         // baseline updateUIView diffs mazeStore.pictureImageSelections
         // against, so only the picture(s) that actually changed get
         // re-fetched/applied.
-        var pictureMaterials: [GridCoordinate: SCNMaterial] = [:]
-        var lastPictureImageSelections: [GridCoordinate: PictureImageSelection] = [:]
+        var pictureMaterials: [WallFace: SCNMaterial] = [:]
+        var lastPictureImageSelections: [WallFace: PictureImageSelection] = [:]
         // Sept 14 (Eddie): so applyTheme() below can tell Floor 1 (the
         // lobby) apart from every other floor when it re-picks the
         // floor image -- mirrors mazeStore.currentMazeID, the same
@@ -1991,6 +2205,38 @@ struct HallwaySceneView: UIViewRepresentable {
         // distance apart is one cell -- an initial feel constant, easy
         // to retune independently of dragMoveDistance.
         private let pinchScalePerCell: Double = 0.4
+
+        // Sept 24 (TOUCH/INSPECTION pass): temporary two-finger pinch-scale
+        // on wall pictures -- same borrow-the-whole-gesture model the
+        // mission plaque below uses, so the two inspectable wall fixtures
+        // feel related. When a pinch begins ON a picture (see handlePinch),
+        // this whole gesture scales just the picture's frame node; on
+        // release it springs back to its authored size. Nothing is
+        // persisted and navigation/editor state never hears about it. nil
+        // whenever no picture is being pinched. Min kept at 0.6x; the max
+        // was raised from the old 1.6x to 2.5x this pass so a user can
+        // genuinely inspect a photograph rather than merely make it
+        // somewhat larger -- 2.5x is the conservative end of Eddie's
+        // 2.5-3.0 target, chosen to keep a magnified frame clear of
+        // near-plane/camera clipping.
+        private var pinchPictureFrame: SCNNode?
+        private var pinchPictureBaseScale = SCNVector3(1, 1, 1)
+        private let picturePinchMinScale: Double = 0.6
+        private let picturePinchMaxScale: Double = 2.5
+
+        // Sept 24 (TOUCH/INSPECTION pass): mission plaque counterpart of
+        // the picture pinch just above -- same model, same useful range,
+        // same spring-back. The WHOLE framed plaque assembly scales in
+        // place: its frame node is tagged .missionSign (DecoratorTarget)
+        // at build time and carries the plaque plane plus any picture
+        // light as children, so scaling that one node enlarges the
+        // complete plaque as a unit. It then snaps exactly back to the
+        // authored scale on release. nil whenever no plaque is being
+        // pinched.
+        private var pinchPlaqueFrame: SCNNode?
+        private var pinchPlaqueBaseScale = SCNVector3(1, 1, 1)
+        private let plaquePinchMinScale: Double = 0.6
+        private let plaquePinchMaxScale: Double = 2.5
 
         // Ticks while a long-press-forward is held -- see
         // handleLongPressForward below. nil whenever nothing's held.
@@ -2097,7 +2343,14 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
                 if let roomCoord = hits.compactMap({ controller.roomDoorCoordinate(for: $0.node) }).first,
                    roomCoord == controller.currentCell {
-                    controller.deliverMail(at: roomCoord)
+                    // Sept 24 (room-door knock interaction): routes by
+                    // door kind -- functional doors keep the mail flow
+                    // (delivery/"No mail"), decorative doors (Floor 2)
+                    // play the knock ladder instead. One tap -> one
+                    // routing decision -> one sound, then this branch
+                    // returns so no later hit path can double-fire.
+                    navLog("tap hit room door at \(roomCoord)")
+                    controller.interactWithRoomDoor(at: roomCoord)
                     return
                 }
                 if let doorCoord = hits.compactMap({ controller.destinationCoordinate(for: $0.node) }).first,
@@ -2232,16 +2485,135 @@ struct HallwaySceneView: UIViewRepresentable {
             let velocityFraction = Double(gesture.velocity) / pinchScalePerCell
             switch gesture.state {
             case .began:
+                // Sept 24 (Finishing Pass): a pinch that starts on a real
+                // picture borrows that WHOLE gesture to temporarily scale
+                // just that one picture (no locomotion, no persisted
+                // state). Every other pinch keeps the existing live-scrub
+                // navigation below, entirely unchanged.
+                if let frame = pictureFrameTouched(by: gesture),
+                   decorator?.enabled != true {
+                    pinchPictureFrame = frame
+                    pinchPictureBaseScale = frame.scale
+                    navLog("pinch began on picture, scaling in place")
+                    return
+                }
+                if let frame = missionPlaqueFrameTouched(by: gesture),
+                   decorator?.enabled != true {
+                    pinchPlaqueFrame = frame
+                    pinchPlaqueBaseScale = frame.scale
+                    navLog("pinch began on mission plaque, scaling in place")
+                    return
+                }
                 navLog("pinch began")
                 controller.beginDragMove()
             case .changed:
+                if let frame = pinchPictureFrame {
+                    applyPicturePinch(gesture.scale, to: frame)
+                    return
+                }
+                if let frame = pinchPlaqueFrame {
+                    applyPlaquePinch(gesture.scale, to: frame)
+                    return
+                }
                 controller.updateDragMove(fraction: fraction)
             case .ended, .cancelled, .failed:
+                if let frame = pinchPictureFrame {
+                    pinchPictureFrame = nil
+                    navLog("pinch ended, picture scale=\(String(format: "%.2f", gesture.scale)) snaps back")
+                    let base = pinchPictureBaseScale
+                    let from = frame.scale
+                    frame.removeAction(forKey: "picturePinch")
+                    frame.runAction(SCNAction.customAction(duration: 0.3) { node, elapsed in
+                        let t = min(elapsed / 0.3, 1)
+                        let eased = Float(1 - pow(1 - t, 3))
+                        let sx = from.x + (base.x - from.x) * eased
+                        let sy = from.y + (base.y - from.y) * eased
+                        let sz = from.z + (base.z - from.z) * eased
+                        node.scale = SCNVector3(sx, sy, sz)
+                    }, forKey: "picturePinch")
+                    return
+                }
+                if let frame = pinchPlaqueFrame {
+                    pinchPlaqueFrame = nil
+                    navLog("pinch ended, plaque scale=\(String(format: "%.2f", gesture.scale)) snaps back")
+                    let base = pinchPlaqueBaseScale
+                    let from = frame.scale
+                    frame.removeAction(forKey: "plaquePinch")
+                    frame.runAction(SCNAction.customAction(duration: 0.3) { node, elapsed in
+                        let t = min(elapsed / 0.3, 1)
+                        let eased = Float(1 - pow(1 - t, 3))
+                        let sx = from.x + (base.x - from.x) * eased
+                        let sy = from.y + (base.y - from.y) * eased
+                        let sz = from.z + (base.z - from.z) * eased
+                        node.scale = SCNVector3(sx, sy, sz)
+                    }, forKey: "plaquePinch")
+                    return
+                }
                 navLog("pinch ended, fraction=\(String(format: "%.2f", fraction)), velocityFraction=\(String(format: "%.2f", velocityFraction))")
                 controller.endDragMove(fraction: fraction, velocityFraction: velocityFraction)
             default:
                 break
             }
+        }
+
+        // Sept 24 (Finishing Pass): walks the hit chain from a pinch's
+        // touch point up to the Decorator-tagged picture frame and
+        // returns it, else nil -- the same parent-chain read the tap
+        // and editor paths use, and the picture frame node is exactly
+        // the node tagged .picture at build time (HallwayScene
+        // buildPictureNode's addPictureNode call site).
+        private func pictureFrameTouched(by gesture: UIPinchGestureRecognizer) -> SCNNode? {
+            guard let view = gesture.view as? SCNView,
+                  let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue, .ignoreHiddenNodes: true]).first else { return nil }
+            var node: SCNNode? = hit.node
+            while let current = node {
+                if let target = DecoratorTarget.read(current), target.kind == .picture {
+                    return current
+                }
+                node = current.parent
+            }
+            return nil
+        }
+
+        // Sept 24 (Finishing Pass): applies a clamped uniform scale to a
+        // picture frame in place (frame pivot sits at the picture's own
+        // center on the wall face, so it grows/shrinks centered and
+        // stays attached to the wall -- no movement, no rebuild).
+        private func applyPicturePinch(_ scale: CGFloat, to frame: SCNNode) {
+            let clamped = CGFloat(min(max(Double(scale), picturePinchMinScale), picturePinchMaxScale))
+            let base = pinchPictureBaseScale
+            frame.scale = SCNVector3(base.x * Float(clamped), base.y * Float(clamped), base.z * Float(clamped))
+        }
+
+        // Sept 24 (TOUCH/INSPECTION pass): same parent-chain hit walk as
+        // pictureFrameTouched just above, for the mission plaque. Returns
+        // the wall-mounted frame node carrying the .missionSign
+        // DecoratorTarget identity (HallwayScene.addMissionSignNode); the
+        // plaque plane and any picture light ride as its children, so
+        // scaling that node scales the complete visible plaque as one
+        // object. nil when the pinch does not begin on an actual plaque,
+        // so pinching bare wall keeps its normal meaning.
+        private func missionPlaqueFrameTouched(by gesture: UIPinchGestureRecognizer) -> SCNNode? {
+            guard let view = gesture.view as? SCNView,
+                  let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue, .ignoreHiddenNodes: true]).first else { return nil }
+            var node: SCNNode? = hit.node
+            while let current = node {
+                if let target = DecoratorTarget.read(current), target.kind == .missionSign {
+                    return current
+                }
+                node = current.parent
+            }
+            return nil
+        }
+
+        // Sept 24 (TOUCH/INSPECTION pass): clamped uniform scale for the
+        // mission plaque -- the applyPicturePinch mirror. The frame
+        // pivot sits at the assembly's own center on the wall face, so it
+        // grows/shrinks centered in place and stays attached to the wall.
+        private func applyPlaquePinch(_ scale: CGFloat, to frame: SCNNode) {
+            let clamped = CGFloat(min(max(Double(scale), plaquePinchMinScale), plaquePinchMaxScale))
+            let base = pinchPlaqueBaseScale
+            frame.scale = SCNVector3(base.x * Float(clamped), base.y * Float(clamped), base.z * Float(clamped))
         }
 
         @objc func handleTwoFingerTap() {

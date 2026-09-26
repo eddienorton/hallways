@@ -6,6 +6,17 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		183BC24B7AF34718B1D74201 /* audio in Resources */ = {isa = PBXBuildFile; fileRef = 6BD341C680C86DB88734CE91 /* audio */; };
+		38203977D1E7C2BD8EF3DF64 /* hallway in Resources */ = {isa = PBXBuildFile; fileRef = A07F0B1371C01F4CB293FAF0 /* hallway */; };
+		4B8CAA65CB5D44DF9780CB20 /* pictures in Resources */ = {isa = PBXBuildFile; fileRef = 54671278D4D14F62A3916679 /* pictures */; };
+		5648AAA839714DAF92FF39F8 /* lobby in Resources */ = {isa = PBXBuildFile; fileRef = 8E5CB16C728B4EA9933A32D9 /* lobby */; };
+		882A5373653B4E2CA83DE2AA /* missions in Resources */ = {isa = PBXBuildFile; fileRef = 220CFFFDE90645ADAE3D91F4 /* missions */; };
+		A27339EDD6574E4E841C749A /* elevator in Resources */ = {isa = PBXBuildFile; fileRef = 8BCBC206844948FEAAD37E48 /* elevator */; };
+		DCD45AE3BC01D3458BD96D35 /* trash-chute in Resources */ = {isa = PBXBuildFile; fileRef = DD27A3380F5DDA7284DDAFE6 /* trash-chute */; };
+		EC0B26CF0FFA47D9B8B54716 /* intro in Resources */ = {isa = PBXBuildFile; fileRef = A7A03B9E60DF4407907B6FAE /* intro */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		0015362F3048A7D500A64BB3 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,11 +38,176 @@
 		001536213048A7D300A64BB3 /* Hallways.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hallways.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0015362E3048A7D500A64BB3 /* HallwaysTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HallwaysTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		001536383048A7D500A64BB3 /* HallwaysUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HallwaysUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		220CFFFDE90645ADAE3D91F4 /* missions */ = {isa = PBXFileReference; lastKnownFileType = folder; name = missions; path = "Hallways/Hallways-Assets/missions"; sourceTree = "<group>"; };
+		54671278D4D14F62A3916679 /* pictures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = pictures; path = "Hallways/Hallways-Assets/pictures"; sourceTree = "<group>"; };
+		6BD341C680C86DB88734CE91 /* audio */ = {isa = PBXFileReference; lastKnownFileType = folder; name = audio; path = "Hallways/Hallways-Assets/audio"; sourceTree = "<group>"; };
+		8BCBC206844948FEAAD37E48 /* elevator */ = {isa = PBXFileReference; lastKnownFileType = folder; name = elevator; path = "Hallways/Hallways-Assets/elevator"; sourceTree = "<group>"; };
+		8E5CB16C728B4EA9933A32D9 /* lobby */ = {isa = PBXFileReference; lastKnownFileType = folder; name = lobby; path = "Hallways/Hallways-Assets/lobby"; sourceTree = "<group>"; };
+		A07F0B1371C01F4CB293FAF0 /* hallway */ = {isa = PBXFileReference; lastKnownFileType = folder; name = hallway; path = "Hallways/Hallways-Assets/textures/hallway"; sourceTree = "<group>"; };
+		A7A03B9E60DF4407907B6FAE /* intro */ = {isa = PBXFileReference; lastKnownFileType = folder; name = intro; path = "Hallways/Hallways-Assets/intro"; sourceTree = "<group>"; };
+		DD27A3380F5DDA7284DDAFE6 /* trash-chute */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "trash-chute"; path = "Hallways/Hallways-Assets/trash-chute"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		6234C27FFEA8A94868D8D34B /* Exceptions for "Hallways" folder in "Hallways" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				".claude_backups/ceiling-pattern.jpg.bak_20260926_013633_pre_cleanup1_loose",
+				.claude_backups/ContentView.swift.bak_20260926_000219_pre_surfaces,
+				.claude_backups/DevPatterns.bak_20260926_013633_pre_cleanup1.tar.gz,
+				".claude_backups/floor-carpet1.jpg.bak_20260926_013633_pre_cleanup1_loose",
+				.claude_backups/floor1.png.bak_20260926_013633_pre_cleanup1_loose,
+				.claude_backups/GridEditorView.swift.bak_20260926_000219_pre_surfaces,
+				".claude_backups/HallwaysAssets_textures_ceiling-pattern.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				".claude_backups/HallwaysAssets_textures_elevator-ceiling.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				".claude_backups/HallwaysAssets_textures_elevator-floor.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				".claude_backups/HallwaysAssets_textures_elevator-wall.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				".claude_backups/HallwaysAssets_textures_floor-carpet1.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				.claude_backups/HallwaysAssets_textures_floor1.png.bak_20260926_013633_pre_cleanup1_flatdup,
+				".claude_backups/HallwaysAssets_textures_trash-chute-inside.jpeg.bak_20260926_013633_pre_cleanup1_flatdup",
+				".claude_backups/HallwaysAssets_textures_wood-oak.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				".claude_backups/HallwaysAssets_textures_wood-walnut.jpg.bak_20260926_013633_pre_cleanup1_flatdup",
+				.claude_backups/HallwayScene.swift.bak_20260926_000219_pre_surfaces,
+				.claude_backups/HallwayScene.swift.bak_20260926_004913_pre_subdirfix,
+				".claude_backups/lobby-ceiling.jpg.bak_20260926_013633_pre_cleanup1_loose",
+				".claude_backups/lobby-wall.jpg.bak_20260926_013633_pre_cleanup1_loose",
+				.claude_backups/MazeStore.swift.bak_20260926_000219_pre_surfaces,
+				.claude_backups/project.pbxproj.bak_20260926_001441_pre_bundlefix,
+				.claude_backups/project.pbxproj.bak_20260926_002012_pre_bundlefix2,
+				.claude_backups/project.pbxproj.bak_20260926_004123_pre_folderref,
+				.claude_backups/project.pbxproj.bak_20260926_013633_pre_cleanup1,
+				.claude_backups/WallTheme.swift.bak_20260926_013633_pre_cleanup1,
+				".claude_backups/wood-walnut.jpg.bak_20260926_013633_pre_cleanup1_loose",
+				"ceiling-pattern.jpg",
+				edit_hallwayscene_exitsigns.py,
+				edit_hallwayscene_youarehere.py,
+				"floor-carpet1.jpg",
+				floor1.png,
+				"Hallways-Assets/.DS_Store",
+				"Hallways-Assets/audio/elevator-arrived-ding-dong.mp3",
+				"Hallways-Assets/audio/elevator-music.mp3",
+				"Hallways-Assets/audio/extinguisher-grab.mp3",
+				"Hallways-Assets/audio/fire_extinguisher.mp3",
+				"Hallways-Assets/audio/game-ttt-lose.mp3",
+				"Hallways-Assets/audio/game-ttt-o.mp3",
+				"Hallways-Assets/audio/game-ttt-win.mp3",
+				"Hallways-Assets/audio/game-ttt-x.mp3",
+				"Hallways-Assets/audio/hit-wall.mp3",
+				"Hallways-Assets/audio/iphone-camera-click.mp3",
+				"Hallways-Assets/audio/ka-ching.wav",
+				"Hallways-Assets/audio/knock-hard.mp3",
+				"Hallways-Assets/audio/knock-medium.mp3",
+				"Hallways-Assets/audio/knock-soft.mp3",
+				"Hallways-Assets/audio/mail-letter-drop-in-door-slot.mp3",
+				"Hallways-Assets/audio/mail-pick-up.mp3",
+				"Hallways-Assets/audio/paint-splat.mp3",
+				"Hallways-Assets/audio/picking-up-trash1.mp3",
+				"Hallways-Assets/audio/picking-up-trash2.mp3",
+				"Hallways-Assets/audio/street1.mp3",
+				"Hallways-Assets/audio/trash-chute-close.mp3",
+				"Hallways-Assets/audio/trash-chute-open.mp3",
+				"Hallways-Assets/audio/walk-heigh-heels.mp3",
+				"Hallways-Assets/audio/walk-man.mp3",
+				"Hallways-Assets/audio/warning-buzz.mp3",
+				"Hallways-Assets/audio/womp2.wav",
+				"Hallways-Assets/elevator/elevator-ceiling.jpg",
+				"Hallways-Assets/elevator/elevator-floor.jpg",
+				"Hallways-Assets/elevator/elevator-wall.jpg",
+				"Hallways-Assets/intro/BuildingIntro.jpg",
+				"Hallways-Assets/lobby/back-of-front-door.jpg",
+				"Hallways-Assets/lobby/lobby-ceiling.jpg",
+				"Hallways-Assets/lobby/lobby-front-desk.png",
+				"Hallways-Assets/lobby/lobby-outside.png",
+				"Hallways-Assets/lobby/lobby-plaque.png",
+				"Hallways-Assets/lobby/lobby-wall.jpg",
+				"Hallways-Assets/missions/mission-2.png",
+				"Hallways-Assets/missions/mission-3.png",
+				"Hallways-Assets/missions/mission-4.png",
+				"Hallways-Assets/missions/mission-5.png",
+				"Hallways-Assets/missions/mission-6.png",
+				"Hallways-Assets/missions/mission-7.png",
+				"Hallways-Assets/missions/mission-8.png",
+				"Hallways-Assets/missions/mission-9.png",
+				"Hallways-Assets/missions/mission-10.png",
+				"Hallways-Assets/missions/mission-11.png",
+				"Hallways-Assets/missions/mission-12.png",
+				"Hallways-Assets/missions/mission-13.png",
+				"Hallways-Assets/missions/mission-14.png",
+				"Hallways-Assets/missions/mission-15.png",
+				"Hallways-Assets/missions/mission-16.png",
+				"Hallways-Assets/pictures/.DS_Store",
+				"Hallways-Assets/pictures/elevator-poster-01.jpg",
+				"Hallways-Assets/pictures/elevator-poster-02.jpg",
+				"Hallways-Assets/pictures/elevator-poster-03.jpg",
+				"Hallways-Assets/pictures/elevator-poster-04.jpg",
+				"Hallways-Assets/pictures/elevator-poster-05.jpg",
+				"Hallways-Assets/pictures/elevator-poster-06.jpg",
+				"Hallways-Assets/pictures/elevator-poster-07.jpg",
+				"Hallways-Assets/pictures/elevator-poster-08.jpg",
+				"Hallways-Assets/pictures/elevator-poster-09.jpg",
+				"Hallways-Assets/pictures/elevator-poster-10.jpg",
+				"Hallways-Assets/pictures/elevator-poster-11.jpg",
+				"Hallways-Assets/pictures/elevator-poster-12.jpg",
+				"Hallways-Assets/pictures/elevator-poster-13.jpg",
+				"Hallways-Assets/pictures/elevator-poster-14.jpg",
+				"Hallways-Assets/pictures/elevator-poster-15.jpg",
+				"Hallways-Assets/pictures/elevator-poster-16.jpg",
+				"Hallways-Assets/pictures/IMG_7416.jpg",
+				"Hallways-Assets/pictures/IMG_7439.jpg",
+				"Hallways-Assets/pictures/IMG_7487.jpg",
+				"Hallways-Assets/pictures/IMG_7598.jpg",
+				"Hallways-Assets/pictures/IMG_7604.jpg",
+				"Hallways-Assets/pictures/IMG_7605.jpg",
+				"Hallways-Assets/pictures/IMG_7606.jpg",
+				"Hallways-Assets/pictures/IMG_7607.jpg",
+				"Hallways-Assets/pictures/IMG_7608.jpg",
+				"Hallways-Assets/props/watering-can-fixed.svg",
+				"Hallways-Assets/props/watering-can.svg",
+				"Hallways-Assets/textures/ceiling-pattern.jpg",
+				"Hallways-Assets/textures/elevator-ceiling.jpg",
+				"Hallways-Assets/textures/elevator-floor.jpg",
+				"Hallways-Assets/textures/elevator-wall.jpg",
+				"Hallways-Assets/textures/floor-carpet1.jpg",
+				"Hallways-Assets/textures/floor1.png",
+				"Hallways-Assets/textures/hallway/BrickWall.jpg",
+				"Hallways-Assets/textures/hallway/CaveWall.jpg",
+				"Hallways-Assets/textures/hallway/ChainLink.jpg",
+				"Hallways-Assets/textures/hallway/Fire.jpg",
+				"Hallways-Assets/textures/hallway/FishTankWall.jpg",
+				"Hallways-Assets/textures/trash-chute-inside.jpeg",
+				"Hallways-Assets/textures/wood-oak.jpg",
+				"Hallways-Assets/textures/wood-walnut.jpg",
+				"Hallways-Assets/trash-chute/trash-chute-inside.jpeg",
+				"Hallways-Assets/TrashArtwork/banana-peel.svg",
+				"Hallways-Assets/TrashArtwork/soda-can.svg",
+				"Hallways-Assets/TrashArtwork/Sources.txt",
+				"Hallways-Assets/unused/audio/cymbals.wav",
+				"Hallways-Assets/unused/audio/dentist_drill.wav",
+				"Hallways-Assets/unused/audio/elevator-arrived-ding-dong2.mp3",
+				"Hallways-Assets/unused/audio/elevator-door-open.mp3",
+				"Hallways-Assets/unused/audio/hit_with_frying_pan.wav",
+				"Hallways-Assets/unused/audio/kiss.wav",
+				"Hallways-Assets/unused/audio/walking-giant.mp3",
+				"Hallways-Assets/unused/audio/walking-heels.mp3",
+				"Hallways-Assets/unused/audio/walking-in-grass.mp3",
+				"Hallways-Assets/unused/audio/walking-in-water.mp3",
+				"Hallways-Assets/unused/audio/walking.mp3",
+				"Hallways-Assets/unused/images/DirtyWater.jpg",
+				"Hallways-Assets/unused/images/wood-oak.jpg",
+				"lobby-ceiling.jpg",
+				"lobby-wall.jpg",
+				"wood-walnut.jpg",
+			);
+			target = 001536203048A7D300A64BB3 /* Hallways */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		001536233048A7D300A64BB3 /* Hallways */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				6234C27FFEA8A94868D8D34B /* Exceptions for "Hallways" folder in "Hallways" target */,
+			);
 			path = Hallways;
 			sourceTree = "<group>";
 		};
@@ -79,6 +255,14 @@
 				001536313048A7D500A64BB3 /* HallwaysTests */,
 				0015363B3048A7D500A64BB3 /* HallwaysUITests */,
 				001536223048A7D300A64BB3 /* Products */,
+				6BD341C680C86DB88734CE91 /* audio */,
+				8BCBC206844948FEAAD37E48 /* elevator */,
+				A07F0B1371C01F4CB293FAF0 /* hallway */,
+				A7A03B9E60DF4407907B6FAE /* intro */,
+				8E5CB16C728B4EA9933A32D9 /* lobby */,
+				220CFFFDE90645ADAE3D91F4 /* missions */,
+				54671278D4D14F62A3916679 /* pictures */,
+				DD27A3380F5DDA7284DDAFE6 /* trash-chute */,
 			);
 			sourceTree = "<group>";
 		};
@@ -212,6 +396,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				183BC24B7AF34718B1D74201 /* audio in Resources */,
+				A27339EDD6574E4E841C749A /* elevator in Resources */,
+				38203977D1E7C2BD8EF3DF64 /* hallway in Resources */,
+				EC0B26CF0FFA47D9B8B54716 /* intro in Resources */,
+				5648AAA839714DAF92FF39F8 /* lobby in Resources */,
+				882A5373653B4E2CA83DE2AA /* missions in Resources */,
+				4B8CAA65CB5D44DF9780CB20 /* pictures in Resources */,
+				DCD45AE3BC01D3458BD96D35 /* trash-chute in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

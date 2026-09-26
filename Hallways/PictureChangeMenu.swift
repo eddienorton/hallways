@@ -147,7 +147,7 @@ struct PictureChangeMenuHost: View {
     // never changes, the scene/TapNavigationController are never torn
     // down and rebuilt, and the player is never moved.
 
-    @State private var pictureSheetTarget: GridCoordinate?
+    @State private var pictureSheetTarget: WallFace?
     @State private var showSystemPhotoPicker = false
     @State private var showHallwaysArtPicker = false
 
@@ -171,30 +171,30 @@ struct PictureChangeMenuHost: View {
                 set: { isPresented in
                     if !isPresented { controller.cancelPictureMenu() }
                 }
-            ), titleVisibility: .visible, presenting: controller.activePictureMenu) { coord in
+            ), titleVisibility: .visible, presenting: controller.activePictureMenu) { face in
                 Button("Random Photo") {
                     controller.cancelPictureMenu()
                     PhotoRollProvider.shared.randomImageWithIdentifier(caller: "Change Picture: Random Photo") { identifier, _ in
                         if let identifier {
-                            mazeStore.setPictureImageSelection(.cameraRoll(identifier), at: coord)
+                            mazeStore.setPictureImageSelection(.cameraRoll(identifier), direction: face.direction, at: face.coord)
                             mazeStore.saveCurrentFloorAsOverride()
                         }
                     }
                 }
                 Button("Choose Photo…") {
                     controller.cancelPictureMenu()
-                    pictureSheetTarget = coord
+                    pictureSheetTarget = face
                     showSystemPhotoPicker = true
                 }
                 Button("Choose Hallways Art…") {
                     controller.cancelPictureMenu()
-                    pictureSheetTarget = coord
+                    pictureSheetTarget = face
                     showHallwaysArtPicker = true
                 }
                 Button("Random Hallways Art") {
                     controller.cancelPictureMenu()
                     if let name = HallwayScene.pictureAssetNames.randomElement() {
-                        mazeStore.setPictureImageSelection(.builtIn(name), at: coord)
+                        mazeStore.setPictureImageSelection(.builtIn(name), direction: face.direction, at: face.coord)
                         mazeStore.saveCurrentFloorAsOverride()
                     }
                 }
@@ -204,8 +204,8 @@ struct PictureChangeMenuHost: View {
             }
             .sheet(isPresented: $showSystemPhotoPicker) {
                 SystemPhotoPicker { identifier in
-                    if let identifier, let coord = pictureSheetTarget {
-                        mazeStore.setPictureImageSelection(.cameraRoll(identifier), at: coord)
+                    if let identifier, let face = pictureSheetTarget {
+                        mazeStore.setPictureImageSelection(.cameraRoll(identifier), direction: face.direction, at: face.coord)
                         mazeStore.saveCurrentFloorAsOverride()
                     }
                     pictureSheetTarget = nil
@@ -213,8 +213,8 @@ struct PictureChangeMenuHost: View {
             }
             .sheet(isPresented: $showHallwaysArtPicker) {
                 HallwaysArtPicker { name in
-                    if let name, let coord = pictureSheetTarget {
-                        mazeStore.setPictureImageSelection(.builtIn(name), at: coord)
+                    if let name, let face = pictureSheetTarget {
+                        mazeStore.setPictureImageSelection(.builtIn(name), direction: face.direction, at: face.coord)
                         mazeStore.saveCurrentFloorAsOverride()
                     }
                     pictureSheetTarget = nil

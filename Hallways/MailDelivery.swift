@@ -8,6 +8,53 @@ struct RoomDoorPlacement: Codable, Equatable {
     var roomNumber: Int
     /// A reward makes this a locked room; nil means a mail-delivery door.
     var cashReward: Int? = nil
+    /// Sept 24 (Empty Wall chooser, decorative room doors): an
+    /// architectural-only door -- the SAME visual and the SAME automatic
+    /// room-number assignment as a functional door, but it carries NO
+    /// gameplay at all: it never opens, never accepts mail, never stops
+    /// the walk, never tells the player anything. Map-authored/editor
+    /// doors stay `false` and keep all their existing mail/key-room
+    /// behavior untouched. Default `false` so any persisted door written
+    /// before this field existed (every bundled/saved floor) decodes as
+    /// functional exactly as before.
+    var isDecorative: Bool = false
+
+    /// Hand-written because of the project's standing MazeRecord-style
+    /// rule: the new persisted field gets an explicit decodeIfPresent
+    /// with its default, so a stale door record that never had the key
+    /// decodes as functional instead of relying on synthesis edge cases
+    /// (this type's Synthesized Codable handles optional-defaulted
+    /// `cashReward` fine, but a NON-optional defaulted `isDecorative`
+    /// gets the belt-and-suspenders treatment).
+    enum CodingKeys: String, CodingKey {
+        case coord, direction, roomNumber, cashReward, isDecorative
+    }
+
+    init(coord: GridCoordinate, direction: Direction, roomNumber: Int, cashReward: Int? = nil, isDecorative: Bool = false) {
+        self.coord = coord
+        self.direction = direction
+        self.roomNumber = roomNumber
+        self.cashReward = cashReward
+        self.isDecorative = isDecorative
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        coord = try container.decode(GridCoordinate.self, forKey: .coord)
+        direction = try container.decode(Direction.self, forKey: .direction)
+        roomNumber = try container.decode(Int.self, forKey: .roomNumber)
+        cashReward = try container.decodeIfPresent(Int.self, forKey: .cashReward)
+        isDecorative = try container.decodeIfPresent(Bool.self, forKey: .isDecorative) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(coord, forKey: .coord)
+        try container.encode(direction, forKey: .direction)
+        try container.encode(roomNumber, forKey: .roomNumber)
+        try container.encodeIfPresent(cashReward, forKey: .cashReward)
+        try container.encode(isDecorative, forKey: .isDecorative)
+    }
 }
 
 struct RoomAssignment: Codable {

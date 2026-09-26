@@ -56,121 +56,125 @@
     "missionObjectKind": null
   },
   {
+    "bathroomDoors": [],
+    "ceilingVisibleFixture": [],
     "cells": [
       {
-        "row": 4,
-        "col": 7
+        "col": 0,
+        "row": 4
       },
       {
-        "row": 3,
-        "col": 7
+        "col": 6,
+        "row": 4
       },
       {
-        "row": 2,
-        "col": 7
+        "col": 7,
+        "row": 9
       },
       {
-        "row": 1,
-        "col": 7
+        "col": 2,
+        "row": 4
       },
       {
-        "row": 0,
-        "col": 7
+        "col": 7,
+        "row": 10
       },
       {
-        "row": 5,
-        "col": 7
+        "col": 4,
+        "row": 4
       },
       {
-        "row": 6,
-        "col": 7
+        "col": 8,
+        "row": 4
       },
       {
-        "row": 7,
-        "col": 7
+        "col": 5,
+        "row": 4
       },
       {
-        "row": 8,
-        "col": 7
+        "col": 11,
+        "row": 4
       },
       {
-        "row": 9,
-        "col": 7
+        "col": 7,
+        "row": 5
       },
       {
-        "row": 10,
-        "col": 7
+        "col": 7,
+        "row": 0
       },
       {
-        "row": 10,
-        "col": 8
+        "col": 7,
+        "row": 1
       },
       {
-        "row": 4,
-        "col": 8
+        "col": 7,
+        "row": 8
       },
       {
-        "row": 4,
-        "col": 9
+        "col": 7,
+        "row": 2
       },
       {
-        "row": 4,
-        "col": 10
+        "col": 7,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 11
+        "col": 8,
+        "row": 10
       },
       {
-        "row": 4,
-        "col": 12
+        "col": 7,
+        "row": 6
       },
       {
-        "row": 4,
-        "col": 13
+        "col": 13,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 14
+        "col": 3,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 6
+        "col": 7,
+        "row": 7
       },
       {
-        "row": 4,
-        "col": 5
+        "col": 10,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 4
+        "col": 1,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 3
+        "col": 9,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 2
+        "col": 12,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 1
+        "col": 14,
+        "row": 4
       },
       {
-        "row": 4,
-        "col": 0
+        "col": 6,
+        "row": 10
       },
       {
-        "row": 10,
-        "col": 6
+        "col": 7,
+        "row": 3
       }
     ],
+    "checkersTerminals": [],
+    "connectFourTerminals": [],
     "destinations": [
       {
         "coord": {
-          "row": 4,
-          "col": 14
+          "col": 14,
+          "row": 4
         },
         "kind": "trashCan"
       }
@@ -178,29 +182,183 @@
     "exitSigns": [
       {
         "coord": {
-          "row": 4,
-          "col": 7
+          "col": 7,
+          "row": 10
         },
-        "direction": "south"
+        "direction": "west"
       },
       {
         "coord": {
-          "row": 10,
-          "col": 7
+          "col": 7,
+          "row": 4
         },
-        "direction": "west"
+        "direction": "south"
       }
     ],
+    "extinguishers": [],
+    "fires": [],
+    "fiveCardDrawTerminals": [],
     "floorMaps": [
       {
         "coord": {
-          "row": 10,
-          "col": 6
+          "col": 6,
+          "row": 10
         },
         "direction": "north"
       }
     ],
+    "fluorescentLights": [
+      {
+        "coord": {
+          "col": 7,
+          "row": 7
+        },
+        "orientation": "northSouth"
+      },
+      {
+        "coord": {
+          "col": 4,
+          "row": 4
+        },
+        "orientation": "eastWest"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 0
+        },
+        "orientation": "northSouth"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 10
+        },
+        "orientation": "northSouth"
+      },
+      {
+        "coord": {
+          "col": 12,
+          "row": 4
+        },
+        "orientation": "eastWest"
+      },
+      {
+        "coord": {
+          "col": 1,
+          "row": 4
+        },
+        "orientation": "eastWest"
+      },
+      {
+        "coord": {
+          "col": 9,
+          "row": 4
+        },
+        "orientation": "eastWest"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 3
+        },
+        "orientation": "northSouth"
+      },
+      {
+        "coord": {
+          "col": 13,
+          "row": 4
+        },
+        "orientation": "eastWest"
+      }
+    ],
+    "hangmanTerminals": [],
+    "higherLowerTerminals": [],
     "id": 2,
+    "itemRooms": [],
+    "lightBrightness": [
+      {
+        "coord": {
+          "col": 7,
+          "row": 10
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 7
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 0
+        },
+        "kind": "fluorescent",
+        "level": 9
+      },
+      {
+        "coord": {
+          "col": 1,
+          "row": 4
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 3
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 0,
+          "row": 4
+        },
+        "direction": "west",
+        "kind": "picture",
+        "level": 3
+      },
+      {
+        "coord": {
+          "col": 4,
+          "row": 4
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 9,
+          "row": 4
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 12,
+          "row": 4
+        },
+        "kind": "fluorescent",
+        "level": 10
+      },
+      {
+        "coord": {
+          "col": 13,
+          "row": 4
+        },
+        "kind": "fluorescent",
+        "level": 7
+      }
+    ],
     "mirrors": [],
     "missionBody": "YOUR FIRST MISSION\n\nCOLLECT ALL TRASH\nAND DROP IT IN THE CHUTE.",
     "missionHeading": "WELCOME TO HALLWAYS\n\nCOMPLETE EACH FLOOR'S MISSION\nTO UNLOCK THE ELEVATOR\nAND MOVE UP.",
@@ -208,8 +366,8 @@
     "missionSigns": [
       {
         "coord": {
-          "row": 10,
-          "col": 8
+          "col": 8,
+          "row": 10
         },
         "direction": "east"
       }
@@ -218,44 +376,256 @@
     "objects": [
       {
         "coord": {
-          "row": 1,
-          "col": 7
+          "col": 3,
+          "row": 4
         },
+        "floorOrientation": "eastWest",
+        "floorPosition": "left",
         "kind": "trashCan"
       },
       {
         "coord": {
-          "row": 4,
-          "col": 3
+          "col": 10,
+          "row": 4
         },
+        "floorOrientation": "eastWest",
+        "floorPosition": "right",
         "kind": "trashCan"
       },
       {
         "coord": {
-          "row": 4,
-          "col": 10
-        },
-        "kind": "trashCan"
-      },
-      {
-        "coord": {
-          "row": 4,
-          "col": 0
+          "col": 0,
+          "row": 4
         },
         "kind": "cash100"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 1
+        },
+        "floorOrientation": "northSouth",
+        "floorPosition": "left",
+        "kind": "trashCan"
+      }
+    ],
+    "photoBooths": [],
+    "pictureImageSelections": [],
+    "pictureLights": [
+      {
+        "coord": {
+          "col": 0,
+          "row": 4
+        },
+        "direction": "west"
       }
     ],
     "pictures": [
       {
         "coord": {
-          "row": 0,
-          "col": 7
+          "col": 7,
+          "row": 10
         },
-        "direction": "north"
+        "direction": "south",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 9,
+          "row": 4
+        },
+        "direction": "south",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 2
+        },
+        "direction": "west",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 8
+        },
+        "direction": "east",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 2,
+          "row": 4
+        },
+        "direction": "south",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 0,
+          "row": 4
+        },
+        "direction": "west",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 11,
+          "row": 4
+        },
+        "direction": "north",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 5,
+          "row": 4
+        },
+        "direction": "north",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 6,
+          "row": 10
+        },
+        "direction": "south",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 8,
+          "row": 10
+        },
+        "direction": "south",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 13,
+          "row": 4
+        },
+        "direction": "north",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 8,
+          "row": 10
+        },
+        "direction": "north",
+        "size": "small"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 6
+        },
+        "direction": "west",
+        "size": "standard"
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 0
+        },
+        "direction": "north",
+        "size": "standard"
       }
     ],
     "picturesUseCameraRoll": true,
-    "spotlights": []
+    "rockPaperScissorsTerminals": [],
+    "roomDoors": [
+      {
+        "coord": {
+          "col": 3,
+          "row": 4
+        },
+        "direction": "north",
+        "isDecorative": true,
+        "roomNumber": 203
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 1
+        },
+        "direction": "west",
+        "isDecorative": true,
+        "roomNumber": 201
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 3
+        },
+        "direction": "west",
+        "isDecorative": true,
+        "roomNumber": 205
+      },
+      {
+        "coord": {
+          "col": 5,
+          "row": 4
+        },
+        "direction": "south",
+        "isDecorative": true,
+        "roomNumber": 208
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 2
+        },
+        "direction": "east",
+        "isDecorative": true,
+        "roomNumber": 204
+      },
+      {
+        "coord": {
+          "col": 9,
+          "row": 4
+        },
+        "direction": "north",
+        "isDecorative": true,
+        "roomNumber": 209
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 8
+        },
+        "direction": "west",
+        "isDecorative": true,
+        "roomNumber": 207
+      },
+      {
+        "coord": {
+          "col": 7,
+          "row": 6
+        },
+        "direction": "east",
+        "isDecorative": true,
+        "roomNumber": 206
+      },
+      {
+        "coord": {
+          "col": 10,
+          "row": 4
+        },
+        "direction": "south",
+        "isDecorative": true,
+        "roomNumber": 202
+      }
+    ],
+    "shellGameStations": [],
+    "simonTerminals": [],
+    "spotlights": [],
+    "ticTacToeTerminals": [],
+    "wallLights": [],
+    "windowRooms": [],
+    "woidleTerminals": []
   },
   {
     "cells": [

@@ -1558,7 +1558,10 @@ enum HallwayScene {
     /// Same per-floor wall-image override table build(fromMaze:...) has
     /// always used, now callable standalone so a live Decorator
     /// mutation can resolve the same image a fresh build would have.
-    static func effectiveWallImageName(floorNumber: Int, theme: HallwayTheme) -> String? {
+    static func effectiveWallImageName(floorNumber: Int, theme: HallwayTheme, wallTexture: String? = nil) -> String? {
+        if let wallTexture {
+            return wallTexture
+        }
         switch floorNumber {
         case 1:
             return "lobby-wall"
@@ -1799,8 +1802,8 @@ enum HallwayScene {
     /// FloorRect, inset only on the sides that actually have a wall, so
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
-    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: (direction: Direction, size: PictureSize)] = [:], mirrors: [GridCoordinate: Direction] = [:],
-                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], pictureLights: [GridCoordinate: Direction] = [:], lightBrightness: [LightBrightness] = [], pictureImageSelections: [GridCoordinate: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:]) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [GridCoordinate: SCNMaterial]) {
+    static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [WallFace: PictureSize] = [:], mirrors: [GridCoordinate: Direction] = [:],
+                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:]) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -1895,7 +1898,7 @@ enum HallwayScene {
         // existing floor/maze identifier. Floors 2-19 are completely
         // unaffected -- they still resolve theme.floorImageName exactly
         // as before.
-        let floorMaterial = makeFloorMaterial(imageName: floorNumber == 1 ? "floor1" : (floorNumber == 2 ? "floor-carpet1" : theme.floorImageName))
+        let floorMaterial = makeFloorMaterial(imageName: floorTexture ?? (floorNumber == 1 ? "floor1" : (floorNumber == 2 ? "floor-carpet1" : theme.floorImageName)))
         if floorNumber == 1 {
             // floor1.png's own diamond grid is denser than the plain
             // 2x2 tiling makeSurfaceMaterial gives every other floor
@@ -1944,8 +1947,8 @@ enum HallwayScene {
         // addPicture) can resolve the exact same per-floor wall image a
         // fresh build would have used, without duplicating this
         // per-floor override table. Same values, same behavior.
-        let effectiveWallImageName = Self.effectiveWallImageName(floorNumber: floorNumber, theme: theme)
-        let effectiveCeilingImageName = floorNumber == 1 ? "lobby-ceiling" : (floorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName)
+        let effectiveWallImageName = Self.effectiveWallImageName(floorNumber: floorNumber, theme: theme, wallTexture: wallTexture)
+        let effectiveCeilingImageName = ceilingTexture ?? (floorNumber == 1 ? "lobby-ceiling" : (floorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName))
         let ceilingMaterial = makeCeilingMaterial(imageName: effectiveCeilingImageName)
         var wallMaterials: [SCNMaterial] = []
 
@@ -2185,6 +2188,46 @@ enum HallwayScene {
             let label = makeDestinationLabelNode(kind: kind, doorHeight: destinationDoorHeight, doorThickness: destinationDoorThickness)
             door.addChildNode(label)
 
+            // A small metal trash-chute latch/pull on the shutter face
+            // (Eddie, Sept 23; reference: apartment-building chute door) --
+            // a flattened rounded grip on a shallow plate, centered L/R,
+            // placed in the upper portion of the shutter, jutting clearly
+            // proud of the metal so hallway spotlights catch a highlight
+            // on its top edge and a shadow under it, selling the shutter
+            // as a physical metal object. Child of `door` -- the node
+            // TapNavigationController.depositIfPresent animates with its
+            // 0.66 move-up chute cycle -- so the pull rides the shutter
+            // slide for free, no separate animation code. Geometry: only
+            // two simple boxes; the grip is itself a slight trim, under-
+            // stated on purpose. Single material ("handle"), same bright-
+            // metal recipe the working frame/handrail metals use (NOT
+            // metalness 1.0).
+            let handle = SCNNode()
+            handle.name = "\(kind.rawValue)_handle"
+            let handleMaterial = SCNMaterial()
+            handleMaterial.diffuse.contents = UIColor(white: 0.92, alpha: 1)
+            handleMaterial.lightingModel = .physicallyBased
+            handleMaterial.metalness.contents = 0.6
+            handleMaterial.roughness.contents = 0.35
+            let handlePlate = SCNNode(geometry: SCNBox(width: 0.34, height: 0.05, length: 0.012, chamferRadius: 0.004))
+            handlePlate.geometry?.materials = [handleMaterial]
+            let handleGrip = SCNNode(geometry: SCNBox(width: 0.2, height: 0.032, length: 0.032, chamferRadius: 0.012))
+            handleGrip.geometry?.materials = [handleMaterial]
+            // Sept 24: the pull must live on the shutter's PLAYER-facing
+            // face. Local +Z is that face: the .north build above is
+            // unrotated and the door shifts +Z (south, into the player's
+            // cell), while each other direction rotates the door about Y
+            // so the same local +Z still points at the player. The first
+            // attempt sat at -Z -- the far side of the 0.04 metal -- and
+            // even a diagnostic emissive-red material hidden there was
+            // invisible behind the shutter. Positions are just proud of
+            // the +0.02 face so spotlights catch the grip's top edge.
+            handlePlate.position = SCNVector3(0, 0.17, 0.030)
+            handleGrip.position = SCNVector3(0, 0.17, 0.060)
+            handle.addChildNode(handlePlate)
+            handle.addChildNode(handleGrip)
+            door.addChildNode(handle)
+
             let assembly = SCNNode()
             assembly.addChildNode(cubby)
             assembly.addChildNode(door)
@@ -2340,6 +2383,14 @@ enum HallwayScene {
             let elevatorBackPosterWidth = elevatorPosterWidth
             let elevatorBackPosterHeight = elevatorPosterHeight
 
+            // Sept 26 (unified Hallways picture library): fetched once,
+            // together, right here -- same "addElevatorDoor runs once
+            // per floor build" stability every other per-floor pick in
+            // this function already relies on. Empty when
+            // picturesUseCameraRoll is true, since that branch below
+            // never reads this array at all.
+            let builtInPosterImages: [UIImage] = picturesUseCameraRoll ? [] : Self.randomBuiltInImages(count: 2)
+
             // Eddie, Sept 13: "The elevator poster images currently
             // appear to be coming from the bundled pattern/texture
             // assets. That is not what I want... The pattern folders
@@ -2349,13 +2400,15 @@ enum HallwayScene {
             // should instead use random photos from the user's camera
             // roll... use the existing camera-roll photo
             // infrastructure already used by hallway pictures, rather
-            // than inventing a second Photos system." Both blocks
-            // below no longer call randomElevatorPosterImages (the
-            // elevator-pics bundle picker added Sept 12) at all --
-            // that function and its elevatorPosterAssetNames list are
-            // left in place, just unused, in case bundled posters come
-            // back later, per Eddie's own "may change later." Each
-            // block instead builds its frame/plane with a neutral
+            // than inventing a second Photos system." (Sept 26 update:
+            // bundled posters HAVE come back, per Eddie's own "may
+            // change later" -- but as part of the unified Hallways
+            // picture library above, not a revived elevator-only
+            // bundle picker. Each of the two blocks below now branches
+            // on picturesUseCameraRoll: true keeps exactly this
+            // Sept 13 camera-roll behavior, unchanged; false uses
+            // builtInPosterImages instead, fetched just above.) Each
+            // block builds its frame/plane with a neutral
             // placeholder (the same dark fill elevatorPosterPhoto
             // already falls back to when it has no image) and then
             // calls PhotoRollProvider.shared.randomImages -- the exact
@@ -2431,19 +2484,22 @@ enum HallwayScene {
 
                 if let contents = elevatorArtwork["elevatorBackImage"] {
                     photoPlaneMaterial.diffuse.contents = contents
-                } else {
-                PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-back") { [weak photoPlaneMaterial] _, image in
-                    guard let photoPlaneMaterial, let image else { return }
+                } else if picturesUseCameraRoll {
+                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-back") { [weak photoPlaneMaterial] _, image in
+                        guard let photoPlaneMaterial, let image else { return }
+                        photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=PHOTOS")
+                    }
+                } else if let image = builtInPosterImages.first {
                     photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
-                    navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=PHOTOS")
-                }
+                    navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=BUILT_IN")
                 }
             }
 
             // The 180-degree ride turn sweeps past the car's left wall.
             // Same poster size as the back wall above (elevatorPosterWidth/
-            // Height). Camera-roll sourced now -- see the big Sept 13
-            // comment above the back-wall block just above.
+            // Height). Same camera-roll-vs-built-in branch as the
+            // back-wall block just above (see its Sept 26 comment).
             do {
                 let photoWidth = elevatorPosterWidth
                 let photoHeight = elevatorPosterHeight
@@ -2466,12 +2522,15 @@ enum HallwayScene {
 
                 if let contents = elevatorArtwork["elevatorSideImage"] {
                     sideMaterial.diffuse.contents = contents
-                } else {
-                PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-side") { [weak sideMaterial] _, image in
-                    guard let sideMaterial, let image else { return }
+                } else if picturesUseCameraRoll {
+                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-side") { [weak sideMaterial] _, image in
+                        guard let sideMaterial, let image else { return }
+                        sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=PHOTOS")
+                    }
+                } else if let image = builtInPosterImages.count > 1 ? builtInPosterImages[1] : builtInPosterImages.first {
                     sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
-                    navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=PHOTOS")
-                }
+                    navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=BUILT_IN")
                 }
             }
 
@@ -3008,6 +3067,31 @@ enum HallwayScene {
             return (room, placement.windowDirection)
         })
 
+        // Sept 22 (Eddie: two-Spot fluorescent diagnostic -- far-above
+        // known-good + far-below ceiling test). One-line summary log
+        // for THIS diagnostic (all 7 fixtures active, TWO hidden
+        // `.spot` sources per fixture now: one ~6m above the ceiling
+        // aimed down -- unchanged, confirmed known-good -- and one new
+        // one ~6m below the floor aimed up, to illuminate the ceiling
+        // through the (shadow-less) floor -- see FluorescentLight.
+        // swift's makeFluorescentLight()). The actual per-light
+        // verification (type, attenuationEndDistance, cone angles,
+        // exact counts) comes from the existing, untouched
+        // LightingDeterminismCheck fingerprint a little later in the
+        // build -- this is just a quick eyeball confirmation at
+        // construction time. Remove once this experiment is read.
+        #if DEBUG
+        if floorNumber == 2 {
+            let fixtureCount = fluorescentLights.count
+            let lightCount = fixtureCount * 2
+            let farAboveVerticalOffset: CGFloat = 6.0
+            let farAboveAttenuationEndDistance = farAboveVerticalOffset + wallHeight + cellSize
+            let farBelowFloorOffset: CGFloat = 6.0
+            let farBelowAttenuationEndDistance = farBelowFloorOffset + wallHeight + cellSize
+            navLog("[LIGHTBUILD] diagnostic: two-Spot fluorescent test (far-above known-good + far-below ceiling) -- expecting \(fixtureCount) fluorescent fixtures active, \(lightCount) fluorescent SCNLights active (\(fixtureCount) far-above + \(fixtureCount) far-below), all type .spot, spotInnerAngle=60 spotOuterAngle=100 on both. far-above: verticalOffset=\(farAboveVerticalOffset) above ceiling, intensity=nominal*20 (unchanged), attenuationEndDistance=\(farAboveAttenuationEndDistance). far-below: offset=\(farBelowFloorOffset) below floor, aimed up, intensity=nominal*5 (new, independently tunable), attenuationEndDistance=\(farBelowAttenuationEndDistance) (see the LightingDeterminismCheck block below for the actual per-light verification)")
+        }
+        #endif
+
         for coord in cells {
             let x = worldX(coord.col)
             let z = worldZ(coord.row)
@@ -3058,21 +3142,74 @@ enum HallwayScene {
             // that cost would show up on an iPad -- easy to turn on
             // later for a single accent light if the flat-lit look
             // isn't enough.
+            // Sept 23 (ceiling light coexistence): these two locals
+            // capture whichever fixture node gets built just below, so
+            // the resolution step right after can hide/show the
+            // correct one's geometry without re-searching the scene
+            // graph for what was just added.
+            var ceilingFixtureNode: SCNNode?
+            var fluorescentFixtureNode: SCNNode?
+
             if spotlights.contains(coord) {
                 let fixture = makeAuthoredCeilingFixture(cellSize: cellSize,
                     level: LightBrightness.level(for: .ceiling, at: coord, in: lightBrightness))
+                // Sept 22 (Eddie: two-Spot fluorescent diagnostic -- far-above
+                // known-good + far-below ceiling test). One-line summary log
+                // for THIS diagnostic (all 7 fixtures active, TWO hidden
+                // `.spot` sources per fixture now: one ~6m above the ceiling
+                // aimed down -- unchanged, confirmed known-good -- and one new
+                // one ~6m below the floor aimed up, to illuminate the ceiling
+                // through the (shadow-less) floor -- see FluorescentLight.
+                // swift's makeFluorescentLight()). The actual per-light
+                // verification (type, attenuationEndDistance, cone angles,
+                // exact counts) comes from the existing, untouched
+                // LightingDeterminismCheck fingerprint a little later in the
+                // build -- this is just a quick eyeball confirmation at
+                // construction time. Remove once this experiment is read.
+                #if DEBUG
+                if floorNumber == 2 {
+                    let fixtureCount = fluorescentLights.count
+                    let lightCount = fixtureCount * 2
+                    let farAboveVerticalOffset: CGFloat = 6.0
+                    let farAboveAttenuationEndDistance = farAboveVerticalOffset + wallHeight + cellSize
+                    let farBelowFloorOffset: CGFloat = 6.0
+                    let farBelowAttenuationEndDistance = farBelowFloorOffset + wallHeight + cellSize
+                    navLog("[LIGHTBUILD] diagnostic: two-Spot fluorescent test (far-above known-good + far-below ceiling) -- expecting \(fixtureCount) fluorescent fixtures active, \(lightCount) fluorescent SCNLights active (\(fixtureCount) far-above + \(fixtureCount) far-below), all type .spot, spotInnerAngle=60 spotOuterAngle=100 on both. far-above: verticalOffset=\(farAboveVerticalOffset) above ceiling, intensity=nominal*20 (unchanged), attenuationEndDistance=\(farAboveAttenuationEndDistance). far-below: offset=\(farBelowFloorOffset) below floor, aimed up, intensity=nominal*5 (new, independently tunable), attenuationEndDistance=\(farBelowAttenuationEndDistance) (see the LightingDeterminismCheck block below for the actual per-light verification)")
+                }
+                #endif
                 fixture.position = SCNVector3(Float(x), Float(wallHeight), Float(z))
                 fixture.childNodes.first(where: { $0.light != nil })?.name = "authored_ceiling_\(coord.row)_\(coord.col)"
                 DecoratorTarget(floor: floorNumber, coord: coord, kind: .ceiling).tag(fixture)
                 root.addChildNode(fixture)
+                ceilingFixtureNode = fixture
             }
 
             if let orientation = fluorescentLights[coord] {
                 let fixture = makeFluorescentLight(orientation: orientation,
-                    level: LightBrightness.level(for: .fluorescent, at: coord, in: lightBrightness), cellSize: cellSize)
+                    level: LightBrightness.level(for: .fluorescent, at: coord, in: lightBrightness), cellSize: cellSize, wallHeight: wallHeight)
                 fixture.position = SCNVector3(Float(x), Float(wallHeight), Float(z))
                 DecoratorTarget(floor: floorNumber, coord: coord, kind: .fluorescent).tag(fixture)
                 root.addChildNode(fixture)
+                fluorescentFixtureNode = fixture
+            }
+
+            // Sept 23 (ceiling light coexistence). Both fixtures above
+            // are built completely independently and unconditionally --
+            // if this coord has BOTH a spotlight and a fluorescent,
+            // resolve which one is visible (explicit ceilingVisibleFixture
+            // override first, defaulting to fluorescent when both are
+            // present with no valid override -- same resolution
+            // MazeStore.visibleCeilingFixtureKind(at:) itself uses, so a
+            // live Decorator session and a fresh floor build always
+            // agree) and hide the OTHER one's GEOMETRY only. Neither
+            // fixture's SCNLight(s) are touched -- both keep
+            // contributing illumination regardless. A complete no-op
+            // whenever only one kind (or neither) is at this coord,
+            // which is every floor authored before this feature existed.
+            if let ceilingFixtureNode, let fluorescentFixtureNode {
+                let visible: AuthoredLightKind = (ceilingVisibleFixture[coord] == .ceiling) ? .ceiling : .fluorescent
+                setCeilingFixtureGeometryHidden(ceilingFixtureNode, hidden: visible != .ceiling)
+                setCeilingFixtureGeometryHidden(fluorescentFixtureNode, hidden: visible != .fluorescent)
             }
 
             let hasWallNorth = !isOpen(coord.row - 1, coord.col)
@@ -3156,7 +3293,11 @@ enum HallwayScene {
             // placed (Eddie, Sept 9: "make the picture appear as a
             // picture on the wall"), same wall-skip check as the floor
             // map/mission sign.
-            let pictureDirection = pictures[coord]?.direction
+            // Sept 22 (wall-face authoring expansion): a cell can now have
+            // more than one Picture, so a single shared "the" picture
+            // direction no longer means anything -- each of the four wall-
+            // skip checks below now asks about ITS OWN face directly.
+            func hasPictureFace(_ direction: Direction) -> Bool { pictures[WallFace(coord: coord, direction: direction)] != nil }
             let mirrorDirection = mirrors[coord]
 
             // Same idea once more, for a Window Room's own exterior
@@ -3178,16 +3319,16 @@ enum HallwayScene {
                 HallwayScene.buildWallPanel(coord: coord, direction: direction, width: width, length: length, x: x, z: z, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, floorNumber: floorNumber, root: root, wallMaterials: &wallMaterials)
             }
 
-            if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && pictureDirection != .north && mirrorDirection != .north && windowDirection != .north {
+            if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && !hasPictureFace(.north) && mirrorDirection != .north && windowDirection != .north {
                 addWall(width: cellSize, length: 0.1, x: x, z: z - half, direction: .north)
             }
-            if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south && missionDirection != .south && pictureDirection != .south && mirrorDirection != .south && windowDirection != .south {
+            if hasWallSouth && destinationMountDirection != .south && elevatorMountDirection != .south && mapDirection != .south && missionDirection != .south && !hasPictureFace(.south) && mirrorDirection != .south && windowDirection != .south {
                 addWall(width: cellSize, length: 0.1, x: x, z: z + half, direction: .south)
             }
-            if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east && missionDirection != .east && pictureDirection != .east && mirrorDirection != .east && windowDirection != .east {
+            if hasWallEast && destinationMountDirection != .east && elevatorMountDirection != .east && mapDirection != .east && missionDirection != .east && !hasPictureFace(.east) && mirrorDirection != .east && windowDirection != .east {
                 addWall(width: 0.1, length: cellSize, x: x + half, z: z, direction: .east)
             }
-            if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && pictureDirection != .west && mirrorDirection != .west && windowDirection != .west {
+            if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && !hasPictureFace(.west) && mirrorDirection != .west && windowDirection != .west {
                 addWall(width: 0.1, length: cellSize, x: x - half, z: z, direction: .west)
             }
 
@@ -3227,11 +3368,10 @@ enum HallwayScene {
                     root.addChildNode(node)
                     objectNodes[coord] = node
                 } else {
-                    let node = kind == .envelope ? makeEnvelopeNode(roomNumber: itemRooms[coord]) : makeObjectNode(kind, size: cellSize * 0.22, floorNumber: floorNumber)
-                    let objectY = wallHeight * (kind == .envelope ? 0.4 : 0.25)
-                    node.position = SCNVector3(Float(x), Float(objectY), Float(z))
-                    root.addChildNode(node)
-                    objectNodes[coord] = node
+                    let assembly = buildPickupAssembly(kind, at: coord, cellSize: cellSize,
+                        wallHeight: wallHeight, floorNumber: floorNumber, roomNumber: itemRooms[coord])
+                    root.addChildNode(assembly)
+                    objectNodes[coord] = assembly
                 }
             }
 
@@ -3292,16 +3432,29 @@ enum HallwayScene {
 
         for (coord, direction) in extinguishers where cells.contains(coord) {
             let node = makeFireExtinguisherNode(at: coord, direction: direction, cellSize: cellSize)
+            // Sept 25 (Designer wall authoring): tagged so a build-time
+            // extinguisher (Floor 5's, or any DefaultMazes.json-authored
+            // one) is selectable/removable in Decorator after a rebuild,
+            // same as Fire just above.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .extinguisher, direction: direction).tag(node)
             root.addChildNode(node)
             extinguisherNodes[coord] = node
         }
         for coord in fires where cells.contains(coord) {
             let node = makeFireNode(at: coord, cellSize: cellSize, brightness: LightBrightness.level(for: .fire, at: coord, in: lightBrightness))
+            // Sept 23 (Decorator Floor expansion: Fire): tagged so a
+            // build-time-authored Fire is selectable/removable in Decorator
+            // after a rebuild, same as every other authored kind above.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .fire).tag(node)
             root.addChildNode(node)
             fireNodes[coord] = node
         }
         for (coord, placement) in photoBooths where cells.contains(coord) {
             let node = makePhotoBoothNode(at: coord, direction: placement.direction, expression: placement.expression, cellSize: cellSize)
+            // Sept 25 (Designer wall authoring): tagged so a build-time
+            // booth (Floor 6's, or any DefaultMazes.json-authored one)
+            // is selectable/removable in Decorator after a rebuild.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .photoBooth, direction: placement.direction).tag(node)
             root.addChildNode(node)
             photoBoothNodes[coord] = node
             // TEMP DIAGNOSTIC (Eddie, Sept 13, photo booth text
@@ -3324,7 +3477,16 @@ enum HallwayScene {
         for door in roomDoors.values {
             let neighbor = GridCoordinate(row: door.coord.row + door.direction.delta.row, col: door.coord.col + door.direction.delta.col)
             guard cells.contains(door.coord), !cells.contains(neighbor) else { continue }
-            root.addChildNode(makeRoomDoorNode(door, cellSize: cellSize))
+            let doorNode = makeRoomDoorNode(door, cellSize: cellSize)
+            // Sept 24 (Empty Wall chooser, decorative room doors): only
+            // DECORATIVE doors get tagged, so a rebuild of a floor a
+            // player added doors to in Decorator keeps them selectable/
+            // removable there. Functional/mail doors stay untagged and
+            // keep their existing non-selectable-in-Decorator status.
+            if door.isDecorative {
+                DecoratorTarget(floor: floorNumber, coord: door.coord, kind: .roomDoor, direction: door.direction).tag(doorNode)
+            }
+            root.addChildNode(doorNode)
         }
 
         for (coord, direction) in exitSigns {
@@ -3344,6 +3506,11 @@ enum HallwayScene {
             // shows a broad face to the approaches that need it and the
             // thin edge to anyone already travelling along the route.
             sign.position = SCNVector3(Float(x), Float(wallHeight), Float(z))
+            // Sept 23 (Decorator Ceiling expansion: Exit Sign): tagged so a
+            // build-time-authored Exit Sign is selectable/removable in
+            // Decorator after a rebuild, exactly like the Fluorescent/
+            // Ceiling fixtures a few lines above already are.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .exitSign).tag(sign)
             root.addChildNode(sign)
             exitSignNodes[coord] = sign
         }
@@ -3381,7 +3548,7 @@ enum HallwayScene {
                 case .east: (wx, wz) = (mapX + half, mapZ)
                 case .west: (wx, wz) = (mapX - half, mapZ)
                 }
-                let plane = addFloorMapNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: mapTexture, coord: coord, pictureLightLevel: pictureLights[coord] == direction ? LightBrightness.level(for: .picture, at: coord, in: lightBrightness) : nil)
+                let plane = addFloorMapNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: mapTexture, coord: coord, pictureLightLevel: pictureLights.contains(WallFace(coord: coord, direction: direction)) ? LightBrightness.level(for: .picture, at: coord, direction: direction, in: lightBrightness) : nil)
                 floorMapPlaneNodes.append(plane)
             }
         }
@@ -3421,10 +3588,24 @@ enum HallwayScene {
             default: missionArtworkName = nil
             }
             var missionTexture = makeMissionSignTexture(heading: missionHeading, body: missionBody)
-            if let missionArtworkName,
-               let path = Bundle.main.path(forResource: missionArtworkName, ofType: "png"),
-               let artwork = UIImage(contentsOfFile: path) {
-                missionTexture = artwork
+            // Sept 26 (mission-artwork resource organization): these
+            // now live in their own Hallways-Assets/missions folder
+            // reference. Same defensive subdirectory-then-flat-fallback
+            // shape as the hallway/elevator surface lookups -- tried
+            // first, falling through to the original flat lookup
+            // unchanged (so this resolves correctly even if the
+            // synchronized-root's bundle layout doesn't preserve the
+            // subdirectory the way expected).
+            if let missionArtworkName {
+                var artwork: UIImage?
+                if let url = Bundle.main.url(forResource: missionArtworkName, withExtension: "png", subdirectory: "missions") {
+                    artwork = UIImage(contentsOfFile: url.path)
+                } else if let path = Bundle.main.path(forResource: missionArtworkName, ofType: "png") {
+                    artwork = UIImage(contentsOfFile: path)
+                }
+                if let artwork {
+                    missionTexture = artwork
+                }
             }
             for (coord, direction) in missionSigns {
                 guard cells.contains(coord) else { continue }
@@ -3444,7 +3625,7 @@ enum HallwayScene {
                 case .east: (wx, wz) = (signX + half, signZ)
                 case .west: (wx, wz) = (signX - half, signZ)
                 }
-                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture, coord: coord, pictureLightLevel: pictureLights[coord] == direction ? LightBrightness.level(for: .picture, at: coord, in: lightBrightness) : nil)
+                addMissionSignNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: missionTexture, coord: coord, pictureLightLevel: pictureLights.contains(WallFace(coord: coord, direction: direction)) ? LightBrightness.level(for: .picture, at: coord, direction: direction, in: lightBrightness) : nil)
             }
         }
 
@@ -3468,9 +3649,9 @@ enum HallwayScene {
         // every placed picture regardless of picturesUseCameraRoll/
         // explicit selection, since ANY of them can later receive an
         // explicit choice via the menu.
-        var pictureMaterials: [GridCoordinate: SCNMaterial] = [:]
+        var pictureMaterials: [WallFace: SCNMaterial] = [:]
         // Sept 20 (Change Picture menu): one specific picture can carry
-        // an explicit image choice (pictureImageSelections[coord]),
+        // an explicit image choice (pictureImageSelections[face]),
         // made by tapping it in-world -- see PictureImageSelection's
         // own doc comment. A camera-roll choice still needs its own
         // async fetch (the exact PHAsset it names, not a random one),
@@ -3482,11 +3663,16 @@ enum HallwayScene {
         var explicitCameraRollMaterials: [(identifier: String, material: SCNMaterial)] = []
         let pendingPhoto = picturesUseCameraRoll ? Self.mirrorPlaceholder("Loading photo…") : nil
         if !pictures.isEmpty {
-            for (coord, placement) in pictures {
-                let direction = placement.direction
+            // Sept 22 (wall-face authoring expansion): iterates one entry
+            // PER WALL FACE now (was one per cell) -- `pictures` is keyed
+            // by WallFace, so a cell with a Picture on two different walls
+            // now correctly builds two separate frame nodes here.
+            for (face, size) in pictures {
+                let coord = face.coord
+                let direction = face.direction
                 guard cells.contains(coord) else { continue }
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
-                let explicitSelection = pictureImageSelections[coord]
+                let explicitSelection = pictureImageSelections[face]
                 var pendingIdentifier: String? = nil
                 let pictureTexture: UIImage?
                 switch explicitSelection {
@@ -3510,15 +3696,17 @@ enum HallwayScene {
                 case .west: (wx, wz) = (picX - half, picZ)
                 }
                 let texture = Self.framedPhoto(pictureTexture)
-                let (material, frameNode) = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, scale: placement.size.scale, pictureLightLevel: pictureLights[coord] == direction ? LightBrightness.level(for: .picture, at: coord, in: lightBrightness) : nil, coord: coord)
+                let (material, frameNode) = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, scale: size.scale, pictureLightLevel: pictureLights.contains(face) ? LightBrightness.level(for: .picture, at: coord, direction: direction, in: lightBrightness) : nil, coord: coord)
                 // Sept 21 (Decorator Picture support): ONLY ordinary
                 // authored pictures from this loop get tagged -- Floor
                 // 1's hardcoded lobbyPhotos loop below deliberately does
                 // not call this, same for every other image-like
                 // surface (mission boards, signs, elevator posters,
-                // maps, mirrors), exactly per Eddie's scope.
-                DecoratorTarget(floor: floorNumber, coord: coord, kind: .picture).tag(frameNode)
-                pictureMaterials[coord] = material
+                // maps, mirrors), exactly per Eddie's scope. Sept 22:
+                // now carries `direction` too, so DecoratorState can
+                // tell apart two Pictures tagged at the same coord.
+                DecoratorTarget(floor: floorNumber, coord: coord, kind: .picture, direction: direction).tag(frameNode)
+                pictureMaterials[face] = material
                 if let pendingIdentifier {
                     explicitCameraRollMaterials.append((identifier: pendingIdentifier, material: material))
                 } else if explicitSelection == nil, picturesUseCameraRoll {
@@ -3557,8 +3745,15 @@ enum HallwayScene {
                 let delta = direction.delta
                 guard !isOpen(coord.row + delta.row, coord.col + delta.col) else { continue }
                 let texture: UIImage
-                if let path = Bundle.main.path(forResource: resourceName, ofType: "png"),
-                   let bundled = UIImage(contentsOfFile: path) {
+                // Sept 26 (intro/lobby resource organization): these three
+                // now live in Hallways-Assets/lobby, bundled as the
+                // "lobby" subdirectory -- tried first, then falls
+                // through to the original flat lookup for resilience.
+                if let url = Bundle.main.url(forResource: resourceName, withExtension: "png", subdirectory: "lobby"),
+                   let bundled = UIImage(contentsOfFile: url.path) {
+                    texture = Self.framedPhoto(bundled)
+                } else if let path = Bundle.main.path(forResource: resourceName, ofType: "png"),
+                          let bundled = UIImage(contentsOfFile: path) {
                     texture = Self.framedPhoto(bundled)
                 } else {
                     navLog("PHOTO-PATH-V1 floor \(floorNumber) lobby fixed photo MISSING resource=\(resourceName).png")
@@ -3612,7 +3807,14 @@ enum HallwayScene {
         for (coord, direction) in mirrors where cells.contains(coord) {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
-            root.addChildNode(makeMirrorNode(at: coord, direction: direction, cellSize: cellSize))
+            let mirrorNode = makeMirrorNode(at: coord, direction: direction, cellSize: cellSize)
+            // Sept 25 (Designer wall authoring): tagged so a build-time
+            // mirror (Floors 2/3/4's, or any DefaultMazes.json-authored
+            // one) is selectable/removable in Decorator after a rebuild.
+            // The tag rides the mirror ROOT; its "mirrorSurface" child
+            // is what the live reflection feed (MirrorCamera) reads.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .mirror, direction: direction).tag(mirrorNode)
+            root.addChildNode(mirrorNode)
             // Eddie, Sept 12, item 5: "the mirror currently shows a
             // BLACK rectangular/background area instead of visually
             // integrating with the wall. The wall texture/material
@@ -4062,9 +4264,20 @@ enum HallwayScene {
 
         // Floor 1: the inside face of the building entrance, behind the spawn.
         // A thin image surface leaves the existing wall and navigation untouched.
-        if floorNumber == 1,
-           let path = Bundle.main.path(forResource: "back-of-front-door", ofType: "jpg"),
-           let image = UIImage(contentsOfFile: path) {
+        // Sept 26 (intro/lobby resource organization): back-of-front-door.jpg
+        // now lives in Hallways-Assets/lobby, a folder reference bundled
+        // as the "lobby" subdirectory (same mechanism as the "hallway"
+        // texture library) -- tried first, then falls through to the
+        // original flat lookup for resilience.
+        let backOfDoorImage: UIImage? = {
+            if let url = Bundle.main.url(forResource: "back-of-front-door", withExtension: "jpg", subdirectory: "lobby"),
+               let image = UIImage(contentsOfFile: url.path) {
+                return image
+            }
+            guard let path = Bundle.main.path(forResource: "back-of-front-door", ofType: "jpg") else { return nil }
+            return UIImage(contentsOfFile: path)
+        }()
+        if floorNumber == 1, let image = backOfDoorImage {
             let height = min(2.85, wallHeight - 0.08)
             let surface = SCNPlane(width: height * image.size.width / image.size.height, height: height)
             let material = SCNMaterial()
@@ -4192,10 +4405,37 @@ enum HallwayScene {
     // picker (ContentView) needs this exact list to build its grid, and
     // this stays the single source of truth for it rather than a
     // second, hand-duplicated copy that could drift.
-    static let pictureAssetNames: [String] = [
-        "IMG_7416", "IMG_7439", "IMG_7487", "IMG_7598", "IMG_7604",
-        "IMG_7605", "IMG_7606", "IMG_7607", "IMG_7608",
-    ]
+    //
+    // Sept 26 (unified Hallways picture library): no longer a
+    // hardcoded list -- Eddie's own architectural decision this round
+    // is that there is ONE built-in stock picture library
+    // (Hallways-Assets/pictures, bundled as the "pictures"
+    // subdirectory, the same folder-reference pattern already
+    // physically verified for hallway/intro/lobby/elevator/missions),
+    // used for BOTH ordinary hallway-frame pictures and elevator
+    // posters. Same discovery shape as availableHallwayTextureNames()
+    // just below: scan the bundle, ignore anything that isn't a
+    // top-level image file in that one folder (no recursion into a
+    // stray subfolder), sort for determinism. Falls back to the
+    // original 9-name list if the scan comes back empty, so a first
+    // physical test stays usable even if this environment's guess
+    // about the synchronized-root/folder-reference bundle layout
+    // turns out wrong -- same unverified-without-a-build reasoning as
+    // every other migrated lookup this session.
+    static var pictureAssetNames: [String] {
+        let subdirectory = "pictures"
+        var names: Set<String> = []
+        for ext in ["jpg", "jpeg", "png", "webp"] {
+            for url in Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: subdirectory) ?? [] {
+                names.insert(url.deletingPathExtension().lastPathComponent)
+            }
+        }
+        if names.isEmpty {
+            names = ["IMG_7416", "IMG_7439", "IMG_7487", "IMG_7598", "IMG_7604",
+                      "IMG_7605", "IMG_7606", "IMG_7607", "IMG_7608"]
+        }
+        return names.sorted()
+    }
 
     /// CSS-cover equivalent for the 0.6 × 0.85 portrait picture opening.
     /// Scale uniformly to fill it, center the image, and clip the overflow.
@@ -4227,9 +4467,9 @@ enum HallwayScene {
     // itself already uses. No behavior change to this function itself.
     static func randomPictureImage(caller: String) -> UIImage? {
         guard let name = pictureAssetNames.randomElement(),
-              let path = Bundle.main.path(forResource: name, ofType: "jpg") else { return nil }
-        navLog("PHOTO-PATH-V1 caller=\(caller) BUNDLED FALLBACK USED (configured bundled mode) file=\(name).jpg")
-        return UIImage(contentsOfFile: path)
+              let image = namedPictureImage(name) else { return nil }
+        navLog("PHOTO-PATH-V1 caller=\(caller) BUNDLED FALLBACK USED (configured bundled mode) file=\(name)")
+        return image
     }
 
     /// One specific bundled Hallways Art image by name (no extension,
@@ -4239,25 +4479,40 @@ enum HallwayScene {
     /// rather than any random one. Not `private`: the same reason
     /// pictureAssetNames above isn't.
     static func namedPictureImage(_ name: String) -> UIImage? {
-        guard let path = Bundle.main.path(forResource: name, ofType: "jpg") else { return nil }
-        return UIImage(contentsOfFile: path)
+        // Sept 26 (unified Hallways picture library): persisted
+        // PictureImageSelection.builtIn(name) identifiers never carry
+        // an extension (see that type's own doc comment), so this now
+        // tries every supported extension against the "pictures"
+        // bundle subdirectory, then falls through to the original
+        // flat lookup (jpg only, matching this function's pre-Sept-26
+        // behavior) for resilience -- same defensive
+        // subdirectory-then-flat shape as every other migrated lookup
+        // this session.
+        let subdirectory = "pictures"
+        for ext in ["jpg", "jpeg", "png", "webp"] {
+            if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: subdirectory),
+               let image = UIImage(contentsOfFile: url.path) {
+                return image
+            }
+        }
+        if let path = Bundle.main.path(forResource: name, ofType: "jpg") {
+            return UIImage(contentsOfFile: path)
+        }
+        return nil
     }
 
-    /// Eddie, Sept 12: bundled resource folder "elevator-pics" (a
-    /// synchronized-group folder under Hallways/, same auto-registration
-    /// as Audio/ -- see SoundEffects.swift's header comment -- so
-    /// nothing further is needed on Eddie's end to pick these up).
-    /// Hardcoded basenames, same established convention as
-    /// pictureAssetNames just above, since these ship in the app
-    /// bundle rather than being enumerated from disk at runtime.
-    /// Elevator posters ONLY -- ordinary hallway pictures keep using
-    /// pictureAssetNames/the camera roll, untouched.
-    private static let elevatorPosterAssetNames: [String] = [
-        "elevator-poster-01", "elevator-poster-02", "elevator-poster-03", "elevator-poster-04",
-        "elevator-poster-05", "elevator-poster-06", "elevator-poster-07", "elevator-poster-08",
-        "elevator-poster-09", "elevator-poster-10", "elevator-poster-11", "elevator-poster-12",
-        "elevator-poster-13", "elevator-poster-14", "elevator-poster-15", "elevator-poster-16",
-    ]
+    /// Sept 26 (unified Hallways picture library): elevator posters
+    /// no longer have their own bundled-picture list at all -- Eddie's
+    /// own architectural decision is that there is no conceptual
+    /// distinction between a built-in elevator picture and a built-in
+    /// hallway picture, so a Hallways-owned picture is just a
+    /// Hallways-owned picture, drawn from pictureAssetNames/
+    /// namedPictureImage above like any other. The old
+    /// elevatorPosterAssetNames hardcoded list and its
+    /// randomElevatorPosterImages(count:) picker (superseded by
+    /// camera-roll posters back on Sept 13, and already dead code by
+    /// then) are removed below, replaced by randomBuiltInImages(count:),
+    /// which draws from that same unified library.
 
     /// The fixed aspect (height / width) both elevator posters share.
     /// Eddie, Sept 12 follow-up: his own "poster" was always the
@@ -4290,22 +4545,50 @@ enum HallwayScene {
         }
     }
 
-    /// Up to `count` distinct random picks from the bundled elevator-pics
-    /// folder (sampling without replacement, so two requested images are
-    /// never the same one as long as at least two bundle images loaded
-    /// successfully -- "prefer two different images when at least two
-    /// are available"). Fewer than `count` come back only if the bundle
-    /// itself has fewer usable images than that.
-    private static func randomElevatorPosterImages(count: Int) -> [UIImage] {
+    /// Sept 26 (unified Hallways picture library): replaces the old
+    /// elevator-only randomElevatorPosterImages(count:) -- same "up to
+    /// count distinct picks, sampling without replacement" contract
+    /// ("prefer two different images when at least two are
+    /// available"), now drawn from pictureAssetNames/namedPictureImage
+    /// (the SAME unified stock library ordinary hallway pictures use)
+    /// instead of the removed elevator-only bundled list. Used by
+    /// addElevatorDoor's two poster blocks below when
+    /// picturesUseCameraRoll is false; camera-roll mode is unchanged
+    /// and does not call this.
+    private static func randomBuiltInImages(count: Int) -> [UIImage] {
         var images: [UIImage] = []
-        for name in elevatorPosterAssetNames.shuffled() {
+        for name in pictureAssetNames.shuffled() {
             guard images.count < count else { break }
-            if let path = Bundle.main.path(forResource: name, ofType: "jpg"),
-               let image = UIImage(contentsOfFile: path) {
+            if let image = namedPictureImage(name) {
                 images.append(image)
             }
         }
         return images
+    }
+
+    /// Sept 26 (per-floor surface authoring): the reusable texture
+    /// names the Floor Editor's "Floor Surfaces" picker offers, drawn
+    /// from Hallways-Assets/textures/hallway/ itself rather than a
+    /// hand-maintained list, so a texture Eddie drops in there later
+    /// shows up with no code change. Falls back to the six names this
+    /// session organized there (Floor 1's lobby-wall/floor1/
+    /// lobby-ceiling, Floor 2's wood-walnut/floor-carpet1/
+    /// ceiling-pattern) if the bundle scan comes back empty -- same
+    /// unverified-without-a-build uncertainty as resolveThemeImage's
+    /// two-lookup fallback just below, and the same reasoning: this
+    /// keeps the picker usable on first physical test either way.
+    static func availableHallwayTextureNames() -> [String] {
+        let subdirectory = "hallway"
+        var names: Set<String> = []
+        for ext in ["jpg", "png", "jpeg", "webp"] {
+            for url in Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: subdirectory) ?? [] {
+                names.insert(url.deletingPathExtension().lastPathComponent)
+            }
+        }
+        if names.isEmpty {
+            names = ["lobby-wall", "floor1", "lobby-ceiling", "wood-walnut", "floor-carpet1", "ceiling-pattern"]
+        }
+        return names.sorted()
     }
 
     static func resolveThemeImage(_ imageName: String?) -> UIImage? {
@@ -4327,6 +4610,51 @@ enum HallwayScene {
             // lookup/behavior for every existing imageName), then png,
             // so a png-named image resolves too without a second
             // image-loading system.
+            // Sept 26 (per-floor surface authoring): the organized
+            // reusable texture library. Tried first, entirely
+            // additively -- an imageName that isn't in here (every
+            // existing theme/floor-1/floor-2 name today) falls
+            // straight through to the exact same flat lookup as
+            // before, unchanged. Two candidate lookups because this
+            // environment has no way to verify, without a real Xcode
+            // build, whether a PBXFileSystemSynchronizedRootGroup
+            // preserves this subdirectory's on-disk path inside the
+            // compiled bundle or flattens it to the bundle root like
+            // every other loose resource here -- trying the
+            // subdirectory-aware lookup first covers the first case,
+            // and falling through to the ordinary flat lookup below
+            // covers the second, so this resolves correctly either way.
+            let hallwayTextureLibrary = "hallway"
+            if let url = Bundle.main.url(forResource: imageName, withExtension: "jpg", subdirectory: hallwayTextureLibrary) {
+                return UIImage(contentsOfFile: url.path)
+            }
+            if let url = Bundle.main.url(forResource: imageName, withExtension: "png", subdirectory: hallwayTextureLibrary) {
+                return UIImage(contentsOfFile: url.path)
+            }
+            // Sept 26 (WebP support): iOS's built-in ImageIO decoder
+            // (which UIImage(contentsOfFile:) already uses under the
+            // hood for every lookup in this function) has decoded WebP
+            // natively since iOS 14 -- this project's deployment target
+            // is 26.5, well past that, so a bundled .webp needs no
+            // third-party decoder, just one more extension tried here,
+            // matching availableHallwayTextureNames()'s own scan just
+            // above. jpg/png/jpeg behavior above and below is
+            // unchanged.
+            if let url = Bundle.main.url(forResource: imageName, withExtension: "webp", subdirectory: hallwayTextureLibrary) {
+                return UIImage(contentsOfFile: url.path)
+            }
+            // Sept 26 (elevator resource organization): elevator-wall/
+            // elevator-ceiling/elevator-floor now live in their own
+            // Hallways-Assets/elevator folder reference (kept separate
+            // from the hallway texture library above -- these are
+            // hardcoded elevator-only surfaces, not part of that
+            // reusable/dynamically-scanned catalog). Same defensive
+            // subdirectory-then-flat-fallback shape as the hallway
+            // lookup just above.
+            let elevatorSurfaceLibrary = "elevator"
+            if let url = Bundle.main.url(forResource: imageName, withExtension: "jpg", subdirectory: elevatorSurfaceLibrary) {
+                return UIImage(contentsOfFile: url.path)
+            }
             if let path = Bundle.main.path(forResource: imageName, ofType: "jpg") {
                 return UIImage(contentsOfFile: path)
             }
@@ -4488,7 +4816,11 @@ enum HallwayScene {
     /// destination-icon placement (mounted flat behind a wall shutter),
     /// so there's exactly one switch over ObjectKind's cases instead of
     /// one per call site.
-    private static func makeObjectNode(_ kind: ObjectKind, size: CGFloat, floorNumber: Int = 1) -> SCNNode {
+    // Sept 23 (Decorator Floor expansion): access widened from `private`
+    // to internal so DecoratorMode.swift can build a live Paint Bucket (and
+    // any other non-trash, non-envelope pickup) node the same way this
+    // file's own build(fromMaze:) loop does. No behavior change.
+    static func makeObjectNode(_ kind: ObjectKind, size: CGFloat, floorNumber: Int = 1) -> SCNNode {
         switch kind {
         case .heart:
             return makeHeartNode(size: size)
@@ -4528,12 +4860,28 @@ enum HallwayScene {
     /// until you arrive with the right critter -- physically based,
     /// high metalness/low roughness so it actually reads as polished
     /// metal (a dumbwaiter-style panel) rather than flat gray paint.
+    /// Sept 23 (black-shutter regression, root-caused and FIXED): this
+    /// was the one and only material in the build at metalness **1.0**.
+    /// A PBR metal at 1.0 drops its diffuse term to ~zero in SceneKit,
+    /// so the surface becomes a pure mirror that gets its entire look
+    /// from whatever the scene's `lightingEnvironment` reflects -- and
+    /// this hallway has **no** environment map (background is just a
+    /// near-black 0.04 slab + fog; see build's scene.background row).
+    /// A chrome mirror with nothing to reflect = solid black, which is
+    /// exactly what Eddie saw on the movable shutter. The elevator
+    /// door on the SAME walls went through this same blackening back in
+    /// the Sept-8 round and lives at metalness 0.2 / roughness 0.65;
+    /// every other metal that renders on this hallway sits at 0.4-0.65.
+    /// Smallest fix that keeps a visible chrome sheen: metalness 1.0
+    /// -> 0.5, roughness 0.22 -> 0.4 (reads as polished chrome instead
+    /// of a black mirror-with-nothing-to-reflect). No geometry, lights,
+    /// environment, or DD recipe touched.
     private static func makeDestinationDoorMaterial() -> SCNMaterial {
         let m = SCNMaterial()
         m.diffuse.contents = UIColor(white: 0.78, alpha: 1)
         m.lightingModel = .physicallyBased
-        m.metalness.contents = 1.0
-        m.roughness.contents = 0.22
+        m.metalness.contents = 0.55
+        m.roughness.contents = 0.40
         return m
     }
 
@@ -4584,11 +4932,35 @@ enum HallwayScene {
     /// faintly readable in the dark.
     private static func makeTrashChuteInteriorMaterial() -> SCNMaterial {
         let m = SCNMaterial()
-        if let path = Bundle.main.path(forResource: "trash-chute-inside", ofType: "jpeg"),
-           let image = UIImage(contentsOfFile: path) {
+        if let url = Bundle.main.url(forResource: "trash-chute-inside", withExtension: "jpeg", subdirectory: "trash-chute")
+            ?? Bundle.main.url(forResource: "trash-chute-inside", withExtension: "jpeg"),
+           let image = UIImage(contentsOfFile: url.path) {
             m.diffuse.contents = image
+            // Sept 26 (Eddie's screenshot review): the back interior
+            // wall faces roughly toward whatever real ceiling fixture
+            // lights the hallway (per the Sept 19 "source-based
+            // lighting" rule -- no flat ambient/headlamp exists
+            // anymore, only real fixtures), so it picks up real diffuse
+            // light and reads correctly. The left/right shaft walls
+            // face sideways, almost perpendicular to that light, so
+            // they receive next to none -- with the old flat near-black
+            // emission color, that left them fully unlit and
+            // featureless, not just "naturally shaded." Emission is
+            // unlit (shows regardless of angle/light), so mirroring the
+            // same photo into it -- dimmed via intensity, clamped/
+            // untiled exactly like diffuse -- makes every face show at
+            // least a faint version of the real photograph. The back
+            // wall's own look is unchanged in practice (its diffuse
+            // response already dominates once lit); the sides go from
+            // flat black to a dim but recognizable chute interior.
+            m.emission.contents = image
+            m.emission.wrapS = .clamp
+            m.emission.wrapT = .clamp
+            m.emission.contentsTransform = SCNMatrix4Identity
+            m.emission.intensity = 0.3
         } else {
             m.diffuse.contents = UIColor(white: 0.03, alpha: 1)
+            m.emission.contents = UIColor(red: 0.05, green: 0.025, blue: 0.01, alpha: 1)
         }
         m.diffuse.wrapS = .clamp
         m.diffuse.wrapT = .clamp
@@ -4596,7 +4968,6 @@ enum HallwayScene {
         m.lightingModel = .physicallyBased
         m.metalness.contents = 0.0
         m.roughness.contents = 0.9
-        m.emission.contents = UIColor(red: 0.05, green: 0.025, blue: 0.01, alpha: 1)
         return m
     }
 
@@ -4703,9 +5074,15 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil) -> UIImage {
-        let cellPx: CGFloat = 48
-        let margin: CGFloat = 16
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false) -> UIImage {
+        // simplified (the handheld mini-map): a small, clean corridor
+        // shape -- floor cells plus the live player marker only. No
+        // room numbers, mission dots, elevator, booths, painted fill,
+        // or HERE label. Full map (simplified == false) keeps all of
+        // those. Same 15x15 building grid either way, so the topology
+        // and the player arrow are pinned to the exact same coordinates.
+        let cellPx: CGFloat = simplified ? 12 : 48
+        let margin: CGFloat = simplified ? 6 : 16
         // The permanent building coordinate space (GridEditorView's own
         // fixed columns/rows) -- NOT this floor's occupied-cell bounding
         // box. See this function's doc comment above.
@@ -4721,7 +5098,7 @@ enum HallwayScene {
         // map frame? that shouldnt be. that background could be a
         // very light gray or color to be determined." This flat tone
         // is a placeholder for whatever color he actually settles on.
-        let backgroundColor = UIColor(white: 0.85, alpha: 1)
+        let backgroundColor = UIColor(white: 0.85, alpha: backgroundOpacity)
         let stoneColor = UIColor(red: 0.08, green: 0.06, blue: 0.03, alpha: 1)
         let floorColor = UIColor(red: 0.86, green: 0.74, blue: 0.46, alpha: 1)
         let elevatorColor = UIColor(white: 0.05, alpha: 1)
@@ -4746,6 +5123,7 @@ enum HallwayScene {
                 cg.fill(rect)
             }
 
+            if !simplified {
             if let paintedCells {
                 PaintPalette.blue.setFill()
                 for coord in paintedCells {
@@ -4754,12 +5132,26 @@ enum HallwayScene {
             }
 
             // Thin grout between open cells so the corridor SHAPE reads
-            // clearly rather than as one solid parchment blob.
+            // clearly rather than as one solid parchment blob. (Full map
+            // only -- the mini-map's ~3pt cells are too small for grout
+            // to survive the downscale, so its corridors are delineated
+            // purely by the floor/background contrast.)
             stoneColor.setStroke()
             cg.setLineWidth(1.5)
             for coord in cells {
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
                 cg.stroke(rect)
+            }
+
+            // Room backgrounds precede mission markers: green wins
+            // on every floor, while the existing room data stays intact.
+            let centerStyle = NSMutableParagraphStyle()
+            centerStyle.alignment = .center
+            for door in roomDoors.values {
+                guard !bathroomCells.contains(door.coord) else { continue }
+                let rect = CGRect(x: margin + CGFloat(door.coord.col) * cellPx + 2, y: margin + CGFloat(door.coord.row) * cellPx + 2, width: cellPx - 4, height: cellPx - 4)
+                UIColor(red: 0.4, green: 0.22, blue: 0.1, alpha: 1).setFill()
+                cg.fill(rect)
             }
 
             // The elevator -- a black circle, deliberately oversized
@@ -4824,20 +5216,18 @@ enum HallwayScene {
             // TapNavigationController.refreshFloorMapTexture(), the
             // "real additional plumbing" this comment used to say was
             // saved for later.
-            let centerStyle = NSMutableParagraphStyle()
-            centerStyle.alignment = .center
+            // Keep room numbers readable above the mission fill.
             for door in roomDoors.values {
                 guard !bathroomCells.contains(door.coord) else { continue }
-                let rect = CGRect(x: margin + CGFloat(door.coord.col) * cellPx + 2, y: margin + CGFloat(door.coord.row) * cellPx + 2, width: cellPx - 4, height: cellPx - 4)
-                UIColor(red: 0.4, green: 0.22, blue: 0.1, alpha: 1).setFill()
-                cg.fill(rect)
-                ("\(door.roomNumber)" as NSString).draw(in: rect.offsetBy(dx: 0, dy: 9), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.white, .paragraphStyle: centerStyle])
+                let rect = CGRect(x: margin + CGFloat(door.coord.col) * cellPx + 2, y: margin + CGFloat(door.coord.row) * cellPx + 11, width: cellPx - 4, height: cellPx - 4)
+                ("\(door.roomNumber)" as NSString).draw(in: rect, withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.white, .paragraphStyle: centerStyle])
             }
             for coord in missionItemCells {
                 guard let room = itemRooms[coord], !bathroomCells.contains(coord) else { continue }
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx + 2, y: margin + CGFloat(coord.row) * cellPx + 10, width: cellPx - 4, height: 28)
                 UIColor.white.setFill(); cg.fill(rect)
                 ("\(room)" as NSString).draw(in: rect, withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.black, .paragraphStyle: centerStyle])
+            }
             }
 
             let playerRect = CGRect(x: margin + CGFloat(playerAt.col) * cellPx, y: margin + CGFloat(playerAt.row) * cellPx, width: cellPx, height: cellPx)
@@ -4855,7 +5245,7 @@ enum HallwayScene {
             let hereRingDiameter = cellPx * 1.08
             let hereRingRect = CGRect(x: center.x - hereRingDiameter / 2, y: center.y - hereRingDiameter / 2, width: hereRingDiameter, height: hereRingDiameter)
             UIColor(red: 0.08, green: 0.12, blue: 0.85, alpha: 1).setStroke()
-            cg.setLineWidth(4)
+            cg.setLineWidth(simplified ? 2 : 4)
             cg.strokeEllipse(in: hereRingRect)
 
             let angle: CGFloat
@@ -4876,6 +5266,7 @@ enum HallwayScene {
             cg.fillPath()
             cg.restoreGState()
 
+            if !simplified {
             let labelFont = UIFont.boldSystemFont(ofSize: cellPx * 0.5)
             let labelAttrs: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: UIColor.black]
             let label = "HERE" as NSString
@@ -4888,6 +5279,7 @@ enum HallwayScene {
             let labelY = aboveY >= 0 ? aboveY : playerRect.maxY + 2
             let labelX = min(max(playerRect.midX - labelSize.width / 2, 2), width - labelSize.width - 2)
             label.draw(at: CGPoint(x: labelX, y: labelY), withAttributes: labelAttrs)
+            }
         }
     }
 
@@ -5059,6 +5451,36 @@ enum HallwayScene {
         let duration = baseDuration * Double.random(in: 0.85...1.15)
         let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: duration))
         node.runAction(spin)
+    }
+
+    /// Sept 25 (hanging-string pickups): the thin cord that makes a
+    /// spinning mid-air pickup read as hung from the ceiling rather
+    /// than inexplicably floating -- piñata-style. The cord is built
+    /// as a SEPARATE sibling node (never a child of the spinning
+    /// pickup), positioned in the caller's placement loop to span from
+    /// the ceiling (wallHeight) down to the pickup's center, so the
+    /// pickup's own spin action rotates only the pickup while this cord
+    /// stays perfectly still. It is raw SCNCylinder geometry with no
+    /// physics body and no collision category, so it can never block
+    /// the player or register in any hit-test/add-pickup path -- pure
+    /// presentation, exactly as Eddie wanted ("just a visual suspension
+    /// cord added to the existing pickup presentation").
+    ///
+    /// Sept 25 (visual tuning, on-device): radius cut 0.03 -> 0.009
+    /// (the thick cord read as a dark rod/broom handle up close) and,
+    /// after the light-tan attempt still rendered black, the material
+    /// swapped to the EXACT cash-gold material makeCashGoldMaterial
+    /// below provides -- the same emissive gold metal as the $100, so
+    /// the cord reads as a thin golden thread catching the same light
+    /// as the money it holds. No image texture at this diameter.
+    /// Second Sept 25 tuning cut: 0.009 -> 0.005, a barely-there strand
+    /// that reads as string up close and can vanish down a long hall.
+    static func makeHangingPickupStringNode(length: CGFloat, radius: CGFloat = 0.005) -> SCNNode {
+        let geometry = SCNCylinder(radius: radius, height: length)
+        let material = makeCashGoldMaterial()
+        geometry.materials = [material]
+        let node = SCNNode(geometry: geometry)
+        return node
     }
 
     /// A small rotating 3D heart — extruded from heartPath rather than
@@ -5448,18 +5870,31 @@ enum HallwayScene {
     /// (not the font's point size, which isn't the same thing once
     /// bevels/descenders are involved) matches `size` exactly, same as
     /// every other spinning pickup.
-    private static func makeCashNode(value: Int, size: CGFloat) -> SCNNode {
-        let text = SCNText(string: "$\(value)", extrusionDepth: 8)
-        text.font = UIFont.boldSystemFont(ofSize: 60)
-        text.flatness = 0.2
-        text.chamferRadius = 1.5
-
+    /// THE one authoritative construction of the cash-gold material —
+    /// single source of truth shared by the spinning "$100" pickup
+    /// (makeCashNode below) and the hanging pickup cord (Sept 25
+    /// tuning: the cord must be a thin golden THREAD that reads as the
+    /// same metal as the money it hangs, never a separate tan or dark
+    /// material). Emissive + metalness + roughness all live here so
+    /// picking up a cash object and the cord that holds it can never
+    /// fall out of sync again.
+    private static func makeCashGoldMaterial() -> SCNMaterial {
         let material = SCNMaterial()
         material.diffuse.contents = UIColor(red: 1.0, green: 0.78, blue: 0.15, alpha: 1)
         material.emission.contents = UIColor(red: 0.5, green: 0.36, blue: 0.04, alpha: 1)
         material.lightingModel = .physicallyBased
         material.metalness.contents = 0.5
         material.roughness.contents = 0.25
+        return material
+    }
+
+    private static func makeCashNode(value: Int, size: CGFloat) -> SCNNode {
+        let text = SCNText(string: "$\(value)", extrusionDepth: 8)
+        text.font = UIFont.boldSystemFont(ofSize: 60)
+        text.flatness = 0.2
+        text.chamferRadius = 1.5
+
+        let material = makeCashGoldMaterial()
         text.materials = [material]
 
         let node = SCNNode(geometry: text)
@@ -5559,7 +5994,11 @@ enum HallwayScene {
         return geometry
     }
 
-    private static func makeExitSignNode(pointing direction: Direction, cellSize: CGFloat) -> SCNNode {
+    // Sept 23 (Decorator Ceiling expansion): access widened from `private`
+    // to internal so DecoratorMode.swift can build a live Exit Sign node the
+    // same way this file's own build(fromMaze:) loop does -- no second
+    // implementation. No behavior change.
+    static func makeExitSignNode(pointing direction: Direction, cellSize: CGFloat) -> SCNNode {
         // A pendant "EXIT" fixture hung from the ceiling slab, scaled to
         // the maze cell so it reads well on any floor. The anchor node's
         // origin sits ON the ceiling (build() places it at y == wallHeight,
@@ -5600,21 +6039,35 @@ enum HallwayScene {
         let textHeight = signHeight * 0.62
 
         let housingMaterial = SCNMaterial()
-        housingMaterial.diffuse.contents = UIColor(red: 0.05, green: 0.05, blue: 0.06, alpha: 1)
+        // Sept 24: dark polished housing instead of a dead-black slab --
+        // subtle reflective sheen under the hallway spotlights so the
+        // pendant reads as a real metal fixture, while staying dark
+        // enough that the glowing legend is what pulls the eye.
+        housingMaterial.diffuse.contents = UIColor(red: 0.13, green: 0.13, blue: 0.15, alpha: 1)
         housingMaterial.lightingModel = .physicallyBased
-        housingMaterial.metalness.contents = 0.35
-        housingMaterial.roughness.contents = 0.8
+        housingMaterial.metalness.contents = 0.55
+        housingMaterial.roughness.contents = 0.5
 
         let faceMaterial = SCNMaterial()
+        // Deep red backing panel, itself faintly lit (controlled
+        // emission) so the whole sign reads as an illuminated fixture;
+        // the bright red legend below carries the actual glow.
         faceMaterial.diffuse.contents = UIColor(red: 0.45, green: 0.02, blue: 0.02, alpha: 1)
-        faceMaterial.emission.contents = UIColor(red: 0.28, green: 0.015, blue: 0.01, alpha: 1)
+        faceMaterial.emission.contents = UIColor(red: 0.34, green: 0.02, blue: 0.015, alpha: 1)
         faceMaterial.lightingModel = .physicallyBased
         faceMaterial.metalness.contents = 0.0
         faceMaterial.roughness.contents = 0.5
 
+        // Sept 24: the EXIT word and its arrow are now bright, glowing
+        // red (real illuminated emergency-sign styling -- the previous
+        // near-white legend read as a printed label). Emission is held
+        // deliberately below 1.0 so the glow stays readable, not blown
+        // out, in the dark hall. `makeExitSignNode` is also what the
+        // Decorator's live Exit Sign edit path builds, so this styling
+        // applies there too.
         let textMaterial = SCNMaterial()
-        textMaterial.diffuse.contents = UIColor(red: 0.95, green: 0.92, blue: 0.9, alpha: 1)
-        textMaterial.emission.contents = UIColor(red: 0.7, green: 0.62, blue: 0.58, alpha: 1)
+        textMaterial.diffuse.contents = UIColor(red: 0.96, green: 0.12, blue: 0.10, alpha: 1)
+        textMaterial.emission.contents = UIColor(red: 0.45, green: 0.03, blue: 0.02, alpha: 1)
         textMaterial.lightingModel = .physicallyBased
 
         // Suspension rods -- ceiling down to the two housing corners.
@@ -5755,3 +6208,49 @@ enum HallwayScene {
             }
         }
 
+
+// Shared by scene rebuilds and current-cell Hanging authoring.
+extension HallwayScene {
+    static func buildPickupAssembly(_ kind: ObjectKind, at coord: GridCoordinate,
+                                    cellSize: CGFloat, wallHeight: CGFloat,
+                                    floorNumber: Int, roomNumber: Int? = nil) -> SCNNode {
+        let node = kind == .envelope ? makeEnvelopeNode(roomNumber: roomNumber) : makeObjectNode(kind, size: cellSize * 0.22, floorNumber: floorNumber)
+        let objectY = wallHeight * (kind == .envelope ? 0.4 : 0.25)
+        // Sept 25 (hanging-string pickups): every kind that uses
+        // the spinning mid-air presentation rides inside a static
+        // assembly node (pickup stays at the SAME world position,
+        // its own spin action spins in place around its own
+        // origin -- a child that spins with it would be too late
+        // to unwrap). The cord is a SIBLING of the spinning
+        // pickup under that stationary assembly, so only the
+        // pickup rotates -- the string never does. Registering
+        // the assembly in objectNodes (instead of the bare
+        // pickup) means collecting it removes pickup AND cord
+        // together; nothing else looks at these nodes directly.
+        let assembly = SCNNode()
+        assembly.position = SCNVector3(Float(CGFloat(coord.col) * cellSize), Float(objectY), Float(CGFloat(coord.row) * cellSize))
+        node.position = SCNVector3Zero
+        assembly.addChildNode(node)
+        if kind.hangsFromCeiling {
+            let pickupSize = cellSize * 0.22
+            let pickupTopOffset: CGFloat = (kind == .envelope ? 0.85 * 550 / 900 / 2 : pickupSize * 0.45)
+            let attachY = objectY + pickupTopOffset
+            let stringHeight = wallHeight - attachY
+            let cord = makeHangingPickupStringNode(length: stringHeight)
+            cord.position = SCNVector3(0, Float(attachY - objectY + stringHeight / 2), 0)
+            cord.name = "hangingPickupString"
+            assembly.addChildNode(cord)
+        }
+        // Sept 23 (Decorator Floor expansion: Envelope/Paint
+        // Bucket): tagged the same way buildTrashCanNode already
+        // tags itself internally, so a build-time-authored
+        // Envelope/Paint Bucket is selectable/removable in
+        // Decorator after a rebuild, not just one added live.
+        // Sept 25: the tag rides on the assembly (walking a hit
+        // up through node.parent reaches it from either the
+        // pickup or its cord), so Decorator delete/move removes
+        // the whole hanging presentation as one unit.
+        DecoratorTarget(floor: floorNumber, coord: coord, kind: .floorObject).tag(assembly)
+        return assembly
+    }
+}

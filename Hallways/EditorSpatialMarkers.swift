@@ -15,8 +15,17 @@ struct EditorSpatialMarkers: View {
     }
     private var marks: [Mark] {
         var result: [Mark] = []
-        if let entry = store.pictures[coord] { result.append(Mark(id: "pictures", symbol: "photo.fill", color: .pink, wall: entry.direction)) }
-        if let d = store.pictureLights[coord] { result.append(Mark(id: "pictureLights", symbol: "lightbulb.fill", color: .orange, wall: d)) }
+        // Sept 22 (wall-face authoring expansion): a cell can now show more
+        // than one Picture (and more than one lit face) -- one Mark per
+        // occupied face, each with a unique id so ForEach doesn't collapse
+        // them; the existing group-by-wall layout below already spaces
+        // multiple marks sharing the same wall side apart automatically.
+        for direction in Direction.allCases where store.hasPicture(direction, at: coord) {
+            result.append(Mark(id: "pictures-\(direction.rawValue)", symbol: "photo.fill", color: .pink, wall: direction))
+        }
+        for direction in Direction.allCases where store.pictureLights.contains(WallFace(coord: coord, direction: direction)) {
+            result.append(Mark(id: "pictureLights-\(direction.rawValue)", symbol: "lightbulb.fill", color: .orange, wall: direction))
+        }
         if let d = store.wallLights[coord] { result.append(Mark(id: "wallLights", symbol: "lamp.table.fill", color: .orange, wall: d)) }
         if let d = store.mirrors[coord] { result.append(Mark(id: "mirrors", symbol: "person.crop.rectangle", color: .cyan, wall: d)) }
         if let d = store.floorMaps[coord] { result.append(Mark(id: "floorMaps", symbol: "map.fill", color: .blue, wall: d)) }

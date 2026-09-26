@@ -29,7 +29,7 @@ enum SoundEffects {
             { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer }, { extinguisherGrabPlayer },
             { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer },
             { ticTacToeXPlayer }, { ticTacToeOPlayer }, { ticTacToeWinPlayer }, { ticTacToeLosePlayer },
-            { streetAudioPlayer }
+            { streetAudioPlayer }, { knockSoftPlayer }, { knockMediumPlayer }, { knockHardPlayer }
         ]
         for load in loaders {
             try? await Task.sleep(for: .milliseconds(10))
@@ -45,8 +45,9 @@ enum SoundEffects {
         let name = filename as NSString
         let ext = name.pathExtension
         let base = name.deletingPathExtension
-        guard let url = Bundle.main.url(forResource: base, withExtension: ext) else {
-            print("SoundEffects: \(filename) not found in the app bundle yet -- check it's in Hallways/Audio.")
+        guard let url = Bundle.main.url(forResource: base, withExtension: ext, subdirectory: "audio")
+            ?? Bundle.main.url(forResource: base, withExtension: ext) else {
+            print("SoundEffects: \(filename) not found in the app bundle yet -- check it's in Hallways-Assets/audio.")
             return nil
         }
         do {
@@ -364,5 +365,95 @@ enum SoundEffects {
 
     @discardableResult
     static func playTicTacToeLose() -> Bool { playMailSound(ticTacToeLosePlayer) }
+
+    /// Eddie, Sept 24: door-knock escalation -- the first knock is soft,
+    /// the second within five seconds is medium, the third hard, and
+    /// every further knock inside the same five-second window stays hard;
+    /// any gap greater than five seconds resets the ladder so the next
+    /// knock is soft again. All three MP3s live in Audio/ like every
+    /// other sound here. They are NOT interchangeable: a stage MUST play
+    /// its own file -- if the file for the stage in question can't be
+    /// loaded or won't start, that is reported loudly and never silently
+    /// substituted (no bouncing back to soft/medium just because the hard
+    /// knock is missing).
+    static let knockResetInterval: TimeInterval = 5
+
+    private static let knockSoftPlayer = loadPlayer("knock-soft.mp3")
+    private static let knockMediumPlayer = loadPlayer("knock-medium.mp3")
+    private static let knockHardPlayer = loadPlayer("knock-hard.mp3")
+
+    /// Ladder position for the NEXT knock: 0 = soft, 1 = medium, 2 = hard
+    /// (capped). Last-knock timestamp decides whether the five-second
+    /// window is still open.
+    private static var knockStage = 0
+    private static var lastKnockAt: Date = .distantPast
+
+    /// The exact file each ladder stage must play -- internal (not
+    /// private) so tests can assert the escalation names directly.
+    static func knockFilename(forStage stage: Int) -> String? {
+        switch stage {
+        case 0: return "knock-soft.mp3"
+        case 1: return "knock-medium.mp3"
+        default: return "knock-hard.mp3"
+        }
+    }
+
+    /// The filename played by the most recent playKnock (nil if it never
+    /// started) -- lets tests observe the ladder without timing audio.
+    internal private(set) static var lastKnockFilename: String?
+
+    /// Test harness seam: forget the ladder so a fresh ladder can be
+    /// stamped without real sleeping.
+    static func resetKnockLadder() {
+        knockStage = 0
+        lastKnockAt = .distantPast
+        lastKnockFilename = nil
+    }
+
+    static func playKnock() -> Bool { playKnock(at: Date()) }
+
+    /// now is injected so the five-second reset is deterministic in
+    /// tests; the real callers go through the no-argument playKnock().
+    static func playKnock(at now: Date) -> Bool {
+        if now.timeIntervalSince(lastKnockAt) > knockResetInterval {
+            knockStage = 0
+        }
+        lastKnockAt = now
+        defer { knockStage = min(knockStage + 1, 2) }
+
+        let player: AVAudioPlayer?
+        switch knockStage {
+        case 0: player = knockSoftPlayer
+        case 1: player = knockMediumPlayer
+        default: player = knockHardPlayer
+        }
+        guard let player else {
+            print("SoundEffects: knock stage \(knockStage) needs \(knockFilename(forStage: knockStage) ?? "?") but it could not be loaded -- NOT substituting another knock sound.")
+            return false
+        }
+        let started = playKnockSound(player)
+        if started { lastKnockFilename = knockFilename(forStage: knockStage) }
+        return started
+    }
+
+    /// knockStep shares the session-activation + rewind + start shape of
+    /// playChuteSound (the closest sibling: also reports a play() that
+    /// didn't start), which is exactly what the no-substitution rule
+    /// needs -- a hard-knock failure is reported, not muffled.
+    private static func playKnockSound(_ player: AVAudioPlayer) -> Bool {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            print("SoundEffects: could not activate knock audio: \(error)")
+        }
+        player.currentTime = 0
+        let started = player.play()
+        if !started {
+            print("SoundEffects: knock playback did not start (\(player.url?.lastPathComponent ?? "unknown"))")
+        }
+        return started
+    }
 
 }

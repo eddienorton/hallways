@@ -46,7 +46,7 @@ enum HallwayTheme: String, CaseIterable {
         case .brick: return "BrickWall"
         case .cave: return "CaveWall"
         case .fishTank: return "FishTankWall"
-        case .paisley: return "Paisley"
+        case .paisley: return "paisley"
         case .fire: return "Fire"
         case .chainLink: return "ChainLink"
         case .myPhotos: return nil // live from the camera roll, see PhotoRollProvider
@@ -60,7 +60,7 @@ enum HallwayTheme: String, CaseIterable {
 
     var ceilingImageName: String? {
         switch self {
-        case .paisley: return "Paisley" // Eddie's ask: try it on walls AND ceiling
+        case .paisley: return "paisley" // Eddie's ask: try it on walls AND ceiling
         case .office: return HallwayScene.officeCeilingGradientName // a beige wall under a near-black ceiling read as broken, not "office"
         default: return nil // myPhotos included — its ceiling photo is also live, not bundled
         }

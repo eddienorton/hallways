@@ -269,10 +269,10 @@ struct DecoratorModeTests {
         #expect(state.canAddPicture(wallTarget))
         state.addPicture()
 
-        let pictureTarget = DecoratorTarget(floor: store.currentMazeID, coord: coord, kind: .picture)
+        let pictureTarget = DecoratorTarget(floor: store.currentMazeID, coord: coord, kind: .picture, direction: direction)
         #expect(state.selection == pictureTarget)
-        #expect(store.pictures[coord]?.direction == direction)
-        #expect(store.pictures[coord]?.size == .standard)
+        #expect(store.hasPicture(direction, at: coord))
+        #expect(store.pictureSize(direction: direction, at: coord) == .standard)
 
         var frame: SCNNode?
         scene.rootNode.enumerateChildNodes { node, _ in
@@ -298,7 +298,7 @@ struct DecoratorModeTests {
         // Live resize to Full Length expands both the frame AND the
         // backfill -- no scene rebuild, same node identity throughout.
         state.changePictureSize(.fullLength)
-        #expect(store.pictureSize(at: coord) == .fullLength)
+        #expect(store.pictureSize(direction: direction, at: coord) == .fullLength)
         #expect(abs(frameBox.width - (0.6 * 2.6 + 0.1)) < 0.01)
         let fullLengthBackfill = backfillNodes()
         #expect(fullLengthBackfill.count == 5)
@@ -322,20 +322,20 @@ struct DecoratorModeTests {
         #expect(!state.pictureLightIsOn(pictureTarget))
         #expect(frameNode.childNode(withName: "pictureLight", recursively: false) == nil)
         state.setPictureLightOn(true)
-        #expect(store.pictureLights[coord] == direction)
+        #expect(store.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         #expect(state.pictureLightIsOn(pictureTarget))
         let light = try #require(frameNode.childNode(withName: "pictureLight", recursively: false))
         let lightSource = try #require(light.childNode(withName: "pictureLightSource", recursively: false))
         #expect(lightSource.light?.intensity == AuthoredLightKind.picture.intensity(level: 3))
 
         state.changePictureLightBrightness(by: 2)
-        #expect(store.lightBrightnessLevel(.picture, at: coord) == 5)
+        #expect(store.lightBrightnessLevel(.picture, direction: direction, at: coord) == 5)
         let brighterLight = try #require(frameNode.childNode(withName: "pictureLight", recursively: false))
         let brighterSource = try #require(brighterLight.childNode(withName: "pictureLightSource", recursively: false))
         #expect(brighterSource.light?.intensity == AuthoredLightKind.picture.intensity(level: 5))
 
         state.setPictureLightOn(false)
-        #expect(store.pictureLights[coord] == nil)
+        #expect(!store.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         #expect(frameNode.childNode(withName: "pictureLight", recursively: false) == nil)
 
         // Re-authoring the light, then deleting the Picture, must ALSO
@@ -343,11 +343,11 @@ struct DecoratorModeTests {
         // Light with no Picture is invalid data (Eddie's explicit
         // integrity rule), even though Picture never owned it.
         state.setPictureLightOn(true)
-        #expect(store.pictureLights[coord] == direction)
+        #expect(store.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         state.deletePicture()
 
-        #expect(store.pictures[coord] == nil)
-        #expect(store.pictureLights[coord] == nil)
+        #expect(!store.hasPicture(direction, at: coord))
+        #expect(!store.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         #expect(state.selection == DecoratorTarget(floor: store.currentMazeID, coord: coord, kind: .wallSurface, direction: direction))
         var restoredWallTargets = 0
         scene.rootNode.enumerateChildNodes { node, _ in
@@ -366,5 +366,23 @@ struct DecoratorModeTests {
         // The restored wall is immediately a legal ADD -> Picture
         // target again, repeatedly, without ever rebuilding the scene.
         #expect(state.canAddPicture(DecoratorTarget(floor: store.currentMazeID, coord: coord, kind: .wallSurface, direction: direction)))
+    }
+
+    // Sept 24 (auto-fluorescent orientation): a freshly added fluorescent
+    // fixture follows the corridor axis the cell actually opens along --
+    // N/S for a straight north-south hallway, E/W for an east-west one --
+    // rather than defaulting to .northSouth unconditionally. Junctions
+    // (3+ open sides), dead ends (1 open side), non-cells, and cells that
+    // already hold a fixture all keep the existing/default orientation.
+    // The store is the real bundled floor 2, so this exercises the actual
+    // maze data path, not synthesized geometry.
+    @Test func autoFluorescentOrientationFollowsTheOpenCorridorAxisOfBundledCells() {
+        let store = MazeStore()
+        store.switchTo(id: 2)
+        #expect(store.autoFluorescentOrientation(at: GridCoordinate(row: 1, col: 7)) == .northSouth)
+        #expect(store.autoFluorescentOrientation(at: GridCoordinate(row: 4, col: 1)) == .eastWest)
+        #expect(store.autoFluorescentOrientation(at: GridCoordinate(row: 4, col: 7)) == nil)
+        #expect(store.autoFluorescentOrientation(at: GridCoordinate(row: 0, col: 7)) == nil)
+        #expect(store.autoFluorescentOrientation(at: GridCoordinate(row: 20, col: 20)) == nil)
     }
 }

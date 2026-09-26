@@ -217,10 +217,27 @@ private final class SuzanimatorSession: ObservableObject {
     @Published var selectedTool: EditorTool = .walls
     @Published var pictureLightDirection: Direction? = nil
     @Published var fluorescentOrientation: FluorescentOrientation = .northSouth
+    /// Auto-orientation is the default for a freshly ADDED fluorescent;
+    /// once the user pinches the Floor Editor's Orientation picker, that
+    /// explicit choice wins and the corridor's own axis is only used as
+    /// the initial default (and on cells with no clear axis at all).
+    @Published var fluorescentOrientationExplicit = false
     @Published var brightnessToPlace = 3
     @Published var photoBoothDirectionToPlace: Direction? = nil
     @Published var photoBoothExpressionToPlace: PhotoBoothExpression = .smile
     @Published var pictureSizeToPlace: PictureSize = .standard
+}
+
+/// SwiftUI owns the modal presentation on both iPhone and iPad; no
+/// unanchored UIKit popover is presented from a global/root controller.
+private struct BuildingJSONShareSheet: UIViewControllerRepresentable {
+    let fileURL: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 private struct CellDeletionRequest: Identifiable {
@@ -336,6 +353,10 @@ struct GridEditorView: View {
     @State private var transformingGrid = false
     @State private var pendingGridPoints: [CGPoint] = []
     @State private var deletionRequest: CellDeletionRequest? = nil
+    @State private var sharedJSONURL: URL?
+    @State private var showJSONShareSheet = false
+    @State private var jsonShareError: String?
+
     /// Two different things a drag can do to a cell now: paint/erase
     /// walls (nil, the default), or place/remove a specific kind of
     /// object on an already-open cell. One toggle button per ObjectKind
@@ -467,6 +488,15 @@ struct GridEditorView: View {
     @State private var missionHeadingDraft = ""
     @State private var missionBodyDraft = ""
 
+    /// Drives the Floor Surfaces sheet -- same "draft, write back only
+    /// on Save" shape as the mission editor above, so Cancel discards
+    /// in-progress picker changes instead of live-editing the real
+    /// value with every tap.
+    @State private var showSurfaceEditor = false
+    @State private var wallTextureDraft: String? = nil
+    @State private var floorTextureDraft: String? = nil
+    @State private var ceilingTextureDraft: String? = nil
+
     /// Drives the RESET confirmation dialog -- a lightweight native
     /// action sheet (same "ask before doing the destructive thing"
     /// idea as Clear's reliance on Undo, but RESET also discards a
@@ -502,6 +532,19 @@ struct GridEditorView: View {
             }
         }
         .statusBarHidden()
+        .sheet(isPresented: $showJSONShareSheet, onDismiss: removeTemporaryJSONExport) {
+            if let sharedJSONURL {
+                BuildingJSONShareSheet(fileURL: sharedJSONURL)
+            }
+        }
+        .alert("Unable to Share JSON", isPresented: Binding(
+            get: { jsonShareError != nil },
+            set: { if !$0 { jsonShareError = nil } }
+        )) {
+            Button("OK", role: .cancel) { jsonShareError = nil }
+        } message: {
+            Text(jsonShareError ?? "Please try again.")
+        }
         .sheet(item: $deletionRequest) { request in
             CellDeletionSheet(request: request) { selected in
                 guard request.floorID == mazeStore.currentMazeID else { return }
@@ -525,6 +568,9 @@ struct GridEditorView: View {
         }
         .sheet(isPresented: $showMissionEditor) {
             missionEditorSheet
+        }
+        .sheet(isPresented: $showSurfaceEditor) {
+            surfaceEditorSheet
         }
         .confirmationDialog(
             "Reset Floor \(mazeStore.currentMazeID) to Default?",
@@ -790,7 +836,8 @@ struct GridEditorView: View {
         if let direction = doorDirectionToPlace, mazeStore.isOpen(coord) {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             if !mazeStore.isOpen(neighbor), coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate,
-               mazeStore.floorMaps[coord] == nil, mazeStore.pictures[coord] == nil, mazeStore.mirrors[coord] == nil, mazeStore.destinations[coord] == nil {
+               // Sept 22 (wall-face authoring expansion): face-specific, matching placeRoomDoor's own guard.
+               mazeStore.floorMaps[coord] != direction, !mazeStore.hasPicture(direction, at: coord), mazeStore.mirrors[coord] != direction, mazeStore.destinations[coord] == nil {
                 Rectangle().stroke(Color.brown, lineWidth: 3)
             }
         } else if let direction = windowRoomDirectionToPlace, mazeStore.isOpen(coord) {
@@ -799,6 +846,34 @@ struct GridEditorView: View {
                 Rectangle().stroke(Color.blue, lineWidth: 3)
             }
         }
+    }
+
+    private func shareBuildingJSON() {
+        guard let json = mazeStore.exportLibraryJSON() else {
+            jsonShareError = "The building JSON could not be generated. Please try again."
+            return
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Hallways-Export-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent("DefaultMazes.json")
+            // Preserve the exact UTF-8 output COPY places on the clipboard.
+            try Data(json.utf8).write(to: url, options: .atomic)
+            sharedJSONURL = url
+            showJSONShareSheet = true
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            jsonShareError = error.localizedDescription
+        }
+    }
+
+    private func removeTemporaryJSONExport() {
+        // Keep the file available throughout sharing, including destination UI.
+        if let sharedJSONURL {
+            try? FileManager.default.removeItem(at: sharedJSONURL.deletingLastPathComponent())
+        }
+        sharedJSONURL = nil
     }
 
     /// Every control that used to overlay the grid, now a normal
@@ -813,13 +888,13 @@ struct GridEditorView: View {
             VStack(spacing: 6) {
                 HStack(spacing: 14) {
                     floorNavButton("chevron.left") {
-                        mazeStore.switchTo(id: max(1, mazeStore.currentMazeID - 1))
+                        navigateFloor(to: max(1, mazeStore.currentMazeID - 1))
                     }
                     Text("Floor \(mazeStore.currentMazeID)")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundStyle(.black)
                     floorNavButton("chevron.right") {
-                        mazeStore.switchTo(id: mazeStore.currentMazeID + 1)
+                        navigateFloor(to: mazeStore.currentMazeID + 1)
                     }
                 }
                 HStack(spacing: 14) {
@@ -887,6 +962,13 @@ struct GridEditorView: View {
                         .frame(width: 36, height: 36)
                         .background(.ultraThinMaterial, in: Circle())
                 }
+
+                Button("SHARE JSON", action: shareBuildingJSON)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 8)
+                    .frame(height: 36)
+                    .background(.ultraThinMaterial, in: Capsule())
 
                 // SAVE button removed (Sept 20 autosave pass): every
                 // completed edit now persists itself automatically --
@@ -1211,6 +1293,11 @@ struct GridEditorView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 300)
+                .onChange(of: session.fluorescentOrientation) { _ in
+                    // The picker is the editor's explicit override: once
+                    // touched, auto-orientation stops guiding this tool.
+                    session.fluorescentOrientationExplicit = true
+                }
             }
 
             if selectedTool == .light && lightTypeToPlace == .picture {
@@ -1237,6 +1324,28 @@ struct GridEditorView: View {
                     missionHeadingDraft = mazeStore.missionHeading
                     missionBodyDraft = mazeStore.missionBody
                     showMissionEditor = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.purple)
+                        .frame(width: 28, height: 28)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            // Floor Surfaces -- Sept 26 (per-floor surface authoring):
+            // structural floor authoring, same "belongs here, not the
+            // live 3D Decorator" reasoning as the Mission row just
+            // above, reusing its exact draft/sheet/pencil-button shape.
+            HStack(spacing: 8) {
+                Text("Surfaces:")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+                Button {
+                    wallTextureDraft = mazeStore.wallTexture
+                    floorTextureDraft = mazeStore.floorTexture
+                    ceilingTextureDraft = mazeStore.ceilingTexture
+                    showSurfaceEditor = true
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 16, weight: .semibold))
@@ -1622,7 +1731,11 @@ struct GridEditorView: View {
             if objectKindToPlace == .envelope || objectKindToPlace == .key {
                 Picker("To room", selection: $session.mailRoomToPlace) {
                     Text("Auto address").tag(Int?.none)
-                    ForEach(mazeStore.roomNumbers, id: \.self) { room in
+                    // Sept 24 (decorative room doors): mailable rooms
+                    // only -- a decorative door's number can never be
+                    // written onto a letter (setItemRoom rejects it
+                    // anyway; this keeps the picker honest about it).
+                    ForEach(mazeStore.mailableRoomNumbers, id: \.self) { room in
                         Text("Rm \(room)").tag(Int?.some(room))
                     }
                 }
@@ -1703,6 +1816,23 @@ struct GridEditorView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(.black)
         }
+    }
+
+    /// Sept 22 (Start-on-Last-Dev-Floor, superseded fix): this used
+    /// to write devLastJumpedFloorKey explicitly here, on the
+    /// assumption these chevrons were the missing piece. They weren't
+    /// the whole story -- advanceToNextMaze() (real gameplay elevator
+    /// arrivals) called switchTo(id:) directly too and never wrote
+    /// that key either, so the actual root cause was one level deeper.
+    /// MazeStore.switchTo(id:) now writes devLastJumpedFloorKey itself
+    /// (see its comment), since it's the one path every floor change
+    /// already funnels through -- so this wrapper no longer needs its
+    /// own copy of that write; it's kept only to route these chevrons
+    /// through switchTo(id:) without also calling devJump(to:)'s
+    /// dismiss-into-3D behavior, which these chevrons must NOT trigger
+    /// (they're meant to keep you in the editor, browsing).
+    private func navigateFloor(to id: Int) {
+        mazeStore.switchTo(id: id)
     }
 
     /// Walks nextMazeID up or down by one floor — starting from the
@@ -1929,16 +2059,19 @@ struct GridEditorView: View {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !mazeStore.isOpen(neighbor) else { return }
             if isStart {
-                paintMode = (mazeStore.pictureDirection(at: coord) != direction || mazeStore.pictureSize(at: coord) != pictureSizeToPlace)
+                // Sept 22 (wall-face authoring expansion): per-face now --
+                // was "is THE picture at this coord pointed this way," now
+                // "is there a picture on THIS specific face."
+                paintMode = (!mazeStore.hasPicture(direction, at: coord) || mazeStore.pictureSize(direction: direction, at: coord) != pictureSizeToPlace)
             }
             if paintMode {
-                if (mazeStore.pictureDirection(at: coord) != direction || mazeStore.pictureSize(at: coord) != pictureSizeToPlace) {
+                if (!mazeStore.hasPicture(direction, at: coord) || mazeStore.pictureSize(direction: direction, at: coord) != pictureSizeToPlace) {
                     NSLog("%@", "[PLACEDIAG] CALL placePicture coord=\(coord) direction=\(direction)")
                     mazeStore.placePicture(direction, at: coord, size: pictureSizeToPlace)
                 }
             } else {
-                if mazeStore.pictureDirection(at: coord) != nil {
-                    mazeStore.removePicture(at: coord)
+                if mazeStore.hasPicture(direction, at: coord) {
+                    mazeStore.removePicture(direction, at: coord)
                 }
             }
             return
@@ -1960,7 +2093,19 @@ struct GridEditorView: View {
                       mazeStore.canPlacePictureLight(direction, at: coord) else { return }
                 mazeStore.placePictureLight(direction, at: coord, brightness: session.brightnessToPlace)
             case .fluorescent:
-                let orientation = session.fluorescentOrientation
+                // Auto-orientation: until the user explicitly pinches the
+                // Orientation picker (fluorescentOrientationExplicit), a
+                // just-add-to hallway cell's long axis is derived from the
+                // corridor's own open sides (MazeStore.autoFluorescentOrientation),
+                // so a freshly added fixture's two ends point at the two
+                // hallway openings. Corners/junctions/dead ends return nil
+                // and keep the picker orientation; a cell that already has
+                // a fluorescent repaints with the picker orientation too.
+                let auto = session.fluorescentOrientationExplicit
+                    ? nil
+                    : (mazeStore.fluorescentLights[coord] == nil
+                       ? mazeStore.autoFluorescentOrientation(at: coord) : nil)
+                let orientation = auto ?? session.fluorescentOrientation
                 if isStart {
                     paintMode = mazeStore.fluorescentLights[coord] != orientation || mazeStore.lightBrightnessLevel(.fluorescent, at: coord) != session.brightnessToPlace
                 }
@@ -2050,6 +2195,59 @@ struct GridEditorView: View {
                     Button("Save") {
                         mazeStore.setMissionText(heading: missionHeadingDraft, body: missionBodyDraft)
                         showMissionEditor = false
+                    }
+                }
+            }
+        }
+    }
+
+    /// One independent picker per surface, each offering "Default"
+    /// (nil -- clears the override, back to the existing Floor 1/
+    /// Floor 2/theme fallback) plus every name HallwayScene.
+    /// availableHallwayTextureNames() finds in the reusable library.
+    /// Multiple floors picking the same name is exactly the point --
+    /// this only ever writes a name string, never a file.
+    private var surfaceEditorSheet: some View {
+        let options = HallwayScene.availableHallwayTextureNames()
+        return NavigationView {
+            Form {
+                Section("Wall") {
+                    Picker("Wall texture", selection: $wallTextureDraft) {
+                        Text("Default").tag(String?.none)
+                        ForEach(options, id: \.self) { name in
+                            Text(name).tag(String?.some(name))
+                        }
+                    }
+                }
+                Section("Floor") {
+                    Picker("Floor texture", selection: $floorTextureDraft) {
+                        Text("Default").tag(String?.none)
+                        ForEach(options, id: \.self) { name in
+                            Text(name).tag(String?.some(name))
+                        }
+                    }
+                }
+                Section("Ceiling") {
+                    Picker("Ceiling texture", selection: $ceilingTextureDraft) {
+                        Text("Default").tag(String?.none)
+                        ForEach(options, id: \.self) { name in
+                            Text(name).tag(String?.some(name))
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Floor Surfaces")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showSurfaceEditor = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        mazeStore.setWallTexture(wallTextureDraft)
+                        mazeStore.setFloorTexture(floorTextureDraft)
+                        mazeStore.setCeilingTexture(ceilingTextureDraft)
+                        showSurfaceEditor = false
                     }
                 }
             }

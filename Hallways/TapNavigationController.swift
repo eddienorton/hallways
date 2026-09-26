@@ -199,13 +199,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// .trashCan (Eddie, Sept 7: "since we already have the trash
     /// pretty much in there, lets make it the first floors mission").
     private let missionObjectKind: ObjectKind?
-    private let fireCoords: Set<GridCoordinate>
-    private let fireNodes: [GridCoordinate: SCNNode]
-    private let extinguisherCoords: [GridCoordinate: Direction]
-    private let extinguisherNodes: [GridCoordinate: SCNNode]
-    private let photoBoothNodes: [GridCoordinate: SCNNode]
-    private let photoBoothDirections: [GridCoordinate: Direction]
-    private let photoBoothExpressions: [GridCoordinate: PhotoBoothExpression]
+    /// Sept 25 (Designer wall/floor authoring, live ADD): the fire and
+    /// extinguisher and photo-booth coordinate/node/expression tables are
+    /// private(set) var (was private let) so DecoratorState-authored
+    /// objects can be registered into the running navigation state and
+    /// join this floor's mission exactly like DefaultMazes.json-authored
+    /// ones. See registerFire/unregisterFire, registerExtinguisher/
+    /// unregisterExtinguisher, registerPhotoBooth/unregisterPhotoBooth.
+    private(set) var fireCoords: Set<GridCoordinate>
+    private(set) var fireNodes: [GridCoordinate: SCNNode]
+    private(set) var extinguisherCoords: [GridCoordinate: Direction]
+    private(set) var extinguisherNodes: [GridCoordinate: SCNNode]
+    private(set) var photoBoothNodes: [GridCoordinate: SCNNode]
+    private(set) var photoBoothDirections: [GridCoordinate: Direction]
+    private(set) var photoBoothExpressions: [GridCoordinate: PhotoBoothExpression]
     private var completedPhotoBooths: Set<GridCoordinate> = []
     @Published private(set) var activePhotoBooth: GridCoordinate?
     @Published private(set) var photoBoothCompletionImage: UIImage?
@@ -220,7 +227,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// shape as activeTicTacToeTerminal, but there is no persisted
     /// board state to hold here: the menu itself is stateless, and the
     /// actual mutation happens in MazeStore, not here (Sept 20).
-    @Published var activePictureMenu: GridCoordinate?
+    /// Sept 22 (wall-face authoring expansion): WallFace, not just
+    /// GridCoordinate -- a cell can now hold two Pictures, so the menu
+    /// must remember WHICH wall face it's for, not just which cell.
+    @Published var activePictureMenu: WallFace?
     @Published private(set) var activeTicTacToeTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER wins a round -- see
     /// isMissionComplete. At most one terminal per floor for now, so
@@ -302,7 +312,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Set once, the instant the PLAYER wins a game -- see
     /// isMissionComplete. Same one-Bool shape as checkersWon.
     @Published private(set) var woidleWon = false
-    private let extinguisherRestingTransforms: [GridCoordinate: (position: SCNVector3, eulerAngles: SCNVector3, scale: SCNVector3)]
+    private(set) var extinguisherRestingTransforms: [GridCoordinate: (position: SCNVector3, eulerAngles: SCNVector3, scale: SCNVector3)]
     private var extinguishedFireCoords: Set<GridCoordinate> = []
     @Published private(set) var carryingExtinguisher = false
     private var carriedExtinguisherNode: SCNNode?
@@ -419,6 +429,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// nextMazeID at the moment this controller got built.
     var currentFloorNumber: Int { floorNumber }
     var floorLabel: String { floorNumber == 1 ? "LOBBY" : "FLOOR \(floorNumber)" }
+    var handheldMapTitle: String { "Map of Floor \(floorNumber)" }
     private let floorNumber: Int
     private let nextFloorNumber: Int?
     // Eddie, Sept 16 (Floor 1 intro walk, once -- bug fix): a `var`,
@@ -493,6 +504,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // starting the instant presentArrivalInsideElevator finishes.
     private var arrivalDiagnosticUntil: TimeInterval? = nil
     private let arrivalDiagnosticWindowSeconds: TimeInterval = 4.0
+
+    #if DEBUG
+    // Sept 22 (Eddie: presentation-vs-model investigation). Set once,
+    // from ContentView.swift's makeUIView, immediately after this
+    // controller is constructed during a Floor-2 rebuild -- the
+    // LIGHTBUILD number for THAT rebuild (see LightingDeterminismCheck.
+    // swift), or nil for every other floor. Consumed (reset to nil) the
+    // very first time renderer(_:didRenderScene:atTime:) fires after
+    // that, so exactly one presentation-state capture happens per
+    // rebuild, taken at the earliest point SceneKit has actually
+    // finished drawing a frame with this scene -- the earliest point
+    // `.presentation` is guaranteed to reflect what was truly
+    // rendered, as opposed to the EARLY/POST/NEXT-RUNLOOP model-state
+    // checkpoints in ContentView.swift, none of which follow an actual
+    // render pass.
+    var pendingPresentationCheckBuildNumber: Int? = nil
+    #endif
     private var arrivalDiagnosticLastModelPos: SCNVector3? = nil
     private var arrivalDiagnosticLastModelEuler: SCNVector3? = nil
     private var arrivalDiagnosticLastPresPos: SCNVector3? = nil
@@ -672,7 +700,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// built the node; this controller only decides whether walking
     /// through is worth stopping for).
     private let floorMapCoords: Set<GridCoordinate>
-    private let photoBoothCoords: Set<GridCoordinate>
+    private(set) var photoBoothCoords: Set<GridCoordinate>
     private let ticTacToeTerminalCoords: Set<GridCoordinate>
     private let shellGameStationCoords: Set<GridCoordinate>
     private let rockPaperScissorsTerminalCoords: Set<GridCoordinate>
@@ -724,7 +752,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// with the same shape, is NOT itself a stored property -- it only
     /// lives for the duration of init, which is why this exists as its
     /// own retained copy rather than reusing that name directly.
-    private var pictureDirections: [GridCoordinate: Direction]
+    /// Sept 22 (wall-face authoring expansion): renamed from
+    /// pictureDirections ([GridCoordinate: Direction]) -- a coordinate
+    /// alone can no longer say "which wall" a Picture is on once a
+    /// cell can hold more than one. Every usage below now checks a
+    /// specific WallFace instead of comparing a stored Direction to
+    /// `facing`.
+    private var pictureFaces: Set<WallFace>
 
     /// Every "You Are Here" map's picture plane for this floor, straight
     /// from HallwayScene.build(fromMaze:)'s own floorMapPlaneNodes --
@@ -805,7 +839,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         update()
     }
 
-    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [GridCoordinate: Direction] = [:], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], ticTacToeTerminalNodes: [GridCoordinate: SCNNode] = [:], shellGameStations: [GridCoordinate: Direction] = [:], shellGameStationNodes: [GridCoordinate: SCNNode] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminalNodes: [GridCoordinate: SCNNode] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode] = [:], simonTerminals: [GridCoordinate: Direction] = [:], simonTerminalNodes: [GridCoordinate: SCNNode] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], hangmanTerminalNodes: [GridCoordinate: SCNNode] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], checkersTerminalNodes: [GridCoordinate: SCNNode] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], woidleTerminalNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], missionObjectKind: ObjectKind? = nil, hasCompletedInitialEntrance: Bool = false) {
+    init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: Set<WallFace> = [], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], ticTacToeTerminalNodes: [GridCoordinate: SCNNode] = [:], shellGameStations: [GridCoordinate: Direction] = [:], shellGameStationNodes: [GridCoordinate: SCNNode] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminalNodes: [GridCoordinate: SCNNode] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode] = [:], simonTerminals: [GridCoordinate: Direction] = [:], simonTerminalNodes: [GridCoordinate: SCNNode] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], hangmanTerminalNodes: [GridCoordinate: SCNNode] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], checkersTerminalNodes: [GridCoordinate: SCNNode] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], woidleTerminalNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], missionObjectKind: ObjectKind? = nil, hasCompletedInitialEntrance: Bool = false) {
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -879,8 +913,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         self.checkersTerminalCoords = Set(checkersTerminals.keys)
         self.woidleTerminalCoords = Set(woidleTerminals.keys)
         self.missionSignCoords = Set(missionSigns.keys)
-        self.pictureCoords = Set(pictures.keys).union(mirrors.keys)
-        self.pictureDirections = pictures
+        self.pictureCoords = Set(pictures.map(\.coord)).union(mirrors.keys)
+        self.pictureFaces = pictures
         self.floorMapPlaneNodes = floorMapPlaneNodes
 
         let foundLight = cameraNode.childNodes.compactMap { $0.light }.first { $0.type == .omni }
@@ -1125,17 +1159,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// ticTacToeTerminalAtCurrentCell and friends, reused here rather
     /// than inventing a hit-test-on-the-3D-node approach (Sept 20).
     var pictureAtCurrentCell: GridCoordinate? {
-        guard pictureDirections[currentCell] == facing else { return nil }
+        guard pictureFaces.contains(WallFace(coord: currentCell, direction: facing)) else { return nil }
         return currentCell
     }
 
-    /// Opens the Change Picture menu for the Picture at `coord` --
-    /// same guard shape as activateTicTacToeTerminal, minus the
-    /// terminal-specific canRotate/won checks a decorative picture has
-    /// no equivalent of.
+    /// Opens the Change Picture menu for the Picture at `coord`, on the
+    /// wall the player is currently facing -- same guard shape as
+    /// activateTicTacToeTerminal, minus the terminal-specific
+    /// canRotate/won checks a decorative picture has no equivalent of.
     func activatePictureMenu(at coord: GridCoordinate) {
-        guard activePictureMenu == nil, coord == currentCell, pictureDirections[coord] == facing else { return }
-        activePictureMenu = coord
+        let face = WallFace(coord: coord, direction: facing)
+        guard activePictureMenu == nil, coord == currentCell, pictureFaces.contains(face) else { return }
+        activePictureMenu = face
     }
 
     /// Sept 21 (3D Decorator wall authoring): registers a Picture added
@@ -1145,21 +1180,130 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// behavior works on it immediately -- no floor reload needed.
     func registerPicture(_ direction: Direction, at coord: GridCoordinate) {
         pictureCoords.insert(coord)
-        pictureDirections[coord] = direction
+        pictureFaces.insert(WallFace(coord: coord, direction: direction))
     }
 
     /// Sept 21 (Picture Decorator complete pass, Goal 4): the reverse of
     /// registerPicture above -- after DecoratorState.deletePicture
     /// removes a live Picture, this removes it from the SAME
     /// bookkeeping, so walking up to that now-empty wall no longer
-    /// offers the "Change Picture" menu. Safe to unconditionally remove
-    /// from pictureCoords (shared with mirrors -- see that property's
-    /// own doc comment) because a coordinate can never hold both a
-    /// Picture and a Mirror at once (MazeStore.canPlacePicture already
-    /// requires mirrors[coord] == nil, and vice versa).
-    func unregisterPicture(at coord: GridCoordinate) {
-        pictureCoords.remove(coord)
-        pictureDirections.removeValue(forKey: coord)
+    /// offers the "Change Picture" menu.
+    ///
+    /// Sept 22 (wall-face authoring expansion): pictureCoords is now
+    /// only cleared once NO face of this cell has a Picture left --
+    /// with two Pictures possible per cell, deleting one must not blind
+    /// the walk-stop logic to the other. Still safe to check only
+    /// pictureFaces (never a mirror) because a coordinate can never
+    /// hold both a Picture and a Mirror at once (MazeStore.
+    /// canPlacePicture already requires mirrors[coord] != direction for
+    /// every face, and vice versa).
+    func unregisterPicture(_ direction: Direction, at coord: GridCoordinate) {
+        pictureFaces.remove(WallFace(coord: coord, direction: direction))
+        if !pictureFaces.contains(where: { $0.coord == coord }) {
+            pictureCoords.remove(coord)
+        }
+    }
+
+    /// Sept 25 (Designer wall authoring, live Mirror ADD). Mirrors already
+    /// force a navigation pause on every pass, exactly like Pictures --
+    /// the build-time call site (init) puts them in `pictureCoords` via
+    /// `Set(pictures.map(\.coord)).union(mirrors.keys)`. A live-added
+    /// mirror must join pictureCoords the same way so walking up to it
+    /// stops the walk. It deliberately does NOT join `pictureFaces`
+    /// (init:910 comment) -- that set drives the "Change Picture" menu,
+    /// and a mirror must never offer it.
+    func registerMirror(at coord: GridCoordinate) {
+        pictureCoords.insert(coord)
+    }
+
+    /// Reverse of registerMirror above. Only clears `coord` from
+    /// pictureCoords when no Picture face remains on that cell -- the
+    /// coord can never hold both, but the mirror might have been deleted
+    /// while a Picture sits on another wall of the same cell.
+    func unregisterMirror(at coord: GridCoordinate) {
+        if !pictureFaces.contains(where: { $0.coord == coord }) {
+            pictureCoords.remove(coord)
+        }
+    }
+
+    /// Sept 25 (Designer authoring, live Fire ADD). Registers a fire
+    /// placed live via Decorator (Floor menu) into the same bookkeeping
+    /// build-time fires already have, so it is extinguishable with a
+    /// picked-up extinguisher AND counted toward the floor's fire
+    /// mission (isMissionComplete: extinguishedFireCoords == fireCoords).
+    func registerFire(at coord: GridCoordinate, node: SCNNode) {
+        fireCoords.insert(coord)
+        fireNodes[coord] = node
+    }
+
+    /// Reverse of registerFire above. If the fire had already been put
+    /// out, it drops out of extinguishedFireCoords too, so the mission
+    /// equality (extinguishedFireCoords == fireCoords) still holds after
+    /// the deletion.
+    func unregisterFire(at coord: GridCoordinate) {
+        fireCoords.remove(coord)
+        fireNodes.removeValue(forKey: coord)
+        extinguishedFireCoords.remove(coord)
+    }
+
+    /// Sept 25 (Designer wall authoring, live Extinguisher ADD).
+    /// Registers an extinguisher placed live via Decorator (Wall chooser)
+    /// so collectExtinguisherIfPresent (:3007 guards extinguisherCoords
+    /// and extinguisherNodes) can pick it up immediately, and stores its
+    /// resting transform so reset() and the carry/drop animation restore
+    /// it exactly like build-time extinguishers.
+    func registerExtinguisher(_ direction: Direction, node: SCNNode, at coord: GridCoordinate) {
+        extinguisherCoords[coord] = direction
+        extinguisherNodes[coord] = node
+        extinguisherRestingTransforms[coord] = (position: node.position, eulerAngles: node.eulerAngles, scale: node.scale)
+    }
+
+    /// Reverse of registerExtinguisher above. If the player was carrying
+    /// this very extinguisher (pickedUpExtinguisherCoords), it also drops
+    /// the carry -- the item no longer exists, so the held node must come
+    /// down with it.
+    func unregisterExtinguisher(at coord: GridCoordinate) {
+        extinguisherCoords.removeValue(forKey: coord)
+        extinguisherNodes.removeValue(forKey: coord)
+        extinguisherRestingTransforms.removeValue(forKey: coord)
+        pickedUpExtinguisherCoords.remove(coord)
+        if carryingExtinguisher {
+            carriedExtinguisherNode?.removeFromParentNode()
+            carriedExtinguisherNode = nil
+            carryingExtinguisher = false
+        }
+        extinguishingFireCoords.remove(coord)
+    }
+
+    /// Sept 25 (Designer wall authoring, live Photo Booth ADD). Registers
+    /// a booth placed live via Decorator (Wall chooser) into every table
+    /// build-time booths already have -- photoBoothCoords (walk-stop +
+    /// floor-map texture) and Directions/Expressions/Nodes (activation at
+    /// activatePhotoBooth :966 guards all three) -- so the player can use
+    /// it immediately and the floor's photo-booth mission count
+    /// (completedPhotoBooths == Set(photoBoothExpressions.keys)) includes
+    /// it (Eddie, Sept 25: new mission objects join the real mission).
+    func registerPhotoBooth(_ direction: Direction, expression: PhotoBoothExpression, node: SCNNode, at coord: GridCoordinate) {
+        photoBoothCoords.insert(coord)
+        photoBoothDirections[coord] = direction
+        photoBoothExpressions[coord] = expression
+        photoBoothNodes[coord] = node
+    }
+
+    /// Reverse of registerPhotoBooth above. If the booth was already
+    /// completed it drops out of completedPhotoBooths to keep the mission
+    /// equality (completedPhotoBooths == Set(photoBoothExpressions.keys))
+    /// true after deletion, and an in-flight session is cancelled.
+    func unregisterPhotoBooth(at coord: GridCoordinate) {
+        photoBoothCoords.remove(coord)
+        photoBoothDirections.removeValue(forKey: coord)
+        photoBoothExpressions.removeValue(forKey: coord)
+        photoBoothNodes.removeValue(forKey: coord)
+        completedPhotoBooths.remove(coord)
+        if activePhotoBooth == coord {
+            activePhotoBooth = nil
+            photoBoothCameraState = nil
+        }
     }
 
     /// Stepping away or dismissing without choosing anything -- same
@@ -1995,9 +2139,28 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// it's one direct, continuous position write per frame, exactly
     /// like updateDragRotate's continuous yaw write, just summed over
     /// however many cells of travel the drag currently represents.
+    // Sept 22 (DECORATE one-cell drag/pinch fix): the real root cause
+    // of DECORATE still marching multiple cells after the earlier HELD-
+    // timer fix -- this continuous drag-move path (driven by a vertical
+    // pan once handlePanRotate's axis lock picks it, AND by handlePinch,
+    // which routes pinch in/out through this exact same trio) computes
+    // its own multi-cell distance directly from how far the finger
+    // physically moved, entirely independent of advance()/
+    // advanceWhileHeld() and their decorateModeEnabled caps -- so a
+    // single continuous drag or pinch (one physical gesture, start to
+    // finish) could already queue and glide through several cells,
+    // finishing the glide well after the finger lifted, which is
+    // exactly "I press once and it marches on its own." Capping
+    // maxForward here (the live preview) AND in endDragMove below (the
+    // committed distance) to the same 1-cell ceiling keeps what's
+    // dragged on screen and what actually gets walked in sync -- doing
+    // it in just one of the two would either preview a multi-cell glide
+    // that then snaps back on release, or commit further than what was
+    // shown. maxBackward is untouched -- the reported bug and Eddie's
+    // spec are both about forward movement only.
     func updateDragMove(fraction: Double) {
         guard isDragMoving else { return }
-        let maxForward = Double(dragMoveMaxForwardCells)
+        let maxForward = decorateModeEnabled ? min(Double(dragMoveMaxForwardCells), 1) : Double(dragMoveMaxForwardCells)
         let maxBackward = Double(dragMoveMaxBackwardCells)
         let clamped = max(-maxBackward, min(maxForward, fraction))
         let delta = dragMoveFacing.delta
@@ -2049,7 +2212,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func endDragMove(fraction: Double, velocityFraction: Double = 0) {
         guard isDragMoving else { return }
         isDragMoving = false
-        let maxForward = Double(dragMoveMaxForwardCells)
+        // Sept 22 (DECORATE one-cell drag/pinch fix): same cap as
+        // updateDragMove's maxForward above, applied to the committed
+        // distance too -- see that function's comment for why both
+        // need it. projectedClamped below can now never exceed 1 cell
+        // forward in DECORATE, so the whole-cells/remainder math that
+        // follows naturally commits to at most 1 step; the final
+        // dragMoveMaxForwardCells safety clamp further down is
+        // unaffected (still >= 1 whenever a drag was even allowed to
+        // begin, since beginDragMove() already required canGoForward).
+        let maxForward = decorateModeEnabled ? min(Double(dragMoveMaxForwardCells), 1) : Double(dragMoveMaxForwardCells)
         let maxBackward = Double(dragMoveMaxBackwardCells)
         let clamped = max(-maxBackward, min(maxForward, fraction))
         let projected = clamped + velocityFraction * moveFlickProjectionSeconds
@@ -2111,10 +2283,28 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private var continuousRun = false
     private var heldDistance: Double = 0
     private(set) var movementPace: Double = 1
+    // Sept 22 (DECORATE one-cell hold fix): advance()'s own
+    // decorateModeEnabled cap (see its "DECORATE one-cell movement"
+    // comment below) already limits any SINGLE advance() call to one
+    // grid cell -- but handleLongPressForward's hold timer in
+    // ContentView.swift calls advanceWhileHeld() again every 0.12s for
+    // as long as the finger stays down, regardless of mode, so a held
+    // press in DECORATE was still walking multiple cells one at a time,
+    // just via repeated one-cell hops instead of one big queued run.
+    // This flag caps advanceWhileHeld() itself to a single forward step
+    // per hold gesture when DECORATE is on -- reset the moment a new
+    // hold begins (setWalkingHeld(true)) so the very next press is
+    // never starved by a previous one. PLAY mode never reads this flag,
+    // so its existing hold-to-walk behavior is untouched.
+    private var decorateHeldStepTaken = false
 
     func setWalkingHeld(_ held: Bool) {
         walkingHeld = held
-        if !held { heldDistance = 0 }
+        if held {
+            decorateHeldStepTaken = false
+        } else {
+            heldDistance = 0
+        }
         if !isAnimating {
             movementPace = 1
             SoundEffects.setWalkingPace(1)
@@ -2151,8 +2341,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func advanceWhileHeld() {
         logNavAttempt(path: "HELD")
         guard canRotate else { return }
+        // Sept 22 (DECORATE one-cell hold fix): once this hold gesture
+        // has already taken its one legal step, ignore further HELD
+        // ticks from the timer entirely -- no forward advance, no
+        // auto-turn-at-corner below -- until the finger lifts and a new
+        // hold begins (setWalkingHeld(true) clears the flag). PLAY mode
+        // (decorateModeEnabled == false) never hits this guard.
+        if decorateModeEnabled, decorateHeldStepTaken { return }
         if canGoForward {
             advance(source: "HELD")
+            if decorateModeEnabled { decorateHeldStepTaken = true }
             return
         }
         // Eddie, Sept 16 (remove automatic step-out): no auto-turn
@@ -2265,8 +2463,19 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // and the wall map/chute, not sweep the payoff past you
             // mid-glide. So this is now genuinely "anything not yet
             // collected," carried or not.
-            if let kind = objectKinds[coord], !collectedCoords.contains(coord) {
-                return true // would pick up (or absorb, for cash) something new -- worth stopping for
+            // Sept 24 (held-walk bypass): a held walk never truncates for
+            // a tap-to-collect object -- it can only be collected by a
+            // deliberate tap, which can't happen mid-hold, so the glide
+            // passes straight over it (that IS the Sept 21 "Choice B: walk
+            // past" outcome), keeping the segment unbroken. Cash is
+            // deliberately still a stop: it auto-collects on arrival and
+            // Eddie wanted the payoff to pause the walk (Sept 6).
+            // Sept 25: that last line now holds for every hanging pickup,
+            // not just cash -- hangsFromCeiling kinds (mail included)
+            // auto-collect on arrival, so they stop the walk too.
+            if let kind = objectKinds[coord], !collectedCoords.contains(coord),
+               !(walkingHeld && kind.requiresTapToCollect) {
+                return true
             }
             if extinguisherCoords[coord] != nil, !carryingExtinguisher {
                 return true
@@ -2277,12 +2486,21 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if destinationKinds[coord] != nil {
                 return true // an unopened chute -- worth stopping for whether or not you're carrying anything, so there's always a chance to tap the door
             }
-            if floorMapCoords.contains(coord) {
-                return true // Stop at wall maps on every pass.
+            if floorMapCoords.contains(coord), !walkingHeld {
+                return true // Stop at wall maps on every pass -- held walking glides over them (you can't read a map mid-hold).
             }
             if missionSignCoords.contains(coord), !viewedMissionSignCoords.contains(coord) {
                 return true // the Floor Mission sign, first pass this run
             }
+            // Sept 24 (room-door knock interaction): ALL room doors stop
+            // the walk -- functional mail doors AND decorative/
+            // architectural doors alike. The earlier decorative-door
+            // authoring pass briefly made decorative doors glide-through
+            // (empty-wall locomotion); Eddie closed that: a door is a
+            // door is a door -- every room door is a genuine stop, so
+            // there is always a real "tap the visible door" moment
+            // stopped beside it, whether the door carries a room
+            // number's mail game or is Floor 2 architectural dressing.
             if roomDoors[coord] != nil { return true }
             // Floor 1's decorative lobby pairs are at rows 11 and 13.
             // Always stop beside them -- in EITHER direction, on EVERY
@@ -2303,7 +2521,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 if !isCeremonialEntrance { return true }
             }
             if pictureCoords.contains(coord) {
-                return floorNumber != 1 || !isCeremonialEntrance
+                // Sept 24: held walking never stops for a picture/mirror --
+                // nothing to act on mid-hold, so the glide stays unbroken.
+                // Tap walking keeps its per-pass stop on every floor.
+                return !walkingHeld && (floorNumber != 1 || !isCeremonialEntrance)
             }
             if photoBoothCoords.contains(coord), !completedPhotoBooths.contains(coord) {
                 return true
@@ -2368,8 +2589,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // destination), which that scan's own `stopIndex < steps.count - 1`
         // guard deliberately does NOT cover -- if the walk's last step
         // would land ON an uncollected object that now requires a
-        // deliberate tap (everything except cash, see
-        // ObjectKind.requiresTapToCollect), back off one cell instead of
+        // deliberate tap (everything that does NOT hang -- trash can
+        // and paint bucket -- see ObjectKind.requiresTapToCollect),
+        // back off one cell instead of
         // entering it. Because the player was traveling toward that
         // cell, this leaves them facing it -- PLAYER -> OBJECT -- ready
         // for isWithinTapRange/collectByTap. Checked as a single
@@ -2379,7 +2601,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // duplicating the scan. Cash is untouched here:
         // kind.requiresTapToCollect is false for cash100, so it keeps
         // its existing walk-into-instant-absorb behavior exactly as
-        // before. Pictures/wall displays are untouched too -- they're
+        // before -- and Sept 25, the same now holds for every hanging
+        // pickup (mail included), which auto-collect on arrival. Pictures/wall displays are untouched too -- they're
         // never in objectKinds, so this check never fires for them.
         //
         // Sept 21 (present-once-then-allow-pass -- fixes the "pickup
@@ -2401,8 +2624,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // unaffected by any of this. Cleared on rotate()/stepBackward()/
         // reset() so turning away or backing up re-presents the object
         // fresh rather than leaving a stale "already declined" memory.
+        // Sept 24 (held-walk bypass): the present-once back-off exists so a TAP
+        // that would otherwise land on an uncollected object stops one short
+        // to present it. A held walk performs no presentation (the stop scan
+        // above already lets it glide over these), so backing off mid-hold
+        // would just re-introduce the stall at every object.
         if let lastCoord = runSteps.last?.cell, let kind = objectKinds[lastCoord],
-           !collectedCoords.contains(lastCoord), kind.requiresTapToCollect {
+           !collectedCoords.contains(lastCoord), kind.requiresTapToCollect,
+           !walkingHeld {
             if presentedPickupCoord == lastCoord {
                 presentedPickupCoord = nil
                 runOutcome = .steppedForward
@@ -2728,7 +2957,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// each caller's own job), only WHAT happens once it does.
     private func performPickup(kind: ObjectKind, at coord: GridCoordinate) {
         if kind == .envelope {
-            guard let room = itemRooms[coord], roomDoors.values.contains(where: { $0.roomNumber == room }) else {
+            // Sept 24 (decorative room doors): a letter is only pickable
+            // when SOME mailable (functional) door carries its address.
+            // A decorative door's number can never become a deliverable
+            // address, so a legacy/hand-authored letter mistakenly
+            // addressed to one is refused here rather than picked up and
+            // stranded forever in the carry list by a door that will
+            // never accept it.
+            guard let room = itemRooms[coord], roomDoors.values.contains(where: { !$0.isDecorative && $0.roomNumber == room }) else {
                 showMessage("This letter needs a valid room address in the editor.")
                 return
             }
@@ -2770,9 +3006,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Called whenever a walk lands on a cell -- both mid-walk and on
     /// the final step. Sept 21 (deliberate tap-to-pick-up): this is now
     /// ONLY the arrival-triggers-collection path for kinds that don't
-    /// require a tap -- i.e. cash (ObjectKind.requiresTapToCollect ==
+    /// require a tap -- cash (ObjectKind.requiresTapToCollect ==
     /// false), which keeps its original "walk into it, instantly
-    /// absorbed" design untouched. Every other kind's actual pickup now
+    /// absorbed" design untouched; Sept 25, every hanging pickup joins
+    /// it (see hangsFromCeiling), so walked-through mail/envelopes and
+    /// the other spinning kinds auto-collect exactly like cash. Every
+    /// other kind's actual pickup now
     /// happens through collectByTap below instead; simply walking onto
     /// their cell here is a no-op for the pickup itself, but
     /// paintIfCarryingBucket/refreshFloorMapTexture (unrelated to
@@ -2827,7 +3066,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// tap on the object's own visible geometry, while leaving DECORATE
     /// selection exactly as forgiving as it already was.
     func objectCoordinate(for node: SCNNode) -> GridCoordinate? {
-        if node.name == "decoratorHitProxy" { return nil }
+        if node.name == "decoratorHitProxy" || node.name == "hangingPickupString" { return nil }
         var candidate: SCNNode? = node
         while let current = candidate {
             if let match = objectNodes.first(where: { $0.value === current }) {
@@ -2842,7 +3081,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Object added live via Decorator (DecoratorState.addFloorObject)
     /// into the SAME objectKinds/objectNodes bookkeeping every
     /// build-time object already has here -- same shape registerPicture
-    /// just above uses for pictureCoords/pictureDirections -- so
+    /// just above uses for pictureCoords/pictureFaces -- so
     /// ordinary gameplay pickup (isWithinTapRange/collectByTap,
     /// objectCoordinate above) and the stop-before/present-once-then-
     /// pass walk logic in advance() both see it immediately, no floor
@@ -3344,7 +3583,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
 
     func deliverMail(at coord: GridCoordinate) {
-        guard canRotate, coord == currentCell, let door = roomDoors[coord], facing == door.direction else { return }
+        // Sept 24 (decorative room doors): a decorative door never
+        // accepts mail and never shows ANY delivery message -- not even
+        // "No mail for Room X" -- so the guard below drops it silently
+        // before the existing message/delivery flow can run.
+        guard canRotate, coord == currentCell, let door = roomDoors[coord], facing == door.direction, !door.isDecorative else { return }
         let matching = carriedMail.filter { $0.roomNumber == door.roomNumber }
         guard !matching.isEmpty else {
             showMessage("No mail for Room \(door.roomNumber).")
@@ -3368,6 +3611,36 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         refreshFloorMapTexture()
     }
 
+    /// Sept 24 (room-door knock interaction): a normal-gameplay tap on a
+    /// room door's visible geometry routes here from ContentView.handleTap.
+    /// Mail-slot/doorknob region-splitting does not exist yet in the new
+    /// portrait (see the Sept 24 report), so this pass keeps one
+    /// whole-door behavior per door kind:
+    ///  - FUNCTIONAL door: unchanged -- deliverMail(at:) (delivery, or the
+    ///    existing "No mail for Room N." flow). Specialized-action-wins is
+    ///    effectively still in force for these because there is no
+    ///    separately-identifiable mail-slot region to subdivide them by;
+    ///    knocking them lands with that region-splitting follow-up.
+    ///  - DECORATIVE door (Floor 2): the whole visible door surface is the
+    ///    knock surface -- no mail slot, no knob-open, no enter behavior
+    ///    exist for them (entirely by construction: deliverMail's own
+    ///    guard refuses them), so a tap anywhere on the door calls
+    ///    SoundEffects.playKnock(), the audio ladder (soft -> medium ->
+    ///    hard, >5s reset) exactly as implemented and verified.
+    /// The guards here mirror the existing door branches in handleTap:
+    /// stopped at the door's own cell (coord == currentCell), facing it
+    /// head-on (facing == door.direction), and not mid-animation
+    /// (canRotate). One call site, one routing decision, one sound --
+    /// no duplicate firing through overlapping gesture paths.
+    func interactWithRoomDoor(at coord: GridCoordinate) {
+        guard canRotate, coord == currentCell, let door = roomDoors[coord], facing == door.direction else { return }
+        if door.isDecorative {
+            SoundEffects.playKnock()
+        } else {
+            deliverMail(at: coord)
+        }
+    }
+
     func isFloorMapNode(_ node: SCNNode) -> Bool {
         floorMapPlaneNodes.contains(where: { $0 === node })
     }
@@ -3383,10 +3656,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// at all (floorMapPlaneNodes empty, nothing to loop over) beyond
     /// the one throwaway image HallwayScene.build(fromMaze:) already
     /// skips generating in that case.
-    func currentFloorMapImage() -> UIImage {
+    func currentFloorMapImage(backgroundOpacity: CGFloat = 1, simplified: Bool = false) -> UIImage {
         let missionItemCells = objectKinds.filter { $0.value == missionObjectKind && !collectedCoords.contains($0.key) }.map { $0.key }
         let missionDestinationCells = destinationKinds.filter { $0.value == missionObjectKind }.map { $0.key }
-        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, photoBoothCells: Array(photoBoothCoords), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil)
+        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, photoBoothCells: Array(photoBoothCoords), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil, backgroundOpacity: backgroundOpacity, simplified: simplified)
     }
 
     private var applyingArrival = false
@@ -4611,6 +4884,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             headlampLight.attenuationEndDistance = Self.convert(baseAttenEnd * multiplier)
         }
     }
+
+    #if DEBUG
+    // Sept 22 (Eddie: presentation-vs-model investigation). A SEPARATE
+    // delegate callback from updateAtTime below (SCNSceneRendererDelegate
+    // allows implementing any subset) -- didRenderScene fires AFTER
+    // SceneKit has drawn a frame, so `scene`'s nodes' `.presentation`
+    // values here are guaranteed to reflect what was actually put on
+    // screen for that frame, not an intermediate or not-yet-applied
+    // value. Fires every frame; the pendingPresentationCheckBuildNumber
+    // guard above makes sure this only ever DOES anything on the first
+    // frame after a Floor-2 rebuild, once.
+    func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+        guard let buildNumber = pendingPresentationCheckBuildNumber else { return }
+        pendingPresentationCheckBuildNumber = nil
+        LightingDeterminismCheck.runPresentationCheck(scene: scene, floor: floorNumber, buildNumber: buildNumber, checkpoint: "FIRST-RENDERED-FRAME")
+    }
+    #endif
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         defer { lastTime = time }

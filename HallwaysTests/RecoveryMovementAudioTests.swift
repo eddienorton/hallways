@@ -51,7 +51,10 @@ struct RecoveryMovementAudioTests {
     }
     @Test func requestedSoundsAreBundledAndDecodable() throws {
         for name in ["hit-wall", "warning-buzz", "paint-splat", "trash-chute-open", "trash-chute-close"] {
-            let url = try #require(Bundle.main.url(forResource: name, withExtension: "mp3"))
+            let url = try #require(
+                Bundle.main.url(forResource: name, withExtension: "mp3", subdirectory: "audio")
+                    ?? Bundle.main.url(forResource: name, withExtension: "mp3")
+            )
             let player = try AVAudioPlayer(contentsOf: url)
             #expect(player.duration > 0)
             #expect(player.prepareToPlay())

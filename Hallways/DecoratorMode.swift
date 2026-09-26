@@ -35,19 +35,23 @@ struct DecoratorTarget: Equatable {
     /// it gets its own small set of methods (floorPosition/
     /// changeFloorPosition/floorObjectOrientation/changeFloorOrientation)
     /// further down in this file.
-    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject }
+    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth }
     let floor: Int
     enum Location: Equatable { case grid(GridCoordinate), elevatorCeiling }
     let location: Location
     let kind: Kind
-    /// Which wall face this target refers to. nil for every kind above
-    /// except `.wallSurface` -- unlike ceiling/fluorescent/picture
-    /// (each capped at one authored object per CELL, so a coordinate
-    /// alone already identifies them uniquely -- see MazeStore's
-    /// canPlaceMirror/canPlaceWallLight/canPlacePhotoBooth, which all
-    /// key off coord alone), a single cell can have up to 4 solid
-    /// walls, and an empty one needs its own direction to be
-    /// distinguishable from its neighbors.
+    /// Which wall face this target refers to. nil for ceiling/
+    /// fluorescent (capped at one authored object per CELL, so a
+    /// coordinate alone already identifies them uniquely -- see
+    /// MazeStore's canPlaceMirror/canPlaceWallLight/canPlacePhotoBooth,
+    /// which all key off coord alone) and for missionSign/floorMap
+    /// (same one-per-cell cap; still queried straight off the store's
+    /// own coord-keyed dict via pictureDirection(_:)). Sept 22
+    /// (wall-face authoring expansion): `.wallSurface` AND `.picture`
+    /// both always carry a concrete direction now -- a cell can hold up
+    /// to 4 solid walls, and since a cell can now also hold more than
+    /// one Picture (one per wall), a Picture's own identity needs its
+    /// wall face too, not just `.wallSurface`'s.
     let direction: Direction?
 
     init(floor: Int, coord: GridCoordinate, kind: Kind, direction: Direction? = nil) {
@@ -85,7 +89,38 @@ struct DecoratorTarget: Equatable {
         case .missionSign: return "Mission Statement"
         case .floorMap: return "Floor Map"
         case .wallSurface: return "Empty Wall"
-        case .floorObject: return "Trash Can" // first pass: the only Floor Object kind
+        // Sept 23 (Decorator Floor expansion): now covers Trash Can,
+        // Envelope, and Paint Bucket -- DecoratorOverlay looks up the
+        // SPECIFIC kind from MazeStore.objects for display instead of
+        // hardcoding one here (see its own floorObjectTitle helper).
+        case .floorObject: return "Object"
+        // Sept 23 (Decorator Ceiling expansion): Exit Sign -- its own
+        // independent authored kind (MazeStore.exitSigns), not part of
+        // the ceiling/fluorescent light machinery.
+        case .exitSign: return "Exit Sign"
+        // Sept 23 (Decorator Floor expansion): Fire -- the project's
+        // other existing physical light source (MazeStore.fires), kept
+        // fully independent of the ceiling/fluorescent machinery below
+        // (own add/remove/brightness functions) so the recently-tuned
+        // fluorescent recipe/brightness logic is never touched by this.
+        case .fire: return "Fire"
+        // Sept 24 (Empty Wall chooser): a decorative (nonfunctional)
+        // room door -- same visual + number as a map-authored door, but
+        // architectural only.
+        case .roomDoor: return "Room Door"
+        // Sept 25 (Designer wall authoring): Mirror -- wall-mounted
+        // fixture with a live camera feed (MirrorCamera) and a real
+        // reflection on the "mirrorSurface" child node; stops navigation
+        // on every pass like a Picture.
+        case .mirror: return "Mirror"
+        // Sept 25 (Designer wall authoring): Fire Extinguisher -- the
+        // Floor-5 mission pickup (MazeStore.extinguishers), now
+        // authorable on any unclaimed solid wall (Wall chooser).
+        case .extinguisher: return "Fire Extinguisher"
+        // Sept 25 (Designer wall authoring): Photo Booth -- the Floor-6
+        // mission fixture (MazeStore.photoBooths), now authorable on
+        // any unclaimed solid wall (Wall chooser).
+        case .photoBooth: return "Photo Booth"
         }
     }
 
@@ -147,7 +182,7 @@ final class DecoratorState: ObservableObject {
     /// unregisterPicture), so no stale in-world "Change Picture" menu
     /// or material reference is left pointing at a coordinate that no
     /// longer has a Picture.
-    var unregisterPicture: (_ coord: GridCoordinate) -> Void = { _ in }
+    var unregisterPicture: (_ coord: GridCoordinate, _ direction: Direction) -> Void = { _, _ in }
     /// Sept 21 (Floor Object current-cell authoring): the ONE piece of
     /// live navigation state this class has no other way to reach --
     /// same shape as canEditCab/stopWalking above, wired up in
@@ -168,6 +203,31 @@ final class DecoratorState: ObservableObject {
     /// Direction via Direction.left/right (MazeNavigation.swift's
     /// existing relative-turn convention), never a second one.
     var currentPlayerFacing: () -> Direction? = { nil }
+    /// Sept 25 (Designer wall authoring, live Mirror ADD): the two places
+    /// a live-added mirror must reach that this class has no other handle
+    /// on -- MirrorCamera (so the player's face shows in the new glass,
+    /// via addSurface/removeSurface on the cover of MirrorCamera.surfaces)
+    /// and TapNavigationController (so walks stop at the new mirror, via
+    /// registerMirror/unregisterMirror on pictureCoords). Wired up in
+    /// ContentView like registerAddedPicture above.
+    var registerMirrorSurface: (_ material: SCNMaterial, _ aspect: CGFloat) -> Void = { _, _ in }
+    var unregisterMirrorSurface: (_ material: SCNMaterial) -> Void = { _ in }
+    var registerMirror: (_ coord: GridCoordinate) -> Void = { _ in }
+    var unregisterMirror: (_ coord: GridCoordinate) -> Void = { _ in }
+    /// Sept 25 (Designer authoring, live mission-object ADD): the
+    /// navigation-state registration closures for the three mission
+    /// objects the Floor/Wall catalogs can now author live -- fire,
+    /// extinguisher, photo booth -- each paired 1:1 with its reverse.
+    /// Wired up in ContentView to TapNavigationController.registerFire/
+    /// registerExtinguisher/registerPhotoBooth and their unregister
+    /// counterparts, so authored objects join the real mission per
+    /// Eddie's Sept 25 direction.
+    var registerLiveFire: (_ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _ in }
+    var unregisterLiveFire: (_ coord: GridCoordinate) -> Void = { _ in }
+    var registerLiveExtinguisher: (_ direction: Direction, _ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _, _ in }
+    var unregisterLiveExtinguisher: (_ coord: GridCoordinate) -> Void = { _ in }
+    var registerLivePhotoBooth: (_ direction: Direction, _ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _, _ in }
+    var unregisterLivePhotoBooth: (_ coord: GridCoordinate) -> Void = { _ in }
 
     func attach(scene: SCNScene?, store: MazeStore) {
         self.scene = scene
@@ -210,6 +270,12 @@ final class DecoratorState: ObservableObject {
             case .picture, .missionSign, .floorMap: return false
             case .wallSurface: return false
             case .floorObject: return false // no Floor Objects in the elevator cab
+            case .exitSign: return false // no Exit Sign in the elevator cab
+            case .fire: return false // no Fire in the elevator cab
+            case .roomDoor: return false // no Room Door in the elevator cab
+            case .mirror: return false // no Mirror in the elevator cab
+            case .extinguisher: return false // no Fire Extinguisher in the elevator cab
+            case .photoBooth: return false // no Photo Booth in the elevator cab
             }
         }
         guard let coord = target.coord else { return false }
@@ -217,11 +283,47 @@ final class DecoratorState: ObservableObject {
         case .ceiling: return store.spotlights.contains(coord)
         case .fluorescent: return store.fluorescentLights[coord] != nil
         case .ceilingSurface: return store.cells.contains(coord)
-        case .picture: return store.pictures[coord] != nil
+        // Sept 22 (wall-face authoring expansion): face-specific --
+        // target.direction is always set on a `.picture` target now
+        // (see HallwayScene's build loop and DecoratorState.addPicture).
+        case .picture:
+            guard let direction = target.direction else { return false }
+            return store.hasPicture(direction, at: coord)
         case .missionSign: return store.missionSigns[coord] != nil
         case .floorMap: return store.floorMaps[coord] != nil
         case .wallSurface: return store.cells.contains(coord)
-        case .floorObject: return store.objects[coord] == .trashCan // first pass: trash cans only
+        // Sept 23 (Decorator Floor expansion): any of the current
+        // Floor-catalog pickup kinds counts as "this floorObject target
+        // exists" -- see FloorObjectCatalogItem below, the single place
+        // that list is defined.
+        case .floorObject:
+            guard let kind = store.objects[coord] else { return false }
+            return kind == .trashCan || kind == .envelope || kind == .paintBucket
+        // Sept 23 (Decorator Ceiling expansion): Exit Sign reads straight
+        // off MazeStore.exitSigns, its own independent authored dictionary.
+        case .exitSign: return store.hasExitSign(coord)
+        // Sept 23 (Decorator Floor expansion): Fire reads straight off
+        // MazeStore.fires, its own independent authored Set.
+        case .fire: return store.hasFire(coord)
+        // Sept 24 (Empty Wall chooser): reads straight off MazeStore.
+        // roomDoors, the door's own authored dictionary -- a decorative
+        // door placed here is a RoomDoorPlacement like any other, only
+        // with its isDecorative flag set.
+        case .roomDoor:
+            guard let direction = target.direction else { return false }
+            return store.roomDoors[coord]?.direction == direction
+        // Sept 25 (Designer wall authoring): mirrors/extinguishers/photo
+        // booths are wall-mounted (direction-carrying), one per cell,
+        // keyed off their own authored dictionaries.
+        case .mirror:
+            guard let direction = target.direction else { return false }
+            return store.mirrors[coord] == direction
+        case .extinguisher:
+            guard let direction = target.direction else { return false }
+            return store.extinguishers[coord] == direction
+        case .photoBooth:
+            guard let direction = target.direction else { return false }
+            return store.photoBooths[coord]?.direction == direction
         }
     }
 
@@ -283,15 +385,50 @@ final class DecoratorState: ObservableObject {
         guard enabled, let target = selection, target.kind == .ceiling || target.kind == .fluorescent,
               exists(target), let store else { return }
         let range = target.lightKind.levelRange
-        let next = min(range.upperBound, max(range.lowerBound, level(target) + delta))
-        guard next != level(target) else { return }
+        let previousLevel = level(target)
+        let next = min(range.upperBound, max(range.lowerBound, previousLevel + delta))
+        guard next != previousLevel else { return }
         let liveNodes = nodes(for: target)
         guard !liveNodes.isEmpty else { return }
         store.snapshotForUndo()
         place(target, level: next, orientation: orientation(target))
+        // Sept 22 (Eddie: brightness-range cleanup -- retires the
+        // stale three-Area x100 fluorescent multiplier from the
+        // abandoned Area-light experiment). The fluorescent fixture
+        // now carries TWO independently-tuned `.spot` lights (far-
+        // above the ceiling aimed down at nominal x20, far-below the
+        // floor aimed up at nominal x5 -- see FluorescentLight.swift),
+        // not one flat intensity shared by every light under the
+        // fixture. Overwriting every light with the SAME new flat
+        // value (the old x100 approach's shape) would silently erase
+        // that 20:5 ratio the moment brightness is nudged in Decorator
+        // mode. Instead, each light is SCALED by the ratio between the
+        // new and previous NOMINAL intensity for this target's kind --
+        // whatever multiplier a given light already carries on top of
+        // nominal (x20, x5, or none) is preserved exactly. This also
+        // reduces correctly to a plain overwrite for `.ceiling`, which
+        // has exactly one light already sitting at the nominal value
+        // with no multiplier -- so one code path is now correct for
+        // both kinds, with no per-kind special case left.
+        let previousNominal = target.lightKind.intensity(level: previousLevel)
+        let newNominal = target.lightKind.intensity(level: next)
         for node in liveNodes {
             node.enumerateHierarchy { child, _ in
-                child.light?.intensity = target.lightKind.intensity(level: next)
+                guard let light = child.light else { return }
+                if previousNominal > 0 {
+                    light.intensity = light.intensity * (newNominal / previousNominal)
+                } else {
+                    // Coming from OFF (previousNominal == 0): no
+                    // existing ratio to scale from, so fall back to
+                    // the plain nominal value -- matches what
+                    // construction time would produce from this level
+                    // for a light with no extra multiplier. A
+                    // multiplied fluorescent light turning on this way
+                    // will briefly not carry its x20/x5 multiplier
+                    // until the NEXT brightness change re-establishes a
+                    // real ratio; acceptable for this diagnostic pass.
+                    light.intensity = newNominal
+                }
             }
         }
         save(target)
@@ -380,24 +517,22 @@ final class DecoratorState: ObservableObject {
     }
 
     func pictureSize(_ target: DecoratorTarget) -> PictureSize {
-        guard let coord = target.coord else { return .standard }
-        return store?.pictureSize(at: coord) ?? .standard
+        guard let coord = target.coord, let direction = pictureDirection(target) else { return .standard }
+        return store?.pictureSize(direction: direction, at: coord) ?? .standard
     }
 
-    /// Sept 21 (Picture Decorator complete pass): a `.picture` target
-    /// never carries its own `direction` (see DecoratorTarget's own doc
-    /// comment -- only `.wallSurface` does, since every other kind is
-    /// capped at one authored object per coordinate), so every method
-    /// below that needs this Picture's wall face -- for
-    /// pictureLights/canPlacePictureLight/placePictureLight lookups, or
-    /// for rebuilding its backfill/wall -- recovers it from the
-    /// authoritative store, via MazeStore's own existing
-    /// pictureDirection(at:), rather than reading store.pictures
-    /// directly a second way.
+    /// Sept 22 (wall-face authoring expansion): a `.picture` target NOW
+    /// DOES carry its own `direction` (see DecoratorTarget's own doc
+    /// comment) -- tagged at construction time by HallwayScene's build
+    /// loop and by DecoratorState.addPicture below, exactly like
+    /// `.wallSurface` already did, since a coordinate alone can no
+    /// longer identify a specific Picture once a cell can hold two.
+    /// `.missionSign`/`.floorMap` are unaffected (still capped at one
+    /// per cell) and keep reading straight off the store.
     private func pictureDirection(_ target: DecoratorTarget) -> Direction? {
         guard let coord = target.coord else { return nil }
         switch target.kind {
-        case .picture: return store?.pictureDirection(at: coord)
+        case .picture: return target.direction
         case .missionSign: return store?.missionSigns[coord]
         case .floorMap: return store?.floorMaps[coord]
         default: return nil
@@ -414,12 +549,12 @@ final class DecoratorState: ObservableObject {
     /// `picture.hasLight` or equivalent) is introduced anywhere here.
     func pictureLightIsOn(_ target: DecoratorTarget) -> Bool {
         guard let coord = target.coord, let direction = pictureDirection(target) else { return false }
-        return store?.pictureLights[coord] == direction
+        return store?.pictureLights.contains(WallFace(coord: coord, direction: direction)) ?? false
     }
 
     func pictureLightBrightness(_ target: DecoratorTarget) -> Int {
-        guard let coord = target.coord else { return 3 }
-        return store?.lightBrightnessLevel(.picture, at: coord) ?? 3
+        guard let coord = target.coord, let direction = pictureDirection(target) else { return 3 }
+        return store?.lightBrightnessLevel(.picture, direction: direction, at: coord) ?? 3
     }
 
     /// Sept 21 (Picture Decorator complete pass, Goal 3): OFF -> ON
@@ -445,7 +580,7 @@ final class DecoratorState: ObservableObject {
         guard !liveNodes.isEmpty else { return }
         store.snapshotForUndo()
         if on {
-            let brightness = store.lightBrightnessLevel(.picture, at: coord)
+            let brightness = store.lightBrightnessLevel(.picture, direction: direction, at: coord)
             store.placePictureLight(direction, at: coord, brightness: brightness)
             for frame in liveNodes {
                 guard frame.childNode(withName: "pictureLight", recursively: false) == nil,
@@ -456,7 +591,7 @@ final class DecoratorState: ObservableObject {
                 frame.addChildNode(HallwayScene.makePictureLight(panelWidth: panelWidth, panelHeight: panelHeight, level: brightness))
             }
         } else {
-            store.removePictureLight(at: coord)
+            store.removePictureLight(direction, at: coord)
             for frame in liveNodes {
                 frame.childNode(withName: "pictureLight", recursively: false)?.removeFromParentNode()
             }
@@ -468,7 +603,7 @@ final class DecoratorState: ObservableObject {
     /// SAME ordinary Picture Light at a new 1-5 level (MazeStore.
     /// placePictureLight has no re-author bypass, but none is needed --
     /// canPlacePictureLight's own guard only depends on cells/neighbor/
-    /// pictures[coord]?.direction, none of which change on a
+    /// pictures[WallFace(coord, direction)], none of which change on a
     /// brightness-only re-call) and mutates the live SCNLight's
     /// intensity in place via enumerateHierarchy, exactly like
     /// changeBrightness does for ceiling/fluorescent lights elsewhere
@@ -519,13 +654,13 @@ final class DecoratorState: ObservableObject {
         guard enabled, let target = selection, target.kind == .picture,
               exists(target), let coord = target.coord, let direction = pictureDirection(target),
               let store, let scene else { return }
-        let currentSize = store.pictureSize(at: coord)
+        let currentSize = store.pictureSize(direction: direction, at: coord)
         guard currentSize != size else { return }
         let liveNodes = nodes(for: target)
         guard !liveNodes.isEmpty else { return }
         guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
         store.snapshotForUndo()
-        store.setPictureSize(size, at: coord)
+        store.setPictureSize(size, direction: direction, at: coord)
         var newPanelWidth: CGFloat = 0
         var newPanelHeight: CGFloat = 0
         for frame in liveNodes {
@@ -543,7 +678,7 @@ final class DecoratorState: ObservableObject {
             }
             if let light = frame.childNode(withName: "pictureLight", recursively: false) {
                 light.removeFromParentNode()
-                let level = store.lightBrightnessLevel(.picture, at: coord)
+                let level = store.lightBrightnessLevel(.picture, direction: direction, at: coord)
                 frame.addChildNode(HallwayScene.makePictureLight(panelWidth: newPanelWidth, panelHeight: newPanelHeight, level: level))
             }
         }
@@ -583,18 +718,29 @@ final class DecoratorState: ObservableObject {
         store.snapshotForUndo()
         remove(target)
         for node in liveNodes { node.removeFromParentNode() }
+        if let coord = target.coord { syncCeilingFixtureVisibility(at: coord) }
         selection = nil
         save(target)
     }
 
-    func canPlace(at coord: GridCoordinate) -> Bool {
+    /// Sept 23 (ceiling light coexistence). Kind-aware on purpose: a
+    /// coordinate can hold at most ONE of a given ceiling light kind
+    /// (a second Fluorescent can never stack on a Fluorescent, same as
+    /// before), but no longer requires BOTH kinds to be absent -- a
+    /// Spotlight and a Fluorescent may now occupy the same coordinate
+    /// at once. This is the single rule change coexistence needed;
+    /// every caller below just needed to start passing which kind it
+    /// actually means.
+    func canPlace(_ kind: DecoratorTarget.Kind, at coord: GridCoordinate) -> Bool {
         guard let store, store.currentMazeID == floor else { return false }
-        return store.cells.contains(coord) && !store.spotlights.contains(coord) && store.fluorescentLights[coord] == nil
+        guard store.cells.contains(coord) else { return false }
+        if kind == .fluorescent { return store.fluorescentLights[coord] == nil }
+        return !store.spotlights.contains(coord)
     }
 
     func canMove(_ direction: Direction) -> Bool {
         guard let target = selection, target.kind == .ceiling || target.kind == .fluorescent, exists(target), let coord = target.coord else { return false }
-        return canPlace(at: GridCoordinate(row: coord.row + direction.delta.row,
+        return canPlace(target.kind, at: GridCoordinate(row: coord.row + direction.delta.row,
                                           col: coord.col + direction.delta.col))
     }
 
@@ -615,20 +761,81 @@ final class DecoratorState: ObservableObject {
             node.position.z += Float(direction.delta.row) * Float(store.cellSize)
             moved.tag(node)
         }
+        // Sept 23 (ceiling light coexistence): the coordinate this
+        // fixture just left may have a same-cell sibling of the OTHER
+        // kind left behind (previously hidden, now the only kind
+        // there -- must become visible again), and the destination
+        // coordinate may have just gained a same-cell sibling of the
+        // other kind (this moved-in fixture may now need to be
+        // hidden). Both are no-ops when no coexistence is involved.
+        syncCeilingFixtureVisibility(at: coord)
+        syncCeilingFixtureVisibility(at: destination)
         selection = moved
         save(target)
     }
 
-    func canAdd(_ target: DecoratorTarget) -> Bool {
+    /// `kind` defaults to `.ceiling` purely so existing single-argument
+    /// call sites (the elevator cab path, which never reaches the
+    /// kind-aware canPlace check below -- it returns from its own
+    /// isCab branch first) keep compiling unchanged. Every non-cab
+    /// caller now passes the specific kind it means.
+    func canAdd(_ target: DecoratorTarget, kind: DecoratorTarget.Kind = .ceiling) -> Bool {
         guard exists(target) else { return false }
         if target.isCab { return store?.elevatorCabDecoration.ceilingFixture == nil }
         guard let coord = target.coord else { return false }
-        return canPlace(at: coord)
+        return canPlace(kind, at: coord)
+    }
+
+    /// Sept 23 (ceiling light coexistence). Re-syncs BOTH ceiling light
+    /// kinds' live fixture geometry at `coord` to whatever
+    /// MazeStore.visibleCeilingFixtureKind(at:) currently resolves to.
+    /// Safe/idempotent to call whenever occupancy or the visible choice
+    /// at a coordinate might have changed (add/move/delete/picker) --
+    /// harmless no-op for a coordinate with only one kind (or none),
+    /// which is every coordinate on a floor authored before this
+    /// feature existed.
+    private func syncCeilingFixtureVisibility(at coord: GridCoordinate) {
+        guard let store else { return }
+        let visible = store.visibleCeilingFixtureKind(at: coord)
+        for (kind, lightKind) in [(DecoratorTarget.Kind.ceiling, AuthoredLightKind.ceiling), (.fluorescent, .fluorescent)] {
+            for node in nodes(for: DecoratorTarget(floor: floor, coord: coord, kind: kind)) {
+                HallwayScene.setCeilingFixtureGeometryHidden(node, hidden: visible != nil && visible != lightKind)
+            }
+        }
+    }
+
+    /// Whether `target`'s coordinate currently has BOTH a spotlight and
+    /// a fluorescent authored -- the only situation the "Lights at this
+    /// location" picker has anything to actually choose between. Never
+    /// true for the elevator cab, which only ever holds one ceiling
+    /// fixture (ElevatorCabDecoration.Fixture is a single value, not a
+    /// per-kind collection) -- cab coexistence is out of scope for this
+    /// pass.
+    func hasCoexistingCeilingLights(_ target: DecoratorTarget) -> Bool {
+        guard !target.isCab, let store, let coord = target.coord else { return false }
+        return store.spotlights.contains(coord) && store.fluorescentLights[coord] != nil
+    }
+
+    /// Which fixture currently renders at `target`'s coordinate --
+    /// drives the "Lights at this location" picker's selection.
+    func visibleCeilingFixture(_ target: DecoratorTarget) -> AuthoredLightKind {
+        guard let coord = target.coord else { return target.lightKind }
+        return store?.visibleCeilingFixtureKind(at: coord) ?? target.lightKind
+    }
+
+    /// The picker's write path. Presentation-only, straight through to
+    /// MazeStore.setVisibleCeilingFixture -- never places, removes, or
+    /// changes the intensity of either light, only which one's
+    /// geometry is shown.
+    func setVisibleCeilingFixture(_ kind: AuthoredLightKind, target: DecoratorTarget) {
+        guard let coord = target.coord, let store else { return }
+        store.setVisibleCeilingFixture(kind, at: coord)
+        syncCeilingFixtureVisibility(at: coord)
     }
 
     func add(_ kind: DecoratorTarget.Kind) {
         guard enabled, let target = selection, target.kind == .ceilingSurface,
-              kind == .ceiling || kind == .fluorescent, canAdd(target),
+              kind == .ceiling || kind == .fluorescent, canAdd(target, kind: kind),
               let store, let scene else { return }
         if target.isCab {
             guard let mount = cabMount else { return }
@@ -641,18 +848,125 @@ final class DecoratorState: ObservableObject {
             return
         }
         guard let coord = target.coord else { return }
+        // Auto-orientation (Fluorescent): derive the corridor's own axis
+        // from the open sides of the cell the player is standing in --
+        // a straight N/S or E/W hallway gets a fixture aligned with it;
+        // corners/junctions/dead ends (no single axis) keep the default.
+        let addedOrientation = store.autoFluorescentOrientation(at: coord) ?? .northSouth
         let added = DecoratorTarget(floor: floor, coord: coord, kind: kind)
         let node = kind == .fluorescent
-            ? HallwayScene.makeFluorescentLight(orientation: .northSouth, level: 3, cellSize: store.cellSize)
+            ? HallwayScene.makeFluorescentLight(orientation: addedOrientation, level: 3, cellSize: store.cellSize)
             : HallwayScene.makeAuthoredCeilingFixture(cellSize: store.cellSize, level: 3)
         node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight),
                                   Float(coord.row) * Float(store.cellSize))
         added.tag(node)
         store.snapshotForUndo()
-        place(added, level: 3, orientation: .northSouth)
+        place(added, level: 3, orientation: addedOrientation)
         scene.rootNode.addChildNode(node)
+        // Sept 23 (ceiling light coexistence): if the OTHER ceiling
+        // light kind was already at this coord, place(...) above just
+        // pinned it as the still-visible fixture (see MazeStore.
+        // placeSpotlight/placeFluorescent's own comments) -- this
+        // hides the fixture just added, since a newly-added kind
+        // arrives hidden-by-default, never auto-visible. A no-op when
+        // this is the only kind at the coord.
+        syncCeilingFixtureVisibility(at: coord)
         selection = added
         save(target)
+    }
+
+    /// Sept 25 (Auto Lights). A RESET + REGENERATE authoring
+    /// convenience for the CURRENT FLOOR's fluorescent layout only --
+    /// scoped to fluorescents alone, nothing else authored on the
+    /// floor is touched (spotlights, pictures, mirrors, doors, floor
+    /// objects, mission content, fires, extinguishers, photo booths,
+    /// maps, signs all pass through untouched). This never changes HOW
+    /// a fluorescent produces light -- it reuses the exact same
+    /// construction/placement/orientation machinery the manual
+    /// "+ -> Ceiling -> Fluorescent Light" entrance above uses (same
+    /// HallwayScene.makeFluorescentLight, same
+    /// store.autoFluorescentOrientation(at:)/store.placeFluorescent,
+    /// same level-3 default, same syncCeilingFixtureVisibility
+    /// bookkeeping) -- only WHERE fluorescents land differs.
+    ///
+    /// STEP 1 (reset): every fluorescent currently on this floor is
+    /// removed the same way deleteSelected() removes one -- its live
+    /// node, store.removeFluorescent(at:) (which also clears that
+    /// coordinate's persisted brightness record and any dormant
+    /// ceiling-visible-fixture override, so no stale data survives),
+    /// and a visibility re-sync for whatever's left at that coord.
+    ///
+    /// STEP 2 (regenerate): a small, deterministic depth-first walk of
+    /// the floor's open cells (hallwayWalkOrder below) -- not raw
+    /// dictionary/array ordering, which isn't stable or topology-aware
+    /// -- covering every reachable cell exactly once. Every 4th cell
+    /// visited gets a fluorescent, oriented via the SAME
+    /// autoFluorescentOrientation(at:) corridor-axis lookup the manual
+    /// add path already uses (falling back to .northSouth on a corner/
+    /// junction/dead end, exactly like a manual add does).
+    ///
+    /// The whole reset+regenerate is ONE undo step (a single
+    /// snapshotForUndo() up front, matching Clear/
+    /// resetCurrentFloorToDefault's own "batch of edits, one undo"
+    /// convention) and ONE save at the end, not one per fixture.
+    func autoLightsCurrentFloor() {
+        guard enabled, let store, let scene, store.currentMazeID == floor else { return }
+        store.snapshotForUndo()
+
+        // STEP 1 -- reset every existing fluorescent on this floor.
+        for coord in Array(store.fluorescentLights.keys) {
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .fluorescent)
+            for node in nodes(for: target) { node.removeFromParentNode() }
+            store.removeFluorescent(at: coord)
+            syncCeilingFixtureVisibility(at: coord)
+        }
+
+        // STEP 2 -- regenerate: walk the floor, light every 4th cell.
+        let walk = Self.hallwayWalkOrder(cells: store.cells)
+        for (index, coord) in walk.enumerated() where index % 4 == 0 {
+            let orientation = store.autoFluorescentOrientation(at: coord) ?? .northSouth
+            let node = HallwayScene.makeFluorescentLight(orientation: orientation, level: 3, cellSize: store.cellSize)
+            node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight),
+                                      Float(coord.row) * Float(store.cellSize))
+            let added = DecoratorTarget(floor: floor, coord: coord, kind: .fluorescent)
+            added.tag(node)
+            store.placeFluorescent(orientation, at: coord, brightness: 10)
+            scene.rootNode.addChildNode(node)
+            syncCeilingFixtureVisibility(at: coord)
+        }
+
+        selection = nil
+        store.saveCurrentFloorAsOverride()
+    }
+
+    /// Deterministic depth-first walk of every cell in `cells`,
+    /// covering each reachable region exactly once. Component starts
+    /// are visited in row-major order (lowest row, then lowest col)
+    /// and, within a walk, neighbors are explored in Direction.
+    /// allCases' own fixed declared order (north, south, east, west) --
+    /// so the SAME cell set always produces the SAME walk, which is
+    /// what makes running Auto Lights twice on an unchanged floor
+    /// reproduce the same layout. Deliberately just a walk, not a
+    /// pathfinder or an optimizer -- Auto Lights only needs "some
+    /// reasonably even, repeatable order to count cells along."
+    private static func hallwayWalkOrder(cells: Set<GridCoordinate>) -> [GridCoordinate] {
+        var visited: Set<GridCoordinate> = []
+        var order: [GridCoordinate] = []
+        let starts = cells.sorted { ($0.row, $0.col) < ($1.row, $1.col) }
+        for start in starts where !visited.contains(start) {
+            var stack: [GridCoordinate] = [start]
+            while let coord = stack.popLast() {
+                guard !visited.contains(coord) else { continue }
+                visited.insert(coord)
+                order.append(coord)
+                let neighbors = Direction.allCases.compactMap { direction -> GridCoordinate? in
+                    let candidate = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+                    return (cells.contains(candidate) && !visited.contains(candidate)) ? candidate : nil
+                }
+                stack.append(contentsOf: neighbors.reversed())
+            }
+        }
+        return order
     }
 
     /// Sept 21 (3D Decorator wall authoring, Pass 3). Legality for a
@@ -718,7 +1032,7 @@ final class DecoratorState: ObservableObject {
 
         var newWallMaterials: [SCNMaterial] = []
         let (material, frameNode) = HallwayScene.buildPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, backfillWall: true, scale: PictureSize.standard.scale, pictureLightLevel: nil, coord: coord, floorNumber: floor, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), root: hallwayRoot, wallMaterials: &newWallMaterials)
-        DecoratorTarget(floor: floor, coord: coord, kind: .picture).tag(frameNode)
+        DecoratorTarget(floor: floor, coord: coord, kind: .picture, direction: direction).tag(frameNode)
         registerAddedPicture(coord, direction, material, newWallMaterials)
 
         if store.picturesUseCameraRoll {
@@ -728,7 +1042,236 @@ final class DecoratorState: ObservableObject {
             }
         }
 
-        selection = DecoratorTarget(floor: floor, coord: coord, kind: .picture)
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .picture, direction: direction)
+        save(target)
+    }
+
+    /// Sept 24 (Empty Wall chooser, decorative room doors): whether ADD
+    /// -> Door should be enabled for the tapped empty wall -- the choice
+    /// beside "Add Picture", backed by MazeStore.canPlaceRoomDoor, its
+    /// own full face-specific occupancy check (modeled on
+    /// canPlacePicture: genuinely solid, unclaimed, non-elevator,
+    /// non-mission walls only).
+    func canAddDoor(_ target: DecoratorTarget) -> Bool {
+        guard enabled, target.kind == .wallSurface, let store, let coord = target.coord, let direction = target.direction else { return false }
+        return store.canPlaceRoomDoor(direction, at: coord)
+    }
+
+    /// Sept 24 (Empty Wall chooser, decorative room doors): tap an empty
+    /// ordinary wall -> ADD -> Door. Places a NONFUNCTIONAL/
+    /// architectural room door -- the SAME visual (makeRoomDoorNode) and
+    /// the SAME automatic room-number assignment (MazeStore.
+    /// placeRoomDoor, the editor/functional door's own placer, shared
+    /// rather than re-implemented) -- but with its `decorative` flag set
+    /// so it carries zero gameplay: no mail, no opening, no walk stop,
+    /// no room of its own (see the TapNavigationController door gates).
+    /// Like addPicture, this keeps the snapshot -> mutate store -> build
+    /// the live node -> tag it -> select it -> save shape. Unlike
+    /// addPicture, the ordinary wall panel underneath is deliberately
+    /// KEPT: HallwayScene.build builds every room door the same way --
+    /// over its own ordinary panel -- so a live-added door must render
+    /// identically to a build-time one. Deleting the door simply
+    /// reveals the panel that was always behind it, so the restored
+    /// face is immediately a valid Empty Wall target again.
+    func addDoor() {
+        guard enabled, let target = selection, target.kind == .wallSurface,
+              let coord = target.coord, let direction = target.direction,
+              canAddDoor(target), let store, let scene else { return }
+        guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        store.snapshotForUndo()
+        store.placeRoomDoor(direction, at: coord, decorative: true)
+        guard let door = store.roomDoors[coord] else { return }
+        let doorNode = HallwayScene.makeRoomDoorNode(door, cellSize: store.cellSize)
+        hallwayRoot.addChildNode(doorNode)
+        DecoratorTarget(floor: floor, coord: coord, kind: .roomDoor, direction: direction).tag(doorNode)
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .roomDoor, direction: direction)
+        save(target)
+    }
+
+    /// Sept 24: the reverse of addDoor. Removes the tagged door node
+    /// (the panel was never removed, so nothing to restore -- the face
+    /// simply reads "Empty Wall" again), removes the authored placement
+    /// from MazeStore, and persists. Only ever reached with a tagged
+    /// .roomDoor target, and only DECORATIVE doors are tagged (see
+    /// HallwayScene.build's door loop), so functional/mail doors are
+    /// not reachable here.
+    func deleteRoomDoor() {
+        guard enabled, let target = selection, target.kind == .roomDoor,
+              exists(target), let coord = target.coord, let direction = target.direction,
+              let store, let scene else { return }
+        guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        let liveNodes = nodes(for: target)
+        store.snapshotForUndo()
+        store.removeRoomDoor(at: coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
+        save(target)
+    }
+
+    /// Sept 25 (Designer wall authoring, live Mirror ADD): whether
+    /// ADD -> Mirror should be enabled for the tapped empty wall --
+    /// backed by MazeStore.canPlaceMirror, the same full face-specific
+    /// occupancy check the build-time mirror loop and the Floor Editor
+    /// already rely on.
+    func canAddMirror(_ target: DecoratorTarget) -> Bool {
+        guard enabled, target.kind == .wallSurface, let store, let coord = target.coord, let direction = target.direction else { return false }
+        return store.canPlaceMirror(direction, at: coord)
+    }
+
+    /// Sept 25 (Designer wall authoring): tap an empty wall -> ADD ->
+    /// Mirror. Places a REAL working mirror -- the SAME makeMirrorNode
+    /// build(fromMaze:)'s mirror loop uses, including its
+    /// "mirrorSurface"-named child -- then registers it into the two
+    /// pieces of live state build-time mirrors already have: the walk-
+    /// stop bookkeeping (registerMirror -> TapNavigationController.
+    /// pictureCoords, so walks halt on every pass exactly like build-
+    /// time mirrors) and the live camera feed (registerMirrorSurface ->
+    /// MirrorCamera.addSurface, with the surface's real aspect, so the
+    /// player's reflection shows in the new glass without a floor
+    /// reload).
+    ///
+    /// The ordinary wall panel underneath is deliberately KEPT -- same
+    /// reasoning as addDoor above (the mirror simply mounts proud of the
+    /// existing face; the build-time loop skips the panel because it
+    /// wall-mounts mirrors flush, but over an intact panel the same
+    /// frame reads identically), so no wall backfill is needed and
+    /// deleting the mirror immediately re-reveals a valid Empty Wall.
+    func addMirror() {
+        guard enabled, let target = selection, target.kind == .wallSurface,
+              let coord = target.coord, let direction = target.direction,
+              canAddMirror(target), let store, let scene else { return }
+        store.snapshotForUndo()
+        store.placeMirror(direction, at: coord)
+        let mirrorNode = HallwayScene.makeMirrorNode(at: coord, direction: direction, cellSize: store.cellSize)
+        scene.rootNode.addChildNode(mirrorNode)
+        DecoratorTarget(floor: floor, coord: coord, kind: .mirror, direction: direction).tag(mirrorNode)
+        registerMirror(coord)
+        if let surface = mirrorNode.childNode(withName: "mirrorSurface", recursively: true),
+           let material = surface.geometry?.firstMaterial {
+            registerMirrorSurface(material, HallwayScene.mirrorSurfaceAspect(of: surface))
+        }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .mirror, direction: direction)
+        save(target)
+    }
+
+    /// Sept 25: the reverse of addMirror. Deregisters the walk-stop and
+    /// camera feed (unregisterMirror/unregisterMirrorSurface), removes
+    /// the authored placement from MazeStore, and removes the tagged
+    /// node. The wall panel was never removed, so the restored face
+    /// immediately reads "Empty Wall" again.
+    func deleteMirror() {
+        guard enabled, let target = selection, target.kind == .mirror,
+              exists(target), let coord = target.coord, let direction = target.direction,
+              let store, let scene else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        var surfaceMaterial: SCNMaterial?
+        for node in liveNodes {
+            if let surface = node.childNode(withName: "mirrorSurface", recursively: true) {
+                surfaceMaterial = surface.geometry?.firstMaterial
+            }
+        }
+        store.snapshotForUndo()
+        store.removeMirror(at: coord)
+        unregisterMirror(coord)
+        if let material = surfaceMaterial { unregisterMirrorSurface(material) }
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
+        save(target)
+    }
+
+    /// Sept 25 (Designer wall authoring, live Extinguisher ADD): whether
+    /// ADD -> Fire Extinguisher should be enabled for the tapped empty
+    /// wall -- backed by the new MazeStore.canPlaceExtinguisher, the
+    /// face-specific check modeled on canPlacePhotoBooth.
+    func canAddExtinguisher(_ target: DecoratorTarget) -> Bool {
+        guard enabled, target.kind == .wallSurface, let store, let coord = target.coord, let direction = target.direction else { return false }
+        return store.canPlaceExtinguisher(direction, at: coord)
+    }
+
+    /// Sept 25 (Designer wall authoring): tap an empty wall -> ADD ->
+    /// Fire Extinguisher. Places the Floor-5 mission pickup (same
+    /// makeFireExtinguisherNode the build loop uses), on top of the kept
+    /// wall panel like addMirror above, and registers it into
+    /// TapNavigationController (registerLiveExtinguisher -> extinguisher
+    /// bookkeeping + resting transform) so the player can pick it up
+    /// immediately and it behaves exactly like a map-authored one.
+    func addExtinguisher() {
+        guard enabled, let target = selection, target.kind == .wallSurface,
+              let coord = target.coord, let direction = target.direction,
+              canAddExtinguisher(target), let store, let scene else { return }
+        store.snapshotForUndo()
+        store.placeExtinguisher(direction, at: coord)
+        let node = HallwayScene.makeFireExtinguisherNode(at: coord, direction: direction, cellSize: store.cellSize)
+        scene.rootNode.addChildNode(node)
+        DecoratorTarget(floor: floor, coord: coord, kind: .extinguisher, direction: direction).tag(node)
+        registerLiveExtinguisher(direction, coord, node)
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .extinguisher, direction: direction)
+        save(target)
+    }
+
+    /// Sept 25: the reverse of addExtinguisher. Deregisters the pickup
+    /// bookkeeping (including dropping the item if it happens to be
+    /// carried), removes the authored placement, and removes the node.
+    func deleteExtinguisher() {
+        guard enabled, let target = selection, target.kind == .extinguisher,
+              exists(target), let store, let coord = target.coord else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        // deleteContent takes its own snapshot (one undo step, same as
+        // deleteRoomDoor's removeRoomDoor path above).
+        store.deleteContent([.extinguishers], at: coord)
+        unregisterLiveExtinguisher(coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: target.direction)
+        save(target)
+    }
+
+    /// Sept 25 (Designer wall authoring, live Photo Booth ADD): whether
+    /// ADD -> Photo Booth should be enabled for the tapped empty wall --
+    /// backed by MazeStore.canPlacePhotoBooth.
+    func canAddPhotoBooth(_ target: DecoratorTarget) -> Bool {
+        guard enabled, target.kind == .wallSurface, let store, let coord = target.coord, let direction = target.direction else { return false }
+        return store.canPlacePhotoBooth(direction, at: coord)
+    }
+
+    /// Sept 25 (Designer wall authoring): tap an empty wall -> ADD ->
+    /// Photo Booth. Places the Floor-6 mission fixture (same
+    /// makePhotoBoothNode the build loop uses; expression defaults to
+    /// .smile, the same authoring default every DefaultMazes.json booth
+    /// starts from) on top of the kept wall panel, and registers it into
+    /// TapNavigationController (registerLivePhotoBooth -> booth
+    /// bookkeeping) so the player can pose/activate it immediately and
+    /// the floor's photo-booth mission count includes it -- Eddie's
+    /// Sept 25 "join the real mission" direction.
+    func addPhotoBooth() {
+        guard enabled, let target = selection, target.kind == .wallSurface,
+              let coord = target.coord, let direction = target.direction,
+              canAddPhotoBooth(target), let store, let scene else { return }
+        store.snapshotForUndo()
+        store.placePhotoBooth(direction, expression: .smile, at: coord)
+        let node = HallwayScene.makePhotoBoothNode(at: coord, direction: direction, expression: .smile, cellSize: store.cellSize)
+        scene.rootNode.addChildNode(node)
+        DecoratorTarget(floor: floor, coord: coord, kind: .photoBooth, direction: direction).tag(node)
+        registerLivePhotoBooth(direction, coord, node)
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .photoBooth, direction: direction)
+        save(target)
+    }
+
+    /// Sept 25: the reverse of addPhotoBooth. Deregisters the booth
+    /// bookkeeping (and cancels any in-flight session), removes the
+    /// authored placement, and removes the node.
+    func deletePhotoBooth() {
+        guard enabled, let target = selection, target.kind == .photoBooth,
+              exists(target), let store, let coord = target.coord else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        // deleteContent takes its own snapshot (one undo step, same as
+        // deleteExtinguisher above).
+        store.deleteContent([.photoBooths], at: coord)
+        unregisterLivePhotoBooth(coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: target.direction)
         save(target)
     }
 
@@ -738,21 +1281,43 @@ final class DecoratorState: ObservableObject {
     /// key, not a generalized object registry -- Eddie: "avoid
     /// hard-wiring the BUTTON itself as a Trash Can button," but "do
     /// NOT build speculative systems" for anything beyond today's one
-    /// item. Adding a second Floor Object later means one more case
-    /// here and one more branch in addFloorObject below, nothing
-    /// structural.
+    /// item.
+    ///
+    /// Sept 23 (Decorator Floor expansion, Eddie: decorating Floors
+    /// 2-6): three more cases -- Envelope and Paint Bucket are the
+    /// Floor 3/4 mission pickups, both EXISTING ObjectKind cases with
+    /// no authoring path anywhere in the app before now (GridEditorView
+    /// never placed them either -- their only route onto a floor was a
+    /// hand-authored MazeStore.objects entry). Fire is the Floor 5
+    /// mission's OTHER existing physical light source (see
+    /// MazeStore.placeFire's own doc comment) -- NOT an ObjectKind at
+    /// all, its own independent Set<GridCoordinate>, so unlike the
+    /// other three cases it does not go through `kind`/placeObject
+    /// below; canAddFloorObjectAtCurrentCell/addFloorObject switch on
+    /// `self` now instead of being 100% generic, exactly as this
+    /// doc comment's own predecessor anticipated ("one more case here
+    /// and one more branch in addFloorObject below").
     enum FloorObjectCatalogItem: CaseIterable, Hashable {
         case trashCan
+        case envelope
+        case paintBucket
+        case fire
 
         var title: String {
             switch self {
             case .trashCan: return "Trash Can"
+            case .envelope: return "Envelope"
+            case .paintBucket: return "Paint Bucket"
+            case .fire: return "Fire"
             }
         }
 
-        fileprivate var kind: ObjectKind {
+        fileprivate var kind: ObjectKind? {
             switch self {
             case .trashCan: return .trashCan
+            case .envelope: return .envelope
+            case .paintBucket: return .paintBucket
+            case .fire: return nil // not an ObjectKind -- see this enum's own doc comment
             }
         }
     }
@@ -760,44 +1325,146 @@ final class DecoratorState: ObservableObject {
     /// Sept 21 (Floor Object current-cell authoring): whether ADD ->
     /// Floor Object -> <item> would succeed right now -- DECORATE must
     /// be on, the player's current cell must be known (currentPlayerCell,
-    /// wired from ContentView) and open, and -- the existing
-    /// one-object-per-cell data model, MazeStore.objects is keyed by a
-    /// single GridCoordinate -- empty. Backs the menu item's own
-    /// .disabled(...) in DecoratorOverlay, so an occupied/unknown
-    /// current cell refuses cleanly instead of silently overwriting
-    /// whatever's already there.
-    func canAddFloorObjectAtCurrentCell() -> Bool {
-        guard enabled, let store, let coord = currentPlayerCell() else { return false }
-        return store.cells.contains(coord) && store.objects[coord] == nil
+    /// wired from ContentView) and open. Trash Can/Envelope/Paint Bucket
+    /// share the existing one-object-per-cell data model (MazeStore.
+    /// objects is keyed by a single GridCoordinate -- must be empty);
+    /// Fire (Sept 23) is a completely independent authored set with its
+    /// own occupancy check (MazeStore.hasFire), since a cell can hold a
+    /// Fire AND a Floor Object/ceiling fixture at the same time in the
+    /// existing data model (different Y heights, never drawn on top of
+    /// each other). Backs the menu item's own .disabled(...) in
+    /// DecoratorOverlay, so an occupied/unknown current cell refuses
+    /// cleanly instead of silently overwriting whatever's already there.
+    func canAddFloorObjectAtCurrentCell(_ item: FloorObjectCatalogItem) -> Bool {
+        guard enabled, let store, let coord = currentPlayerCell(), store.cells.contains(coord) else { return false }
+        switch item {
+        case .trashCan, .envelope, .paintBucket: return store.objects[coord] == nil
+        case .fire: return !store.hasFire(coord)
+        }
     }
 
     /// Sept 21 (Floor Object current-cell authoring): the world-tap-free
     /// entrance for creating a Floor Object -- tap ADD (beside DONE) ->
     /// Floor Object -> <item>, no trip to the Floor Editor. Same overall
     /// shape as addPicture() above (snapshot -> mutate store -> build
-    /// the live node -> tag/register it -> select it -> save), except
-    /// the coordinate comes from the player's OWN current cell
-    /// (currentPlayerCell) rather than a tapped DecoratorTarget, and the
-    /// live node is built through HallwayScene.buildTrashCanNode -- the
-    /// SAME static method the per-cell scene-build loop itself now
-    /// calls (see that method's own doc comment) -- rather than a
-    /// second implementation. Refuses cleanly (no-op) if the cell
-    /// already holds anything, per canAddFloorObjectAtCurrentCell above
-    /// -- this pass doesn't migrate the one-object-per-cell data model.
-    /// Explicitly authors the default FloorObjectPlacement (CENTER /
-    /// north-south) rather than relying on floorObjectPlacement(at:)'s
-    /// own missing-entry default, so the authored data is unambiguous
-    /// from the moment this object exists.
+    /// the live node -> tag/register it -> select it -> save).
+    ///
+    /// Trash Can still goes through HallwayScene.buildTrashCanNode --
+    /// the SAME static method the per-cell scene-build loop itself
+    /// calls -- exactly as before. Envelope/Paint Bucket (Sept 23) go
+    /// through the SAME two functions build(fromMaze:)'s own per-cell
+    /// loop calls for every non-trash-can pickup (HallwayScene.
+    /// makeEnvelopeNode(roomNumber:)/makeObjectNode(_:size:floorNumber:),
+    /// both widened from `private` to internal for this -- see their
+    /// own doc comments), at the SAME height/no-offset convention that
+    /// loop uses, then tagged the same way buildTrashCanNode already
+    /// tags itself. Fire (Sept 23) goes through HallwayScene.
+    /// makeFireNode, already internal, and MazeStore.placeFire/
+    /// removeFire -- its own independent authored kind, kept
+    /// deliberately OUT of the ceiling/fluorescent light machinery
+    /// elsewhere in this file (place/remove/changeBrightness/
+    /// deleteSelected/move/add) so the recently-tuned fluorescent
+    /// recipe is never at risk from this addition; see fireBrightness/
+    /// changeFireBrightness/deleteFire below for its own small,
+    /// independent add/remove/brightness path.
     func addFloorObject(_ item: FloorObjectCatalogItem) {
-        guard canAddFloorObjectAtCurrentCell(), let store, let coord = currentPlayerCell(), let scene else { return }
-        guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        guard canAddFloorObjectAtCurrentCell(item), let store, let coord = currentPlayerCell(), let scene else { return }
+        store.snapshotForUndo()
+        switch item {
+        case .trashCan:
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            store.placeObject(.trashCan, at: coord)
+            let placement = FloorObjectPlacement()
+            store.setFloorObjectPlacement(placement, at: coord)
+            let node = HallwayScene.buildTrashCanNode(at: coord, cellSize: store.cellSize, floorNumber: floor, placement: placement)
+            hallwayRoot.addChildNode(node)
+            registerFloorObject(.trashCan, coord, node)
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .floorObject)
+            selection = target
+            save(target)
+        case .envelope, .paintBucket:
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false), let kind = item.kind else { return }
+            store.placeObject(kind, at: coord)
+            let node = kind == .envelope
+                ? HallwayScene.makeEnvelopeNode(roomNumber: store.itemRooms[coord])
+                : HallwayScene.makeObjectNode(kind, size: store.cellSize * 0.22, floorNumber: floor)
+            let objectY = store.wallHeight * (kind == .envelope ? 0.4 : 0.25)
+            node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(objectY), Float(coord.row) * Float(store.cellSize))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .floorObject)
+            target.tag(node)
+            hallwayRoot.addChildNode(node)
+            registerFloorObject(kind, coord, node)
+            selection = target
+            save(target)
+        case .fire:
+            store.placeFire(at: coord, brightness: 3)
+            let node = HallwayScene.makeFireNode(at: coord, cellSize: store.cellSize, brightness: 3)
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .fire)
+            target.tag(node)
+            scene.rootNode.addChildNode(node)
+            // Sept 25: register into TapNavigationController's fire
+            // bookkeeping so a Designer-authored fire is extinguishable
+            // AND counted by the floor's fire mission, exactly like a
+            // DefaultMazes.json-authored one (Eddie: join the real
+            // mission, not just the scenery).
+            registerLiveFire(coord, node)
+            selection = target
+            save(target)
+        }
+    }
+
+    /// Sept 21 (Floor Object placement, first pass): the specific
+    /// removal path Floor Objects never got in that first pass --
+    /// added Sept 23 alongside Envelope/Paint Bucket/Fire so every
+    /// Floor-category item is fully removable, per this task's own
+    /// requirement. Covers Trash Can/Envelope/Paint Bucket (Fire has
+    /// its own deleteFire below, since it's a different DecoratorTarget
+    /// kind). Same shape as deleteSelected() elsewhere in this file.
+    func deleteFloorObject() {
+        guard enabled, let target = selection, target.kind == .floorObject,
+              exists(target), let store, let coord = target.coord else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.removeObject(at: coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    /// Hanging is a catalog category; each item retains its own gameplay behavior.
+    enum HangingObjectCatalogItem: CaseIterable, Hashable {
+        case money
+
+        var title: String {
+            switch self {
+            case .money: return "Money"
+            }
+        }
+
+        var kind: ObjectKind {
+            switch self {
+            case .money: return .cash100
+            }
+        }
+    }
+
+    func canAddHangingObjectAtCurrentCell(_ item: HangingObjectCatalogItem) -> Bool {
+        guard enabled, let store, store.currentMazeID == floor,
+              let coord = currentPlayerCell(), store.cells.contains(coord) else { return false }
+        return store.objects[coord] == nil
+    }
+
+    func addHangingObjectAtCurrentCell(_ item: HangingObjectCatalogItem) {
+        guard canAddHangingObjectAtCurrentCell(item), let store,
+              let coord = currentPlayerCell(),
+              let hallwayRoot = scene?.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
         store.snapshotForUndo()
         store.placeObject(item.kind, at: coord)
-        let placement = FloorObjectPlacement()
-        store.setFloorObjectPlacement(placement, at: coord)
-        let node = HallwayScene.buildTrashCanNode(at: coord, cellSize: store.cellSize, floorNumber: floor, placement: placement)
-        hallwayRoot.addChildNode(node)
-        registerFloorObject(item.kind, coord, node)
+        let assembly = HallwayScene.buildPickupAssembly(item.kind, at: coord,
+            cellSize: store.cellSize, wallHeight: store.wallHeight, floorNumber: floor)
+        hallwayRoot.addChildNode(assembly)
+        registerFloorObject(item.kind, coord, assembly)
         let target = DecoratorTarget(floor: floor, coord: coord, kind: .floorObject)
         selection = target
         save(target)
@@ -805,52 +1472,232 @@ final class DecoratorState: ObservableObject {
 
     /// Sept 21 (current-cell Ceiling authoring): the catalog behind
     /// "+" -> Ceiling, same extensible-dispatch-key shape as
-    /// FloorObjectCatalogItem above -- one case today (Eddie asked for
-    /// Fluorescent Light only, not the plain non-fluorescent Ceiling
-    /// Light add(_:) also supports), a second case later means one more
-    /// case here and one more switch branch below, nothing structural.
+    /// FloorObjectCatalogItem above.
+    ///
+    /// Sept 23 (Decorator Ceiling expansion, Eddie: decorating Floors
+    /// 2-6): two more cases. Spotlight is the EXISTING plain (non-
+    /// fluorescent) ceiling fixture -- DecoratorTarget.Kind.ceiling,
+    /// MazeStore.spotlights, `add(.ceiling)` -- which already had a
+    /// full world-tap authoring path (tap an empty ceiling -> "Add
+    /// Ceiling") but was never in this current-cell catalog; exposing
+    /// it here reuses `add(.ceiling)` completely unchanged, same as
+    /// Fluorescent already does with `add(.fluorescent)`. Exit Sign is
+    /// its own independent authored kind (see canAddExitSignAtCurrentCell/
+    /// addExitSignAtCurrentCell below), deliberately NOT routed through
+    /// add(_:)/canAdd(_:) since it participates in neither the light
+    /// machinery nor that machinery's mutual-exclusion rule (a cell can
+    /// hold a ceiling light/fluorescent AND an Exit Sign at once in the
+    /// existing data model -- GridEditorView already allows this).
     enum CeilingObjectCatalogItem: CaseIterable, Hashable {
         case fluorescent
+        case spotlight
+        case exitSign
 
         var title: String {
             switch self {
             case .fluorescent: return "Fluorescent Light"
+            case .spotlight: return "Spotlight"
+            case .exitSign: return "Exit Sign"
             }
         }
     }
 
     /// Sept 21 (current-cell Ceiling authoring): whether "+" -> Ceiling
-    /// -> <item> would succeed right now -- reuses canAdd(_:) UNCHANGED
-    /// (exists(target) + canPlace(at:), the SAME legality a world tap
-    /// on this cell's ceiling already goes through), just keyed off the
-    /// player's current cell instead of a tapped DecoratorTarget. Backs
-    /// the menu item's own .disabled(...) in DecoratorOverlay.
+    /// -> <item> would succeed right now -- Fluorescent/Spotlight reuse
+    /// canAdd(_:) UNCHANGED (exists(target) + canPlace(at:), the SAME
+    /// legality a world tap on this cell's ceiling already goes
+    /// through), just keyed off the player's current cell instead of a
+    /// tapped DecoratorTarget. Exit Sign (Sept 23) has its own
+    /// independent legality -- see canAddExitSignAtCurrentCell below.
+    /// Backs the menu item's own .disabled(...) in DecoratorOverlay.
     func canAddCeilingObjectAtCurrentCell(_ item: CeilingObjectCatalogItem) -> Bool {
         guard enabled, let coord = currentPlayerCell() else { return false }
         switch item {
-        case .fluorescent: return canAdd(DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface))
+        case .fluorescent: return canAdd(DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface), kind: .fluorescent)
+        case .spotlight: return canAdd(DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface), kind: .ceiling)
+        case .exitSign: return canAddExitSignAtCurrentCell()
         }
     }
 
     /// Sept 21 (current-cell Ceiling authoring): the "+" -> Ceiling ->
-    /// Fluorescent Light entrance -- builds the EXACT .ceilingSurface
-    /// DecoratorTarget a world tap on the current cell's ceiling would
-    /// produce, selects it (same as select(at:in:) does for a real
-    /// tap), then calls the EXISTING add(_:) UNCHANGED. add(_:) does
-    /// everything else: build the live fluorescent node, tag it, author
-    /// it (brightness 3, north-south, MazeStore.placeFluorescent),
-    /// persist, and select the new fixture -- opening the SAME
-    /// fluorescent inspector (orientation/brightness/move/delete) a
+    /// Fluorescent Light/Spotlight entrance -- builds the EXACT
+    /// .ceilingSurface DecoratorTarget a world tap on the current
+    /// cell's ceiling would produce, selects it (same as select(at:in:)
+    /// does for a real tap), then calls the EXISTING add(_:) UNCHANGED.
+    /// add(_:) does everything else: build the live fixture node, tag
+    /// it, author it (brightness 3, MazeStore.placeFluorescent/
+    /// placeSpotlight), persist, and select the new fixture -- opening
+    /// the SAME inspector (brightness/orientation/move/delete) a
     /// world-tapped one already gets. No new construction, no new
-    /// inspector -- this function's only job is supplying the
-    /// coordinate add(_:) would otherwise get from a tap.
+    /// inspector for either case -- this function's only job is
+    /// supplying the coordinate add(_:) would otherwise get from a tap.
+    /// Exit Sign (Sept 23) is its own independent entrance -- see
+    /// addExitSignAtCurrentCell below.
     func addCeilingObjectAtCurrentCell(_ item: CeilingObjectCatalogItem) {
         guard canAddCeilingObjectAtCurrentCell(item), let coord = currentPlayerCell() else { return }
         switch item {
         case .fluorescent:
             selection = DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface)
             add(.fluorescent)
+        case .spotlight:
+            selection = DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface)
+            add(.ceiling)
+        case .exitSign:
+            addExitSignAtCurrentCell()
         }
+    }
+
+    /// Sept 23 (Decorator Ceiling expansion: Exit Sign): whether "+" ->
+    /// Ceiling -> Exit Sign would succeed right now. Deliberately NOT
+    /// canAdd(_:)/canPlace(at:) -- those gate specifically on
+    /// spotlights/fluorescentLights mutual exclusion, which an Exit
+    /// Sign has never participated in (MazeStore.placeExitSign's own
+    /// guard is just `cells.contains(coord)`; GridEditorView already
+    /// lets one go on any open cell regardless of what else is there).
+    /// One Exit Sign per cell is the only rule here -- repointing an
+    /// existing one is a direction change (changeExitSignDirection
+    /// below), not a second add.
+    func canAddExitSignAtCurrentCell() -> Bool {
+        guard enabled, let store, let coord = currentPlayerCell() else { return false }
+        return store.cells.contains(coord) && !store.hasExitSign(coord)
+    }
+
+    /// Sept 23 (Decorator Ceiling expansion: Exit Sign): the "+" ->
+    /// Ceiling -> Exit Sign entrance -- authors a new Exit Sign at the
+    /// player's current cell, defaulting to `.north` (an arbitrary but
+    /// harmless starting direction; changeExitSignDirection below lets
+    /// it be repointed immediately from the inspector, same as every
+    /// other authored direction in this app starts at a default and is
+    /// then adjusted). Builds the live node through the EXACT same
+    /// HallwayScene.makeExitSignNode(pointing:cellSize:) the per-cell
+    /// scene-build loop itself now calls (widened from `private` to
+    /// internal for this -- see that function's own doc comment), not
+    /// a second implementation.
+    func addExitSignAtCurrentCell() {
+        guard canAddExitSignAtCurrentCell(), let store, let coord = currentPlayerCell(), let scene else { return }
+        store.snapshotForUndo()
+        store.placeExitSign(.north, at: coord)
+        let node = HallwayScene.makeExitSignNode(pointing: .north, cellSize: store.cellSize)
+        node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight), Float(coord.row) * Float(store.cellSize))
+        let target = DecoratorTarget(floor: floor, coord: coord, kind: .exitSign)
+        target.tag(node)
+        scene.rootNode.addChildNode(node)
+        selection = target
+        save(target)
+    }
+
+    /// Sept 23 (Decorator Ceiling expansion: Exit Sign): reads the
+    /// authored direction straight off MazeStore.exitSigns -- same
+    /// "no second source of truth" shape orientation(_:)/floorPosition(_:)
+    /// elsewhere in this file already use.
+    func exitSignDirection(_ target: DecoratorTarget) -> Direction {
+        guard let coord = target.coord else { return .north }
+        return store?.exitSignDirection(at: coord) ?? .north
+    }
+
+    /// Sept 23 (Decorator Ceiling expansion: Exit Sign): repoints an
+    /// existing Exit Sign. Unlike Fluorescent's changeOrientation
+    /// (a plain node rotation), an Exit Sign's `direction` determines
+    /// BOTH the fixture's rotation AND which fixed arrow text each face
+    /// prints (see HallwayScene.makeExitSignNode's own doc comment --
+    /// "EXIT ->" vs "<- EXIT" depends on direction, not just axis), so
+    /// there is no cheap in-place rotation that produces a correct
+    /// result for all 4 directions. This rebuilds the fixture exactly
+    /// the way add/move elsewhere in this file already rebuild-on-
+    /// change: remove the old live node, author the new direction
+    /// (MazeStore.placeExitSign re-points rather than duplicating, per
+    /// its own doc comment), build a fresh node, tag/select it.
+    func changeExitSignDirection(_ direction: Direction) {
+        guard enabled, let target = selection, target.kind == .exitSign,
+              exists(target), let store, let coord = target.coord, let scene,
+              exitSignDirection(target) != direction else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.placeExitSign(direction, at: coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        let node = HallwayScene.makeExitSignNode(pointing: direction, cellSize: store.cellSize)
+        node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight), Float(coord.row) * Float(store.cellSize))
+        let newTarget = DecoratorTarget(floor: floor, coord: coord, kind: .exitSign)
+        newTarget.tag(node)
+        scene.rootNode.addChildNode(node)
+        selection = newTarget
+        save(target)
+    }
+
+    /// Sept 23 (Decorator Ceiling expansion: Exit Sign): removal, same
+    /// shape as deleteSelected()/deleteFloorObject() elsewhere in this
+    /// file.
+    func deleteExitSign() {
+        guard enabled, let target = selection, target.kind == .exitSign,
+              exists(target), let store, let coord = target.coord else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.removeExitSign(at: coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    /// Sept 23 (Decorator Floor expansion: Fire): current brightness,
+    /// reading the SAME MazeStore.lightBrightnessLevel(_:at:) every
+    /// other authored light in this file reads (AuthoredLightKind.fire
+    /// has its own 1...5 range, unrelated to ceiling/fluorescent's
+    /// 0...10 -- see LightBrightness.swift).
+    func fireBrightness(_ target: DecoratorTarget) -> Int {
+        guard let coord = target.coord else { return 3 }
+        return store?.lightBrightnessLevel(.fire, at: coord) ?? 3
+    }
+
+    /// Sept 23 (Decorator Floor expansion: Fire): live brightness
+    /// change -- same proportional-scaling shape changeBrightness above
+    /// uses for ceiling/fluorescent (scale each light's CURRENT
+    /// intensity by the ratio between the new and previous nominal
+    /// value, correct for Fire's single unmultiplied glow light and
+    /// harmless for a light coming from off), but its OWN, entirely
+    /// separate function -- deliberately not folded into the shared
+    /// changeBrightness above, so that function (and the fluorescent
+    /// recipe it protects) is never touched by this addition.
+    /// MazeStore.placeFire re-authors brightness the same "call place
+    /// again" way placeExitSign/placeSpotlight already do.
+    func changeFireBrightness(by delta: Int) {
+        guard enabled, let target = selection, target.kind == .fire,
+              exists(target), let store, let coord = target.coord else { return }
+        let range = AuthoredLightKind.fire.levelRange
+        let previous = fireBrightness(target)
+        let next = min(range.upperBound, max(range.lowerBound, previous + delta))
+        guard next != previous else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.placeFire(at: coord, brightness: next)
+        let previousNominal = AuthoredLightKind.fire.intensity(level: previous)
+        let newNominal = AuthoredLightKind.fire.intensity(level: next)
+        for node in liveNodes {
+            node.enumerateHierarchy { child, _ in
+                guard let light = child.light else { return }
+                light.intensity = previousNominal > 0 ? light.intensity * (newNominal / previousNominal) : newNominal
+            }
+        }
+        save(target)
+    }
+
+    /// Sept 23 (Decorator Floor expansion: Fire): removal, same shape
+    /// as deleteSelected()/deleteFloorObject()/deleteExitSign() above.
+    func deleteFire() {
+        guard enabled, let target = selection, target.kind == .fire,
+              exists(target), let store, let coord = target.coord else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.removeFire(at: coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        // Sept 25: reverse the registerLiveFire above so the removed
+        // fire also leaves TapNavigationController's fire bookkeeping.
+        unregisterLiveFire(coord)
+        selection = nil
+        save(target)
     }
 
     /// Sept 21 (current-cell Wall authoring): the catalog behind "+" ->
@@ -966,10 +1813,10 @@ final class DecoratorState: ObservableObject {
         }
 
         store.snapshotForUndo()
-        if store.pictureLights[coord] == direction {
-            store.removePictureLight(at: coord)
+        if store.pictureLights.contains(WallFace(coord: coord, direction: direction)) {
+            store.removePictureLight(direction, at: coord)
         }
-        store.removePicture(at: coord)
+        store.removePicture(direction, at: coord)
 
         for node in liveNodes { node.removeFromParentNode() }
         for node in backfillNodes { node.removeFromParentNode() }
@@ -977,7 +1824,7 @@ final class DecoratorState: ObservableObject {
         var newWallMaterials: [SCNMaterial] = []
         HallwayScene.buildWallPanel(coord: coord, direction: direction, width: panelWidth, length: panelLength, x: wx, z: wz, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), floorNumber: floor, root: hallwayRoot, wallMaterials: &newWallMaterials)
         appendWallMaterials(newWallMaterials)
-        unregisterPicture(coord)
+        unregisterPicture(coord, direction)
 
         selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
         save(target)
@@ -995,9 +1842,56 @@ struct DecoratorOverlay: View {
     /// Picture menu, so a sheet's completion handler never depends on
     /// state.selection still being the same target by the time the
     /// person finishes picking.
-    @State private var pictureSheetTarget: GridCoordinate?
+    @State private var pictureSheetTarget: WallFace?
     @State private var showSystemPhotoPicker = false
     @State private var showHallwaysArtPicker = false
+
+    /// Sept 23 (Decorator Floor expansion): DecoratorTarget.Kind.
+    /// floorObject now covers Trash Can/Envelope/Paint Bucket (see its
+    /// own doc comment), so target.title alone can no longer name the
+    /// specific object -- this looks the real ObjectKind up from
+    /// MazeStore (the same single source of truth every other kind-
+    /// specific accessor in this file reads from) for display only.
+    private func floorObjectTitle(_ target: DecoratorTarget) -> String {
+        guard let coord = target.coord, let kind = store.objects[coord] else { return target.title }
+        switch kind {
+        case .cash100: return "Money"
+        case .trashCan: return "Trash Can"
+        case .envelope: return "Envelope"
+        case .paintBucket: return "Paint Bucket"
+        default: return kind.rawValue.capitalized
+        }
+    }
+
+    /// Sept 24 (Empty Wall chooser): one row of the "Empty Wall" chooser.
+    /// Data-modeled (not hand-rolled per kind) so future choices are a
+    /// list entry, and shaped with a `children` seam for the future
+    /// grouped categories (Games > Checkers/Ping Pong, humor category,
+    /// etc.) Eddie described -- but NO current item has children and NO
+    /// UI renders a submenu today: the Empty Wall branch below stays a
+    /// flat ForEach over these two direct choices, and the submenu
+    /// behavior arrives only when a real multi-choice category lands.
+    private struct WallChooserItem: Identifiable {
+        let id = UUID()
+        let title: String
+        let isEnabled: Bool
+        let action: () -> Void
+        var children: [WallChooserItem]? = nil
+    }
+
+    private func emptyWallChoices(_ target: DecoratorTarget) -> [WallChooserItem] {
+        [
+            WallChooserItem(title: "Picture", isEnabled: state.canAddPicture(target)) { state.addPicture() },
+            WallChooserItem(title: "Door", isEnabled: state.canAddDoor(target)) { state.addDoor() },
+            // Sept 25 (Designer wall authoring): the three mission-fixture
+            // choices -- each disabled when its own face-specific occupancy
+            // check refuses this wall (would collide with any wall-mounted
+            // object already here).
+            WallChooserItem(title: "Mirror", isEnabled: state.canAddMirror(target)) { state.addMirror() },
+            WallChooserItem(title: "Fire Extinguisher", isEnabled: state.canAddExtinguisher(target)) { state.addExtinguisher() },
+            WallChooserItem(title: "Photo Booth", isEnabled: state.canAddPhotoBooth(target)) { state.addPhotoBooth() }
+        ]
+    }
 
     @ViewBuilder
     private func pictureLightControls(_ target: DecoratorTarget) -> some View {
@@ -1019,81 +1913,11 @@ struct DecoratorOverlay: View {
 
     var body: some View {
         VStack {
-            HStack(spacing: 8) {
-                Button(state.enabled ? "DECORATING · Done" : "DECORATE") { state.enabled.toggle() }
-                    .font(.system(size: 12, weight: .bold))
-                    .padding(10)
-                    .background(state.enabled ? Color.orange : Color.black.opacity(0.75), in: Capsule())
-                    .foregroundStyle(.white)
-                // Sept 21 (current-cell authoring front door): the
-                // explicit authoring entrance -- "ADD SOMETHING TO THE
-                // CELL I AM CURRENTLY STANDING IN" -- Eddie was clear
-                // this must NOT be a tap on the empty 3D world (world
-                // taps already mean movement), so it's this small
-                // button beside DONE instead, visually subordinate (a
-                // plain icon, no capsule/color of its own) and present
-                // ONLY while DECORATE is active. Three top-level
-                // categories -- Floor/Ceiling/Wall -- each a nested
-                // Menu over its own small CaseIterable catalog
-                // (FloorObjectCatalogItem/CeilingObjectCatalogItem/
-                // WallSide, all defined above in this file), so a
-                // future item in any category is one more case + one
-                // more switch branch, never a redesign of this menu.
-                // Every leaf here reuses an existing authoring system
-                // (Floor Object placement, fluorescent add(_:), the
-                // Empty Wall -> Add Picture flow) -- nothing here
-                // constructs new authored content on its own.
-                if state.enabled {
-                    Menu {
-                        Menu("Floor") {
-                            ForEach(DecoratorState.FloorObjectCatalogItem.allCases, id: \.self) { item in
-                                Button(item.title) { state.addFloorObject(item) }
-                                    .disabled(!state.canAddFloorObjectAtCurrentCell())
-                            }
-                        }
-                        Menu("Ceiling") {
-                            ForEach(DecoratorState.CeilingObjectCatalogItem.allCases, id: \.self) { item in
-                                Button(item.title) { state.addCeilingObjectAtCurrentCell(item) }
-                                    .disabled(!state.canAddCeilingObjectAtCurrentCell(item))
-                            }
-                        }
-                        Menu("Wall") {
-                            ForEach(DecoratorState.WallSide.allCases, id: \.self) { side in
-                                Button(side.title) { state.selectWallAtCurrentCell(side) }
-                                    .disabled(!state.canSelectWallAtCurrentCell(side))
-                            }
-                        }
-                    } label: {
-                        // Sept 21 (visual polish -- Eddie, on device:
-                        // the "+" was functionally right but far too
-                        // small next to DECORATING . Done). Plain
-                        // "plus" (not "plus.circle.fill", which already
-                        // draws its own circle and would double up with
-                        // the Circle() background below) on an explicit
-                        // orange Circle matching the pill's own
-                        // Color.orange -- same visual language, just a
-                        // compact circular control instead of a second
-                        // long pill. 34x34 is a deliberate explicit
-                        // frame (not padding-derived) so the shape stays
-                        // a perfect circle regardless of glyph metrics,
-                        // sized to match DECORATING . Done's own
-                        // rendered height (12pt bold text + 10pt
-                        // padding on each side). Menu's own behavior
-                        // (Floor/Ceiling/Wall submenus) is completely
-                        // unchanged -- only this label's appearance.
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 34, height: 34)
-                            .background(Color.orange, in: Circle())
-                    }
-                }
-            }
             Spacer()
             if state.enabled, let target = state.selection, target.floor == store.currentMazeID {
                 VStack(spacing: 10) {
                     HStack {
-                        Text(target.title).font(.headline)
+                        Text(target.kind == .floorObject ? floorObjectTitle(target) : target.title).font(.headline)
                         Spacer()
                         Button("Close") { state.selection = nil }
                     }
@@ -1102,9 +1926,10 @@ struct DecoratorOverlay: View {
                     if target.kind == .ceilingSurface {
                         HStack {
                             Button("Add Ceiling") { state.add(.ceiling) }
+                                .disabled(!state.canAdd(target, kind: .ceiling))
                             Button("Add Fluorescent") { state.add(.fluorescent) }
+                                .disabled(!state.canAdd(target, kind: .fluorescent))
                         }
-                        .disabled(!state.canAdd(target))
                     } else if target.kind == .picture {
                         // Sept 21 (Picture Decorator complete pass):
                         // Image, Size, Picture Light, and Delete --
@@ -1130,23 +1955,27 @@ struct DecoratorOverlay: View {
                             Text("Image").font(.caption).foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 4) {
                                 Button("Hallways Collection — Select") {
-                                    pictureSheetTarget = target.coord
+                                    if let coord = target.coord, let direction = target.direction {
+                                        pictureSheetTarget = WallFace(coord: coord, direction: direction)
+                                    }
                                     showHallwaysArtPicker = true
                                 }
                                 Button("Hallways Collection — Random") {
-                                    guard let coord = target.coord, let name = HallwayScene.pictureAssetNames.randomElement() else { return }
-                                    store.setPictureImageSelection(.builtIn(name), at: coord)
+                                    guard let coord = target.coord, let direction = target.direction, let name = HallwayScene.pictureAssetNames.randomElement() else { return }
+                                    store.setPictureImageSelection(.builtIn(name), direction: direction, at: coord)
                                     store.saveCurrentFloorAsOverride()
                                 }
                                 Button("Camera Roll — Select") {
-                                    pictureSheetTarget = target.coord
+                                    if let coord = target.coord, let direction = target.direction {
+                                        pictureSheetTarget = WallFace(coord: coord, direction: direction)
+                                    }
                                     showSystemPhotoPicker = true
                                 }
                                 Button("Camera Roll — Random") {
-                                    guard let coord = target.coord else { return }
+                                    guard let coord = target.coord, let direction = target.direction else { return }
                                     PhotoRollProvider.shared.randomImageWithIdentifier(caller: "Decorator: Camera Roll — Random") { identifier, _ in
                                         if let identifier {
-                                            store.setPictureImageSelection(.cameraRoll(identifier), at: coord)
+                                            store.setPictureImageSelection(.cameraRoll(identifier), direction: direction, at: coord)
                                             store.saveCurrentFloorAsOverride()
                                         }
                                     }
@@ -1168,13 +1997,24 @@ struct DecoratorOverlay: View {
                     } else if target.kind == .missionSign || target.kind == .floorMap {
                         pictureLightControls(target)
                     } else if target.kind == .wallSurface {
-                        // Sept 21 (3D Decorator wall authoring, Pass 3):
-                        // Picture only this pass -- Mirror/Wall Light
-                        // ADD are deliberately not offered here yet
-                        // (see the Sept 21 recon report's own
-                        // recommended sequencing).
-                        Button("Add Picture") { state.addPicture() }
-                            .disabled(!state.canAddPicture(target))
+                        // Sept 24 (Empty Wall chooser): the extensible
+                        // wall-placement chooser replacing the single
+                        // "Add Picture" button -- today exactly two
+                        // DIRECT choices (Picture, Door), no extra
+                        // "Wall Objects" level. Picture routes through
+                        // the SAME existing addPicture flow it always
+                        // has (zero regression); Door is the new
+                        // decorative/architectural door placement (see
+                        // DecoratorState.addDoor). Both entries
+                        // independently disable via their own occupancy
+                        // checks.
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(emptyWallChoices(target)) { item in
+                                Button(item.title) { item.action() }
+                                    .disabled(!item.isEnabled)
+                                    .font(.body)
+                            }
+                        }
                     } else if target.kind == .floorObject {
                         // Sept 21 (Floor Object placement, first pass --
                         // trash cans only): LEFT/CENTER/RIGHT is a
@@ -1188,28 +2028,137 @@ struct DecoratorOverlay: View {
                         // which move the SAME live node immediately (no
                         // rebuild) -- same shape as the Fluorescent
                         // Orientation picker just below in this file.
+                        //
+                        // Sept 23 (Decorator Floor expansion): gated to
+                        // Trash Can specifically -- Envelope/Paint
+                        // Bucket render dead-center with no LEFT/CENTER/
+                        // RIGHT concept (HallwayScene.build(fromMaze:)'s
+                        // own per-cell loop never reads
+                        // floorObjectPlacements for them), so offering
+                        // this picker for them would silently move the
+                        // live node somewhere a rebuild would then
+                        // snap back from.
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Position").font(.caption).foregroundStyle(.secondary)
-                            Picker("Position", selection: Binding(
-                                get: { state.floorPosition(target) },
-                                set: { state.changeFloorPosition($0) })) {
-                                    ForEach(FloorPosition.allCases, id: \.self) { position in
-                                        Text(position.title).tag(position)
+                            if let coord = target.coord, store.objects[coord] == .trashCan {
+                                Text("Position").font(.caption).foregroundStyle(.secondary)
+                                Picker("Position", selection: Binding(
+                                    get: { state.floorPosition(target) },
+                                    set: { state.changeFloorPosition($0) })) {
+                                        ForEach(FloorPosition.allCases, id: \.self) { position in
+                                            Text(position.title).tag(position)
+                                        }
                                     }
-                                }
-                                .pickerStyle(.segmented)
+                                    .pickerStyle(.segmented)
 
-                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
-                            Picker("Axis", selection: Binding(
-                                get: { state.floorObjectOrientation(target) },
-                                set: { state.changeFloorOrientation($0) })) {
-                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
-                                        Text(orientation.title).tag(orientation)
+                                Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                                Picker("Axis", selection: Binding(
+                                    get: { state.floorObjectOrientation(target) },
+                                    set: { state.changeFloorOrientation($0) })) {
+                                        ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                            Text(orientation.title).tag(orientation)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                            }
+                            // Sept 23 (Decorator Floor expansion): Floor
+                            // Objects had no removal path at all before
+                            // this pass -- see deleteFloorObject's own
+                            // doc comment.
+                            Button("Delete Object", role: .destructive) { state.deleteFloorObject() }
+                        }
+                    } else if target.kind == .exitSign {
+                        // Sept 23 (Decorator Ceiling expansion: Exit
+                        // Sign): a Direction picker over all 4 cardinal
+                        // values, same segmented-picker shape the
+                        // Fluorescent Orientation control below already
+                        // uses, writing through changeExitSignDirection
+                        // (a full node rebuild under the hood -- see its
+                        // own doc comment for why a plain rotation isn't
+                        // enough here).
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Exit Direction").font(.caption).foregroundStyle(.secondary)
+                            Picker("Direction", selection: Binding(
+                                get: { state.exitSignDirection(target) },
+                                set: { state.changeExitSignDirection($0) })) {
+                                    ForEach([Direction.north, .east, .south, .west], id: \.self) { direction in
+                                        Text(direction.rawValue.capitalized).tag(direction)
                                     }
                                 }
                                 .pickerStyle(.segmented)
+                            Button("Delete Exit Sign", role: .destructive) { state.deleteExitSign() }
                         }
+                    } else if target.kind == .fire {
+                        // Sept 23 (Decorator Floor expansion: Fire): its
+                        // own brightness control -- same +/- shape the
+                        // ceiling/fluorescent Brightness row below uses,
+                        // but reading fireBrightness/changeFireBrightness
+                        // (its own independent functions, AuthoredLightKind.
+                        // fire's 1...5 range) rather than target.lightKind/
+                        // state.level/state.changeBrightness, which stay
+                        // scoped to ceiling/fluorescent only.
+                        HStack {
+                            Text("Brightness")
+                            Button { state.changeFireBrightness(by: -1) } label: { Image(systemName: "minus.circle.fill") }
+                                .disabled(state.fireBrightness(target) == AuthoredLightKind.fire.levelRange.lowerBound)
+                            Text("\(state.fireBrightness(target)) / \(AuthoredLightKind.fire.levelRange.upperBound)").monospacedDigit()
+                            Button { state.changeFireBrightness(by: 1) } label: { Image(systemName: "plus.circle.fill") }
+                                .disabled(state.fireBrightness(target) == AuthoredLightKind.fire.levelRange.upperBound)
+                        }
+                        Button("Delete Fire", role: .destructive) { state.deleteFire() }
+                    } else if target.kind == .roomDoor {
+                        // Sept 24 (Empty Wall chooser, decorative room
+                        // doors): an existing decorative door's only
+                        // authoring affordance is its removal -- same
+                        // "restores the ordinary Empty Wall face"
+                        // outcome as Delete Picture. Functional/mail
+                        // doors are never tagged, so they can never
+                        // reach this branch.
+                        Button("Delete Room Door", role: .destructive) { state.deleteRoomDoor() }
+                    } else if target.kind == .mirror {
+                        // Sept 25 (Designer wall authoring): an existing
+                        // Mirror's only authoring affordance is removal
+                        // (deregisters the walk-stop and the live camera
+                        // feed, reveals the still-intact wall panel).
+                        // Tapping the mirror's own in-world node selects
+                        // it here -- it also stops the walk by design.
+                        Button("Delete Mirror", role: .destructive) { state.deleteMirror() }
+                    } else if target.kind == .extinguisher {
+                        // Sept 25 (Designer wall authoring): a placed
+                        // Fire Extinguisher's only authoring affordance
+                        // is removal (deregisters the pickup bookkeeping,
+                        // including dropping it if carried).
+                        Button("Delete Fire Extinguisher", role: .destructive) { state.deleteExtinguisher() }
+                    } else if target.kind == .photoBooth {
+                        // Sept 25 (Designer wall authoring): a placed
+                        // Photo Booth's only authoring affordance is
+                        // removal (deregisters the booth bookkeeping and
+                        // cancels any in-flight session).
+                        Button("Delete Photo Booth", role: .destructive) { state.deletePhotoBooth() }
                     } else {
+                        // Sept 23 (ceiling light coexistence). Only
+                        // ever shown when this coordinate genuinely
+                        // has BOTH a spotlight and a fluorescent
+                        // authored -- hasCoexistingCeilingLights is
+                        // false for every floor authored before this
+                        // feature existed, and always false for the
+                        // elevator cab. Presentation-only: switching
+                        // this selection never places, removes, or
+                        // dims either light -- see setVisibleCeilingFixture's
+                        // own doc comment.
+                        if state.hasCoexistingCeilingLights(target) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Lights at this location").font(.caption).foregroundStyle(.secondary)
+                                Picker("Visible Fixture", selection: Binding(
+                                    get: { state.visibleCeilingFixture(target) },
+                                    set: { state.setVisibleCeilingFixture($0, target: target) })) {
+                                        Text(state.visibleCeilingFixture(target) == .fluorescent ? "✓ Fluorescent" : "Fluorescent")
+                                            .tag(AuthoredLightKind.fluorescent)
+                                        Text(state.visibleCeilingFixture(target) == .ceiling ? "✓ Spotlight" : "Spotlight")
+                                            .tag(AuthoredLightKind.ceiling)
+                                    }
+                                    .pickerStyle(.segmented)
+                            }
+                        }
                         HStack {
                             Text("Brightness")
                             Button { state.changeBrightness(by: -1) } label: { Image(systemName: "minus.circle.fill") }
@@ -1245,14 +2194,68 @@ struct DecoratorOverlay: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
                 .frame(maxWidth: 350)
             }
+            // Sept 25 (HUD fix): the "complete Decorate control group" --
+            // DECORATE/DECORATING · Done pill plus the orange + ADD menu,
+            // which used to sit upper-middle where it rode over the
+            // carried-objects strip and the 3D view. Moved to BOTTOM
+            // CENTER, just above the FLOOR N pill (which is a separate
+            // NavigationOverlay element, untouched -- see its own doc).
+            HStack(spacing: 8) {
+                Button(state.enabled ? "DECORATING · Done" : "DECORATE") { state.enabled.toggle() }
+                    .font(.system(size: 12, weight: .bold))
+                    .padding(10)
+                    .background(state.enabled ? Color.orange : Color.black.opacity(0.75), in: Capsule())
+                    .foregroundStyle(.white)
+                if state.enabled {
+                    Menu {
+                        Menu("Floor") {
+                            ForEach(DecoratorState.FloorObjectCatalogItem.allCases, id: \.self) { item in
+                                Button(item.title) { state.addFloorObject(item) }
+                                    .disabled(!state.canAddFloorObjectAtCurrentCell(item))
+                            }
+                        }
+                        Menu("Ceiling") {
+                            ForEach(DecoratorState.CeilingObjectCatalogItem.allCases, id: \.self) { item in
+                                Button(item.title) { state.addCeilingObjectAtCurrentCell(item) }
+                                    .disabled(!state.canAddCeilingObjectAtCurrentCell(item))
+                            }
+                        }
+                        Menu("Hanging") {
+                            ForEach(DecoratorState.HangingObjectCatalogItem.allCases, id: \.self) { item in
+                                Button(item.title) { state.addHangingObjectAtCurrentCell(item) }
+                                    .disabled(!state.canAddHangingObjectAtCurrentCell(item))
+                            }
+                        }
+                        Menu("Wall") {
+                            ForEach(DecoratorState.WallSide.allCases, id: \.self) { side in
+                                Button(side.title) { state.selectWallAtCurrentCell(side) }
+                                    .disabled(!state.canSelectWallAtCurrentCell(side))
+                            }
+                        }
+                        // Sept 25 (Auto Lights): a direct action, not a
+                        // submenu -- unlike Floor/Ceiling/Hanging/Wall
+                        // above, it has no catalog item to pick and
+                        // isn't scoped to the player's current cell; it
+                        // resets and regenerates the WHOLE current
+                        // floor's fluorescent layout in one tap. See
+                        // autoLightsCurrentFloor()'s own doc comment.
+                        Button("Auto Lights") { state.autoLightsCurrentFloor() }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Color.orange, in: Circle())
+                    }
+                }
+            }
         }
-        .padding(.top, 110)
-        .padding(.bottom, 100)
+        .padding(.bottom, 12)
         .padding(.horizontal, 12)
         .sheet(isPresented: $showSystemPhotoPicker) {
             SystemPhotoPicker { identifier in
-                if let identifier, let coord = pictureSheetTarget {
-                    store.setPictureImageSelection(.cameraRoll(identifier), at: coord)
+                if let identifier, let face = pictureSheetTarget {
+                    store.setPictureImageSelection(.cameraRoll(identifier), direction: face.direction, at: face.coord)
                     store.saveCurrentFloorAsOverride()
                 }
                 pictureSheetTarget = nil
@@ -1260,8 +2263,8 @@ struct DecoratorOverlay: View {
         }
         .sheet(isPresented: $showHallwaysArtPicker) {
             HallwaysArtPicker { name in
-                if let name, let coord = pictureSheetTarget {
-                    store.setPictureImageSelection(.builtIn(name), at: coord)
+                if let name, let face = pictureSheetTarget {
+                    store.setPictureImageSelection(.builtIn(name), direction: face.direction, at: face.coord)
                     store.saveCurrentFloorAsOverride()
                 }
                 pictureSheetTarget = nil
@@ -1339,5 +2342,27 @@ extension HallwayScene {
         root.addChildNode(source)
         root.addChildNode(makeDecoratorHitProxy(cellSize: cellSize))
         return root
+    }
+
+    /// Sept 23 (ceiling light coexistence). Hides (or shows) a ceiling
+    /// fixture's visible GEOMETRY only -- every light-bearing node
+    /// (the fixture's own SCNLight(s)) and the shared decoratorHitProxy
+    /// (see makeDecoratorHitProxy above) are left completely untouched,
+    /// so the fixture's light keeps contributing illumination and stays
+    /// selectable via hit-test even while its physical body is
+    /// invisible. This is the ONLY mechanism the coexistence feature
+    /// uses to decide which fixture is seen -- it never enables,
+    /// disables, or removes a light, and it never touches either
+    /// fixture's own construction recipe (makeAuthoredCeilingFixture/
+    /// FluorescentLight.makeFluorescentLight are both unchanged).
+    /// Works for both fixture types unmodified: both build their
+    /// visible parts as plain geometry-only child nodes, their
+    /// SCNLight(s) on separate light-only nodes, and share this same
+    /// named hit-proxy shape -- see each one's own construction.
+    static func setCeilingFixtureGeometryHidden(_ fixture: SCNNode, hidden: Bool) {
+        fixture.enumerateHierarchy { node, _ in
+            guard node.geometry != nil, node.light == nil, node.name != "decoratorHitProxy" else { return }
+            node.isHidden = hidden
+        }
     }
 }

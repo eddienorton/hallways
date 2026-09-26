@@ -10,7 +10,7 @@ struct DisplayLightDecoratorTests {
         store.switchTo(id: 2)
         let (coord, direction) = try #require(store.missionSigns.first)
         if kind == .floorMap { store.placeFloorMap(direction, at: coord) }
-        store.removePictureLight(at: coord)
+        store.removePictureLight(direction, at: coord)
         let built = HallwayScene.build(fromMaze: store.cells, cellSize: store.cellSize, wallHeight: store.wallHeight,
             floorMaps: kind == .floorMap ? [coord: direction] : [:],
             missionSigns: kind == .missionSign ? [coord: direction] : [:],
@@ -48,7 +48,7 @@ struct DisplayLightDecoratorTests {
         #expect(!state.pictureLightIsOn(target))
         state.setPictureLightOn(true)
         state.setPictureLightOn(true)
-        #expect(store.pictureLights[coord] == direction)
+        #expect(store.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         #expect(frame.childNodes.filter { $0.name == "pictureLight" }.count == 1)
         let fixture = try #require(frame.childNode(withName: "pictureLight", recursively: false))
         let light = try #require(fixture.childNode(withName: "pictureLightSource", recursively: false)?.light)
@@ -60,7 +60,7 @@ struct DisplayLightDecoratorTests {
         #expect(frame.childNode(withName: "pictureLight", recursively: false) === fixture)
         let reload = MazeStore()
         reload.switchTo(id: store.currentMazeID)
-        #expect(reload.pictureLights[coord] == direction)
+        #expect(reload.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         #expect(reload.lightBrightnessLevel(.picture, at: coord) == 1)
         // Picture-only methods and generic light movement/deletion must reject these displays.
         let originalWidth = (frame.geometry as? SCNBox)?.width
@@ -73,9 +73,9 @@ struct DisplayLightDecoratorTests {
         #expect(frame.childNode(withName: "pictureLight", recursively: false) === fixture)
         state.setPictureLightOn(false)
         #expect(frame.childNode(withName: "pictureLight", recursively: false) == nil)
-        #expect(store.pictureLights[coord] == nil)
+        #expect(!store.pictureLights.contains(WallFace(coord: coord, direction: direction)))
         let afterOff = MazeStore()
         afterOff.switchTo(id: store.currentMazeID)
-        #expect(afterOff.pictureLights[coord] == nil)
+        #expect(!afterOff.pictureLights.contains(WallFace(coord: coord, direction: direction)))
     }
 }

@@ -80,17 +80,6 @@ enum HallwayScene {
 
 
     /// Cab dimensions are independent of the centered passenger doorway.
-    // Temporary gameplay experiment: set false to restore authored/default visibility.
-    static let suppressNavigationArrowsForExperiment = true
-
-    static func navigationArrowNodeName(at coord: GridCoordinate) -> String {
-        "navigationArrows_\(coord.row)_\(coord.col)"
-    }
-
-    static func setNavigationArrowsHidden(_ hidden: Bool, at coord: GridCoordinate, in scene: SCNScene) {
-        scene.rootNode.childNode(withName: navigationArrowNodeName(at: coord), recursively: true)?.isHidden = suppressNavigationArrowsForExperiment || hidden
-    }
-
     struct ElevatorGeometry {
         let cellSize: CGFloat
         var cabWidth: CGFloat { cellSize }
@@ -1856,7 +1845,7 @@ enum HallwayScene {
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
     static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [WallFace: PictureSize] = [:], mirrors: [GridCoordinate: Direction] = [:],
-                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], hiddenNavigationArrows: Set<GridCoordinate> = [], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
+                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -2005,55 +1994,6 @@ enum HallwayScene {
         let effectiveCeilingImageName = Self.effectiveCeilingImageName(floorNumber: floorNumber, theme: theme, ceilingTexture: ceilingTexture)
         let ceilingMaterial = makeCeilingMaterial(imageName: effectiveCeilingImageName)
         var wallMaterials: [SCNMaterial] = []
-
-        // Warm brass/amber, lit like metal trim rather than flat-red
-        // tape — same color family as the end-of-maze glowing marker, so
-        // "amber glow" reads consistently as "something to notice" instead
-        // of a hazard-stripe red that looked out of place on real brick.
-        let doorwayMaterial = SCNMaterial()
-        doorwayMaterial.diffuse.contents = UIColor(red: 0.72, green: 0.52, blue: 0.18, alpha: 1)
-        doorwayMaterial.emission.contents = UIColor(red: 0.5, green: 0.32, blue: 0.06, alpha: 1)
-        doorwayMaterial.lightingModel = .physicallyBased
-        doorwayMaterial.roughness.contents = 0.35
-        doorwayMaterial.metalness.contents = 0.65
-
-        // Builds one intersection marker centered at (x, z): a flat
-        // amber "+" (or "T"/"Y" at a 3-way) lying on the floor, one arm
-        // per open side, each arm ending in a flat triangular
-        // arrowhead pointing out into that doorway -- Eddie's "2 cris
-        // cross lines that form arrows pointing in 4 directions,"
-        // replacing the old per-doorway header bars.
-        func addIntersectionMarker(at coord: GridCoordinate, atX x: CGFloat, z: CGFloat, openNorth: Bool, openSouth: Bool, openEast: Bool, openWest: Bool) {
-            let marker = SCNNode()
-            marker.name = navigationArrowNodeName(at: coord)
-            marker.isHidden = suppressNavigationArrowsForExperiment || hiddenNavigationArrows.contains(coord)
-            root.addChildNode(marker)
-            let armLength = cellSize * 0.42
-            let armThickness: CGFloat = 0.08
-            let markerY: CGFloat = 0.015 // just proud of the floor, like the old threshold lines were
-            let arrowBaseWidth: CGFloat = 0.26
-            let arrowLength: CGFloat = 0.24
-
-            func addArm(_ direction: Direction, dx: CGFloat, dz: CGFloat) {
-                let shaft = dx == 0
-                    ? SCNBox(width: armThickness, height: 0.02, length: armLength, chamferRadius: 0)
-                    : SCNBox(width: armLength, height: 0.02, length: armThickness, chamferRadius: 0)
-                shaft.materials = [doorwayMaterial]
-                let shaftNode = SCNNode(geometry: shaft)
-                shaftNode.position = SCNVector3(Float(x + dx * armLength / 2), Float(markerY), Float(z + dz * armLength / 2))
-                marker.addChildNode(shaftNode)
-
-                let arrowGeometry = makeArrowheadGeometry(direction: direction, baseWidth: arrowBaseWidth, length: arrowLength, material: doorwayMaterial)
-                let arrowNode = SCNNode(geometry: arrowGeometry)
-                arrowNode.position = SCNVector3(Float(x + dx * armLength), Float(markerY), Float(z + dz * armLength))
-                marker.addChildNode(arrowNode)
-            }
-
-            if openNorth { addArm(.north, dx: 0, dz: -1) }
-            if openSouth { addArm(.south, dx: 0, dz: 1) }
-            if openEast { addArm(.east, dx: 1, dz: 0) }
-            if openWest { addArm(.west, dx: -1, dz: 0) }
-        }
 
         // The deposit half of the pick-up/deliver mechanic (Eddie,
         // Sept 5): a small metallic shutter mounted on one solid wall
@@ -3803,19 +3743,6 @@ enum HallwayScene {
             }
             if hasWallWest && destinationMountDirection != .west && elevatorMountDirection != .west && mapDirection != .west && missionDirection != .west && !hasPictureFace(.west) && mirrorDirection != .west && windowDirection != .west {
                 addWall(width: 0.1, length: cellSize, x: x - half, z: z, direction: .west)
-            }
-
-            // Doorway markers — only at TRUE intersections (3 or 4 open
-            // sides), where you actually have a choice to make under tap
-            // navigation. A plain pass-through or a turn (exactly 2 open
-            // sides) auto-advances and never stops there, so marking every
-            // boundary was just clutter — especially along a long straight
-            // run like the cross maze's arms. A real decision point gets a
-            // red header bar + threshold line over each of its open sides,
-            // so arriving there it's obvious you've hit a choice.
-            let openSides = [!hasWallNorth, !hasWallSouth, !hasWallEast, !hasWallWest].filter { $0 }.count
-            if openSides >= 3 {
-                addIntersectionMarker(at: coord, atX: x, z: z, openNorth: !hasWallNorth, openSouth: !hasWallSouth, openEast: !hasWallEast, openWest: !hasWallWest)
             }
 
             // First slice of the pick-up/deliver mechanic — this pass
@@ -6672,9 +6599,9 @@ enum HallwayScene {
     /// Bright emissive red, self-illuminating for the same reason every
     /// other pickup is (no dependence on scene lights reaching a nested
     /// child via categoryBitMask) -- and red specifically because it's
-    /// the one color in this game not already claimed by trash (white),
-    /// cash (gold), or the doorway/amber "notice this" markers, so an
-    /// Exit Sign reads as its own distinct category at a glance.
+    /// the one color in this game not already claimed by trash (white)
+    /// or cash (gold), so an Exit Sign reads as its own distinct
+    /// category at a glance.
     // v2 (Sept 18): the whole dim-vs-neon split is gone -- nothing
     // depends on the player's position anymore, so every material the
     // fixture needs now lives privately inside makeExitSignNode below.
@@ -6702,36 +6629,6 @@ enum HallwayScene {
     /// (the same double-faced trick MailDelivery's envelopes use). Rich
     /// 3D only -- the text is real extruded SCNText, no texture maps, no
     /// new assets.
-    /// A single flat triangle lying in the floor plane, tip pointing
-    /// out along `direction` -- used to cap each arm of
-    /// addIntersectionMarker with a proper arrowhead instead of
-    /// approximating one out of rotated boxes. Custom SCNGeometry
-    /// (rather than a primitive like SCNPyramid, whose base is a
-    /// rectangle, not a triangle) is what actually gets a flat,
-    /// 3-vertex wedge that reads as an arrowhead from directly above,
-    /// matching Eddie's reference sketch.
-    private static func makeArrowheadGeometry(direction: Direction, baseWidth: CGFloat, length: CGFloat, material: SCNMaterial) -> SCNGeometry {
-        let hw = Float(baseWidth / 2)
-        let len = Float(length)
-        let vertices: [SCNVector3]
-        switch direction {
-        case .north: vertices = [SCNVector3(-hw, 0, 0), SCNVector3(hw, 0, 0), SCNVector3(0, 0, -len)]
-        case .south: vertices = [SCNVector3(-hw, 0, 0), SCNVector3(hw, 0, 0), SCNVector3(0, 0, len)]
-        case .east: vertices = [SCNVector3(0, 0, -hw), SCNVector3(0, 0, hw), SCNVector3(len, 0, 0)]
-        case .west: vertices = [SCNVector3(0, 0, -hw), SCNVector3(0, 0, hw), SCNVector3(-len, 0, 0)]
-        }
-        let source = SCNGeometrySource(vertices: vertices)
-        // Both winding orders, so the triangle renders whichever side
-        // of it the camera happens to be on -- it's a paper-thin floor
-        // decal, not a solid, so there's no "back face" that should
-        // stay hidden.
-        let indices: [Int32] = [0, 1, 2, 0, 2, 1]
-        let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
-        let geometry = SCNGeometry(sources: [source], elements: [element])
-        geometry.materials = [material]
-        return geometry
-    }
-
     // Sept 23 (Decorator Ceiling expansion): access widened from `private`
     // to internal so DecoratorMode.swift can build a live Exit Sign node the
     // same way this file's own build(fromMaze:) loop does -- no second

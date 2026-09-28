@@ -335,25 +335,6 @@ final class DecoratorState: ObservableObject {
     /// implementation of picture-changing logic.
     var presentPictureChangeMenu: (_ face: WallFace) -> Void = { _ in }
 
-    var navigationArrowsEnabledAtCurrentCell: Bool {
-        guard let coord = currentPlayerCell(), let store else { return true }
-        return !store.hiddenNavigationArrows.contains(coord)
-    }
-
-    var canEditNavigationArrowsAtCurrentCell: Bool {
-        guard enabled, let coord = currentPlayerCell(), let store else { return false }
-        return store.cells.contains(coord)
-    }
-
-    func setNavigationArrowsEnabledAtCurrentCell(_ enabled: Bool) {
-        guard canEditNavigationArrowsAtCurrentCell, let coord = currentPlayerCell(),
-              let store, let scene, navigationArrowsEnabledAtCurrentCell != enabled else { return }
-        store.snapshotForUndo()
-        store.setNavigationArrowsEnabled(enabled, at: coord)
-        HallwayScene.setNavigationArrowsHidden(!enabled, at: coord, in: scene)
-        store.saveCurrentFloorAsOverride()
-    }
-
     func attach(scene: SCNScene?, store: MazeStore) {
         self.scene = scene
         self.store = store
@@ -2765,10 +2746,6 @@ struct DecoratorOverlay: View {
                         Button("Door Entry") { state.addRoomEntranceDoorAtCurrentCell() }
                             .disabled(!state.canAddRoomEntranceDoorAtCurrentCell())
                         Menu("Floor") {
-                            Toggle("Navigation Arrows", isOn: Binding(
-                                get: { state.navigationArrowsEnabledAtCurrentCell },
-                                set: { state.setNavigationArrowsEnabledAtCurrentCell($0) }))
-                                .disabled(!state.canEditNavigationArrowsAtCurrentCell)
                             ForEach(DecoratorState.FloorObjectCatalogItem.allCases, id: \.self) { item in
                                 Button(item.title) { state.addFloorObject(item) }
                                     .disabled(!state.canAddFloorObjectAtCurrentCell(item))

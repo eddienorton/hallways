@@ -31,6 +31,7 @@ struct EditorSpatialMarkers: View {
         if let d = store.floorMaps[coord] { result.append(Mark(id: "floorMaps", symbol: "map.fill", color: .blue, wall: d)) }
         if let d = store.missionSigns[coord] { result.append(Mark(id: "missionSigns", symbol: "signpost.right.fill", color: .purple, wall: d)) }
         if let d = store.bathroomDoors[coord] { result.append(Mark(id: "bathroomDoors", symbol: "door.left.hand.closed", color: .brown, wall: d)) }
+        if let placement = store.roomEntranceDoors[coord] { result.append(Mark(id: "roomEntranceDoors", symbol: "door.left.hand.open", color: .indigo, wall: placement.direction)) }
         if let d = store.extinguishers[coord] { result.append(Mark(id: "extinguishers", symbol: "flame.fill", color: .red, wall: d)) }
         if let d = store.ticTacToeTerminals[coord] { result.append(Mark(id: "ticTacToeTerminals", symbol: "square.grid.3x3", color: .blue, wall: d)) }
         if let d = store.shellGameStations[coord] { result.append(Mark(id: "shellGameStations", symbol: "cup.and.saucer.fill", color: .blue, wall: d)) }

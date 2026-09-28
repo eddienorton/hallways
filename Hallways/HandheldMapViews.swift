@@ -192,7 +192,7 @@ struct HandheldMapOverlay: View {
     }
 
     private func miniMapCard(geometry: HandheldMapGeometry) -> some View {
-        Image(uiImage: controller.currentFloorMapImage(backgroundOpacity: 0, simplified: true))
+        Image(uiImage: controller.currentFloorMapImage(backgroundOpacity: 0, simplified: true, includeWallObjectIndicators: true))
             .resizable()
             .interpolation(.medium)
             .frame(width: HandheldMapGeometry.miniSize, height: HandheldMapGeometry.miniSize)
@@ -208,7 +208,7 @@ struct HandheldMapOverlay: View {
     }
 
     private func fullMapCard(geometry: HandheldMapGeometry) -> some View {
-        Image(uiImage: controller.currentFloorMapImage(backgroundOpacity: 0))
+        Image(uiImage: controller.currentFloorMapImage(backgroundOpacity: 0, includeWallObjectIndicators: true))
             .resizable()
             .interpolation(.high)
             .frame(width: geometry.imageSize, height: geometry.imageSize)

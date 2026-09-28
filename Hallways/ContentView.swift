@@ -475,6 +475,12 @@ struct ContentView: View {
                 // the scene or moves the player. See PictureChangeMenuHost's
                 // own doc comment.
                 PictureChangeMenuHost(controller: navController, mazeStore: mazeStore)
+                // BUG 2 fix (manual-mode elevator Change Picture), Sept
+                // 26: same "zero-size host, own confirmationDialog"
+                // shape as PictureChangeMenuHost just above, but keyed
+                // on activeElevatorPictureMenu instead of
+                // activePictureMenu -- see that view's own doc comment.
+                ElevatorPictureChangeMenuHost(controller: navController, mazeStore: mazeStore)
                 // Sept 26 (intro-HUD leak fix): DECORATE and the
                 // handheld mini-map are gameplay/authoring controls
                 // that must never appear while the intro screen is up.
@@ -498,7 +504,7 @@ struct ContentView: View {
                             .zIndex(30)
                     }
                 }
-                PlayerSettingsButton()
+                PlayerSettingsButton(store: mazeStore)
             }
 
             // Unconditional, unlike the overlays above -- it has to
@@ -646,7 +652,7 @@ struct ContentView: View {
                 sceneVersion = mazeStore.version
             }
         }) {
-            GridEditorView(mazeStore: mazeStore, youAreHere: navBridge.controller?.currentCell, youAreHereFacing: navBridge.controller?.facing, youAreHereMazeID: navBridge.controller != nil ? mazeStore.currentMazeID : nil)
+            GridEditorView(mazeStore: mazeStore, themeStore: themeStore, youAreHere: navBridge.controller?.currentCell, youAreHereFacing: navBridge.controller?.facing, youAreHereMazeID: navBridge.controller != nil ? mazeStore.currentMazeID : nil)
         }
         // A floor switch (reaching an elevator/end cell in 3D, or
         // navigating floors inside the grid editor) needs the 3D scene
@@ -861,7 +867,10 @@ private struct CarriedItemsPill: View {
                         .background(Color.red.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
                 }
                 ForEach(controller.carriedMail) { letter in
-                    Label("Rm \(letter.roomNumber)", systemImage: "envelope.fill")
+                    // Sept 26 (Eddie: carried-mail pills overflow with
+                    // 3+ items): drop the "Rm " prefix, room number
+                    // only -- icon/styling/spacing/logic all unchanged.
+                    Label("\(letter.roomNumber)", systemImage: "envelope.fill")
                         .font(.system(size: 17, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 8)
@@ -1016,8 +1025,6 @@ private struct ElevatorCurtainOverlay: View {
             guard event != nil else { return }
             openFraction = 0
             visible = true
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
-            navLog("[ARRIVALDIAG] curtain floorTransitionRequested received t=\(String(format: "%.4f", Date().timeIntervalSince1970)) -- curtain now FULLY CLOSED (openFraction=0, visible=true)")
             // A brief beat so mazeStore.advanceToNextMaze() (called by
             // the controller right alongside this same event) actually
             // swaps in and settles behind this fully-closed curtain
@@ -1026,7 +1033,6 @@ private struct ElevatorCurtainOverlay: View {
             // floor for an instant.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 SoundEffects.playElevatorArrival()
-                navLog("[ARRIVALDIAG] arrival sound played t=\(String(format: "%.4f", Date().timeIntervalSince1970))")
                 DispatchQueue.main.asyncAfter(deadline: .now() + SoundEffects.elevatorDoorOpeningDelay) {
                     // Eddie, Sept 16 (atomic arrival presentation):
                     // this fixed 0.2s + elevatorDoorOpeningDelay beat
@@ -1055,24 +1061,13 @@ private struct ElevatorCurtainOverlay: View {
                     // otherwise. The curtain stays fully closed for
                     // however much longer that takes -- nothing behind
                     // it is visible either way.
-                    // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): counts
-                    // how many 0.03s polls it actually took, so the
-                    // console shows whether the destination floor was
-                    // already ready (pollCount stays 0) or the wait
-                    // genuinely engaged (pollCount > 0).
-                    var arrivalDiagPollCount = 0
                     func openWhenSceneReady() {
                         guard navBridge.arrivalSceneReady else {
-                            if arrivalDiagPollCount == 0 {
-                                navLog("[ARRIVALDIAG] curtain open gate NOT READY yet t=\(String(format: "%.4f", Date().timeIntervalSince1970)) -- polling")
-                            }
-                            arrivalDiagPollCount += 1
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
                                 openWhenSceneReady()
                             }
                             return
                         }
-                        navLog("[ARRIVALDIAG] curtain open gate READY t=\(String(format: "%.4f", Date().timeIntervalSince1970)) pollCount=\(arrivalDiagPollCount) -- stopping music, starting open animation")
                         // Sept 14 (Eddie): "keep the elevator music playing
                         // continuously while the doors remain closed... stop
                         // it at the moment the doors START to open." Moved
@@ -1100,7 +1095,6 @@ private struct ElevatorCurtainOverlay: View {
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
                             visible = false
-                            navLog("[ARRIVALDIAG] curtain visible = false t=\(String(format: "%.4f", Date().timeIntervalSince1970)) -- transition presentation complete")
                         }
                     }
                     openWhenSceneReady()
@@ -1563,12 +1557,6 @@ struct HallwaySceneView: UIViewRepresentable {
         } else {
             // A maze is drawn — tap-to-advance between intersections,
             // no hold-and-steer at all.
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator arrival
-            // visual-transition audit). Remove this whole block (every
-            // line tagged [ARRIVALDIAG] in this file and
-            // TapNavigationController.swift) once diagnosed.
-            let arrivalDiagBuildStart = Date().timeIntervalSince1970
-            navLog("[ARRIVALDIAG] makeUIView START t=\(String(format: "%.4f", arrivalDiagBuildStart)) buildingFloor=\(mazeStore.currentMazeID) pendingElevatorArrival=\(navBridge.pendingElevatorArrival) pendingArrivalYaw=\(String(describing: navBridge.pendingArrivalYaw))")
             let start = mazeStore.startCoordinate ?? GridCoordinate(row: 0, col: 0)
             let end = mazeStore.endCoordinate ?? start
             let facing = startingFacing(at: start, cells: mazeStore.cells)
@@ -1586,15 +1574,11 @@ struct HallwaySceneView: UIViewRepresentable {
             // already-known type to destructure in a SEPARATE, trivial second
             // statement, instead of solving both at once. No behavior change --
             // same call, same arguments, same resulting bindings below.
-            navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) floorNumber=\(mazeStore.currentMazeID)")
-            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements)
+            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, hiddenNavigationArrows: mazeStore.hiddenNavigationArrows, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
             navBridge.pendingElevatorArtwork = [:]
             let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, _, floorMapPlaneNodes, pictureMaterials) = hallwaySceneBuildResult
-            navLog("[ARRIVALDIAG] HallwayScene.build(fromMaze:) END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) elapsed=\(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagBuildStart))s raw-spawn cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles) elevatorDoors-present=\(elevatorDoors != nil)")
             view.scene = scene
-            navLog("[ARRIVALDIAG] view.scene = scene assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970))")
             view.pointOfView = cameraNode
-            navLog("[ARRIVALDIAG] view.pointOfView = cameraNode assigned t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
             #if DEBUG
             // Sept 22 (Eddie): lighting-determinism instrumentation
             // (see LightingDeterminismCheck.swift) -- the scene is now
@@ -1629,6 +1613,18 @@ struct HallwaySceneView: UIViewRepresentable {
             // picture this build already rendered correctly.
             context.coordinator.pictureMaterials = pictureMaterials
             context.coordinator.lastPictureImageSelections = mazeStore.pictureImageSelections
+            // Sept 26 (Decorate-mode elevator pictures): same
+            // "baseline matches what THIS build already rendered"
+            // reasoning as lastPictureImageSelections just above --
+            // this build's HallwayScene.addElevatorDoor already
+            // consulted mazeStore.elevatorCabDecoration.backArtwork/
+            // sideArtwork itself, so priming these to the CURRENT
+            // values (not nil) stops updateUIView's own diff-watcher
+            // below from redundantly re-fetching/re-applying the very
+            // artwork this build just rendered correctly.
+            context.coordinator.lastElevatorBackArtwork = mazeStore.elevatorCabDecoration.backArtwork
+            context.coordinator.lastElevatorSideArtwork = mazeStore.elevatorCabDecoration.sideArtwork
+            context.coordinator.lastElevatorSideRightArtwork = mazeStore.elevatorCabDecoration.sideRightArtwork
             // Eddie, Sept 9: "tapping the elevator doors that
             // first time sometimes takes a while." The shaft's
             // interior -- back wall, side panels, the building
@@ -1667,8 +1663,7 @@ struct HallwaySceneView: UIViewRepresentable {
                     _ = view.prepare(shaftNodes)
                 }
             }
-            navLog("[ARRIVALDIAG] TapNavigationController(...) about to construct t=\(String(format: "%.4f", Date().timeIntervalSince1970)) cameraNode.position=\(cameraNode.position) cameraNode.eulerAngles=\(cameraNode.eulerAngles)")
-            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, exitSigns: mazeStore.exitSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors.mapValues { $0.direction }, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
             #if DEBUG
             // Sept 22 (Eddie: presentation-vs-model investigation).
             // Hands this rebuild's LIGHTBUILD number (nil unless this
@@ -1689,7 +1684,6 @@ struct HallwaySceneView: UIViewRepresentable {
             // floor load. pendingArrivalYaw is only ever non-nil
             // alongside it, for a controlled ride -- nil means present
             // the normal passive "facing the doors" default instead.
-            navLog("[ARRIVALDIAG] pendingElevatorArrival check t=\(String(format: "%.4f", Date().timeIntervalSince1970)) pendingElevatorArrival=\(navBridge.pendingElevatorArrival) pendingArrivalYaw=\(String(describing: navBridge.pendingArrivalYaw))")
             if navBridge.pendingElevatorArrival {
                 let preservedYaw = navBridge.pendingArrivalYaw
                 navBridge.pendingElevatorArrival = false
@@ -1707,7 +1701,6 @@ struct HallwaySceneView: UIViewRepresentable {
                 // onChange handler waits on this flag before it lets
                 // openFraction start moving.
                 navBridge.arrivalSceneReady = true
-                navLog("[ARRIVALDIAG] arrivalSceneReady = true SET t=\(String(format: "%.4f", Date().timeIntervalSince1970)) makeUIView total elapsed=\(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagBuildStart))s")
             }
             navController.onCollectCash = { [mazeStore] amount in
                 mazeStore.addMoney(amount)
@@ -1724,9 +1717,6 @@ struct HallwaySceneView: UIViewRepresentable {
             // grid editor's onDismiss fix.
             navController.onReachedEnd = { [weak view, mazeStore, navBridge] in
                 guard mazeStore.nextMazeID != nil else { return }
-                // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator
-                // arrival visual-transition audit)
-                navLog("[ARRIVALDIAG] onReachedEnd (passive) START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(mazeStore.currentMazeID) nextMazeID=\(String(describing: mazeStore.nextMazeID))")
                 // Eddie, Sept 8: "the same exact color/lighting has
                 // to be on the doors when theyre opening as when
                 // theyre closing." The curtain's gradient was
@@ -1742,8 +1732,6 @@ struct HallwaySceneView: UIViewRepresentable {
                 // player was just looking at, not a guess at them.
                 navBridge.doorSnapshot = view?.snapshot()
                 navBridge.pendingElevatorArtwork = view?.scene.map { HallwayScene.elevatorArtwork(in: $0) } ?? [:]
-                // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
-                navLog("[ARRIVALDIAG] onReachedEnd doorSnapshot captured t=\(String(format: "%.4f", Date().timeIntervalSince1970)) snapshot=\(navBridge.doorSnapshot != nil ? "non-nil" : "NIL")")
                 // Fired on navBridge itself, not read off the outgoing
                 // controller -- see NavigationBridge.floorTransitionRequested.
                 navBridge.floorTransitionRequested = TapNavigationController.FloorTransitionEvent()
@@ -1765,10 +1753,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 // Eddie, Sept 16 (spatially-truthful controlled
                 // arrival): a passive arrival -- see NavigationBridge.arrivalWasControlled.
                 navBridge.arrivalWasControlled = false
-                // TEMPORARY DIAGNOSTIC (Eddie, Sept 16)
-                navLog("[ARRIVALDIAG] onReachedEnd calling advanceToNextMaze() t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID(before)=\(mazeStore.currentMazeID)")
                 mazeStore.advanceToNextMaze()
-                navLog("[ARRIVALDIAG] onReachedEnd advanceToNextMaze() returned t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID(after)=\(mazeStore.currentMazeID)")
             }
             // Controlled arrival keeps a full-frame snapshot (never split into doors)
             // while the destination is constructed with the same displayed artwork.
@@ -1882,6 +1867,9 @@ struct HallwaySceneView: UIViewRepresentable {
         }
         context.coordinator.lastResetToken = runtime.resetToken
         context.coordinator.lastTheme = themeStore.current
+        context.coordinator.lastWallTexture = mazeStore.wallTexture
+        context.coordinator.lastFloorTexture = mazeStore.floorTexture
+        context.coordinator.lastCeilingTexture = mazeStore.ceilingTexture
         context.coordinator.decorator = decorator
         decorator.attach(scene: view.scene, store: mazeStore)
         decorator.canEditCab = { [weak coordinator = context.coordinator] in
@@ -1898,7 +1886,20 @@ struct HallwaySceneView: UIViewRepresentable {
         // themeStore separately.
         decorator.currentWallImageName = { [weak coordinator = context.coordinator] in
             guard let coordinator else { return nil }
-            return HallwayScene.effectiveWallImageName(floorNumber: coordinator.currentFloorNumber, theme: coordinator.lastTheme)
+            // Sept 26 (live-Decorator wall-backfill bug fix): this used
+            // to omit wallTexture entirely, which defaults to nil in
+            // effectiveWallImageName -- always resolving the plain
+            // per-floor/theme DEFAULT (e.g. Floor 3's brick) regardless
+            // of whatever override is actually in effect (e.g. an
+            // explicit "wood-walnut" override), so any wall panel a
+            // live Decorator action rebuilt (adding a picture, a door,
+            // an empty wall) came out in the wrong, default material
+            // instead of matching the walls already on screen. A full
+            // scene rebuild was unaffected because HallwayScene.build
+            // (fromMaze:...) always passes the real override (see its
+            // ContentView call site) -- only this live, no-rebuild path
+            // was missing it.
+            return HallwayScene.effectiveWallImageName(floorNumber: coordinator.currentFloorNumber, theme: coordinator.lastTheme, wallTexture: coordinator.lastWallTexture)
         }
         decorator.registerAddedPicture = { [weak coordinator = context.coordinator] coord, direction, material, newWallMaterials in
             coordinator?.pictureMaterials[WallFace(coord: coord, direction: direction)] = material
@@ -1939,6 +1940,23 @@ struct HallwaySceneView: UIViewRepresentable {
         decorator.registerFloorObject = { [weak coordinator = context.coordinator] kind, coord, node in
             coordinator?.navigationController?.registerFloorObject(kind, at: coord, node: node)
         }
+        // Sept 27 (Decorator delete-staleness fix): reverse of
+        // registerFloorObject just above, and unregisterRoomDoor right
+        // below -- both route deletion through TapNavigationController's
+        // own unregister counterparts so the live floor map and
+        // navigation/mission state drop a deleted object or door
+        // immediately, same shape as unregisterMirror/unregisterLiveFire/
+        // unregisterLiveExtinguisher/unregisterLivePhotoBooth further
+        // down already do for their own kinds.
+        decorator.unregisterFloorObject = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterFloorObject(at: coord)
+        }
+        decorator.registerRoomDoor = { [weak coordinator = context.coordinator] door in
+            coordinator?.navigationController?.registerRoomDoor(door)
+        }
+        decorator.unregisterRoomDoor = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterRoomDoor(at: coord)
+        }
         // Sept 21 (current-cell Wall authoring): same shape as
         // currentPlayerCell just above -- DecoratorState.
         // selectWallAtCurrentCell reads this to translate the player's
@@ -1976,11 +1994,11 @@ struct HallwaySceneView: UIViewRepresentable {
         decorator.unregisterMirrorSurface = { [weak coordinator = context.coordinator] material in
             coordinator?.mirrorCamera?.removeSurface(material)
         }
-        decorator.registerMirror = { [weak coordinator = context.coordinator] coord in
-            coordinator?.navigationController?.registerMirror(at: coord)
+        decorator.registerMirror = { [weak coordinator = context.coordinator] coord, direction in
+            coordinator?.navigationController?.registerMirror(direction, at: coord)
         }
-        decorator.unregisterMirror = { [weak coordinator = context.coordinator] coord in
-            coordinator?.navigationController?.unregisterMirror(at: coord)
+        decorator.unregisterMirror = { [weak coordinator = context.coordinator] coord, direction in
+            coordinator?.navigationController?.unregisterMirror(direction, at: coord)
         }
         decorator.registerLiveFire = { [weak coordinator = context.coordinator] coord, node in
             coordinator?.navigationController?.registerFire(at: coord, node: node)
@@ -1999,6 +2017,39 @@ struct HallwaySceneView: UIViewRepresentable {
         }
         decorator.unregisterLivePhotoBooth = { [weak coordinator = context.coordinator] coord in
             coordinator?.navigationController?.unregisterPhotoBooth(at: coord)
+        }
+        // Sept 27 (Decorator Room Entrance authoring): same
+        // register/unregister routing as the mirror/fire/extinguisher/
+        // photo-booth pairs just above -- DecoratorState.
+        // addRoomEntranceDoorAtCurrentCell/deleteRoomEntranceDoor never
+        // touch TapNavigationController directly, only through these.
+        decorator.registerLiveRoomEntranceDoor = { [weak coordinator = context.coordinator] direction, coord in
+            coordinator?.navigationController?.registerRoomEntranceDoor(direction, at: coord)
+        }
+        decorator.unregisterLiveRoomEntranceDoor = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterRoomEntranceDoor(at: coord)
+        }
+        // Sept 28 (EXIT sign map markers): same register/unregister
+        // routing as roomEntranceDoor just above -- DecoratorState.
+        // addExitSignAtCurrentCell/changeExitSignDirection/
+        // deleteExitSign never touch TapNavigationController directly,
+        // only through these.
+        decorator.registerLiveExitSign = { [weak coordinator = context.coordinator] direction, coord in
+            coordinator?.navigationController?.registerExitSign(direction, at: coord)
+        }
+        decorator.unregisterLiveExitSign = { [weak coordinator = context.coordinator] coord in
+            coordinator?.navigationController?.unregisterExitSign(at: coord)
+        }
+        // Sept 28 (picture content moved to Decorator): Decorator's
+        // Picture panel "Content..." button routes through here rather
+        // than holding a TapNavigationController reference itself --
+        // setting activePictureMenu is exactly what Play mode's own
+        // tap-a-picture path used to do (TapNavigationController.
+        // activatePictureMenu), so this opens the SAME existing Change
+        // Picture menu (PictureChangeMenuHost), unconditionally mounted
+        // in this view's body regardless of Decorator/Play mode.
+        decorator.presentPictureChangeMenu = { [weak coordinator = context.coordinator] face in
+            coordinator?.navigationController?.activePictureMenu = face
         }
 
         // Sept 22 (Eddie: in-process rebuild-lifecycle investigation).
@@ -2069,6 +2120,13 @@ struct HallwaySceneView: UIViewRepresentable {
         // movement planner now actually reflects the live mode.
         // navigationController is already non-nil here in steady state
         // (set once in makeUIView); optional chaining is defensive only.
+        // Apply visual-only authoring changes (including Undo) in place.
+        if let scene = uiView.scene {
+            for coord in context.coordinator.lastHiddenNavigationArrows.symmetricDifference(mazeStore.hiddenNavigationArrows) {
+                HallwayScene.setNavigationArrowsHidden(mazeStore.hiddenNavigationArrows.contains(coord), at: coord, in: scene)
+            }
+            context.coordinator.lastHiddenNavigationArrows = mazeStore.hiddenNavigationArrows
+        }
         context.coordinator.navigationController?.decorateModeEnabled = decorator.enabled
         context.coordinator.mirrorCamera?.setActive(cameraEnabled)
         context.coordinator.mirrorCamera?.setExpressionAnalysisEnabled(cameraEnabled && mirrorComments.looking)
@@ -2092,9 +2150,23 @@ struct HallwaySceneView: UIViewRepresentable {
                 context.coordinator.navigationController?.reset()
             }
         }
-        if context.coordinator.lastTheme != themeStore.current {
+        // Sept 27 (Decorator Surfaces): widened from a lastTheme-only
+        // diff to also watch wallTexture/floorTexture/ceilingTexture --
+        // Decorator's new Surfaces picker changes those three directly,
+        // live, with no sceneVersion bump (same "swap the retained
+        // material's contents in place" mechanism the theme button
+        // already uses, per applyTheme's own updated doc comment). Any
+        // one of the four changing re-applies through the SAME call, so
+        // there's exactly one place that decides what's effective.
+        if context.coordinator.lastTheme != themeStore.current
+            || context.coordinator.lastWallTexture != mazeStore.wallTexture
+            || context.coordinator.lastFloorTexture != mazeStore.floorTexture
+            || context.coordinator.lastCeilingTexture != mazeStore.ceilingTexture {
             context.coordinator.lastTheme = themeStore.current
-            context.coordinator.applyTheme(themeStore.current)
+            context.coordinator.lastWallTexture = mazeStore.wallTexture
+            context.coordinator.lastFloorTexture = mazeStore.floorTexture
+            context.coordinator.lastCeilingTexture = mazeStore.ceilingTexture
+            context.coordinator.applyTheme(themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture)
         }
 
         // Sept 20 (picture-teleport fix): the in-gameplay Change
@@ -2114,6 +2186,50 @@ struct HallwaySceneView: UIViewRepresentable {
             for (face, selection) in current {
                 guard previous[face] != selection, let material = context.coordinator.pictureMaterials[face] else { continue }
                 context.coordinator.applyLivePictureSelection(selection, to: material)
+            }
+        }
+
+        // Sept 26 (Decorate-mode elevator pictures): the elevator-
+        // poster counterpart to the pictureImageSelections diff just
+        // above -- Decorate mode's new Image section
+        // (DecoratorOverlay's .elevatorPosterSurface branch) mutates
+        // mazeStore.elevatorCabDecoration.backArtwork/sideArtwork
+        // directly (via setElevatorBackArtwork/setElevatorSideArtwork),
+        // with no sceneVersion bump, so the live SceneKit material has
+        // to be swapped here the same "no rebuild, player never moved"
+        // way. Reuses TapNavigationController.applyElevatorPosterImage
+        // (the SAME method Play mode's own in-ride Change Picture menu
+        // calls) purely as the material-write mechanism -- this is
+        // still the only place that DECIDES to persist an elevator
+        // poster choice; Play mode's own calls to that method remain
+        // exactly as ephemeral/unpersisted as its doc comment says.
+        if context.coordinator.lastElevatorBackArtwork != mazeStore.elevatorCabDecoration.backArtwork {
+            context.coordinator.lastElevatorBackArtwork = mazeStore.elevatorCabDecoration.backArtwork
+            if let selection = mazeStore.elevatorCabDecoration.backArtwork {
+                context.coordinator.resolvePictureImage(selection, floorNumber: mazeStore.currentMazeID) { [weak navigationController = context.coordinator.navigationController] image in
+                    guard let image, let navigationController else { return }
+                    navigationController.applyElevatorPosterImage(image, to: .back)
+                }
+            }
+        }
+        if context.coordinator.lastElevatorSideArtwork != mazeStore.elevatorCabDecoration.sideArtwork {
+            context.coordinator.lastElevatorSideArtwork = mazeStore.elevatorCabDecoration.sideArtwork
+            if let selection = mazeStore.elevatorCabDecoration.sideArtwork {
+                context.coordinator.resolvePictureImage(selection, floorNumber: mazeStore.currentMazeID) { [weak navigationController = context.coordinator.navigationController] image in
+                    guard let image, let navigationController else { return }
+                    navigationController.applyElevatorPosterImage(image, to: .side)
+                }
+            }
+        }
+        // Sept 26 (third elevator poster, right wall): same live-swap
+        // diff as the back/side blocks just above.
+        if context.coordinator.lastElevatorSideRightArtwork != mazeStore.elevatorCabDecoration.sideRightArtwork {
+            context.coordinator.lastElevatorSideRightArtwork = mazeStore.elevatorCabDecoration.sideRightArtwork
+            if let selection = mazeStore.elevatorCabDecoration.sideRightArtwork {
+                context.coordinator.resolvePictureImage(selection, floorNumber: mazeStore.currentMazeID) { [weak navigationController = context.coordinator.navigationController] image in
+                    guard let image, let navigationController else { return }
+                    navigationController.applyElevatorPosterImage(image, to: .sideRight)
+                }
             }
         }
 
@@ -2159,6 +2275,14 @@ struct HallwaySceneView: UIViewRepresentable {
         // re-fetched/applied.
         var pictureMaterials: [WallFace: SCNMaterial] = [:]
         var lastPictureImageSelections: [WallFace: PictureImageSelection] = [:]
+        // Sept 26 (Decorate-mode elevator pictures): the elevator-
+        // poster counterpart to lastPictureImageSelections above --
+        // the baseline updateUIView diffs mazeStore.elevatorCabDecoration.
+        // backArtwork/sideArtwork against, so only a surface whose
+        // authored choice actually changed gets re-resolved/re-applied.
+        var lastElevatorBackArtwork: PictureImageSelection?
+        var lastElevatorSideArtwork: PictureImageSelection?
+        var lastElevatorSideRightArtwork: PictureImageSelection?
         // Sept 14 (Eddie): so applyTheme() below can tell Floor 1 (the
         // lobby) apart from every other floor when it re-picks the
         // floor image -- mirrors mazeStore.currentMazeID, the same
@@ -2166,6 +2290,26 @@ struct HallwaySceneView: UIViewRepresentable {
         // already called with.
         var currentFloorNumber: Int = 1
         var lastTheme: HallwayTheme = .brick
+        // Sept 26 (live-Decorator wall-backfill bug): the per-floor
+        // WALL override from the Floor Editor's "Floor Surfaces" sheet
+        // (mazeStore.wallTexture -- nil means no override, back to the
+        // plain per-floor/theme default). Tracked here the same way
+        // lastTheme is, and for the same reason: a live in-Decorator
+        // wall rebuild (adding a picture, a door, an empty-wall panel)
+        // needs "the wall image actually baked into the CURRENT scene,"
+        // not a fresh from-scratch default lookup.
+        // Sept 27 (Decorator Surfaces): a wallTexture/floorTexture/
+        // ceilingTexture change USED to only ever happen through the
+        // Floor Editor's Save (which forces a full scene rebuild -- see
+        // the sheet's onDismiss version check), so this comment used to
+        // say no updateUIView diff/apply path was needed. Decorator's
+        // new Surfaces picker changes these three properties directly,
+        // live, with NO rebuild -- so now, like lastTheme, all three
+        // need an explicit diff in updateUIView (see applyTheme's own
+        // updated doc comment) that reapplies materials in place.
+        var lastWallTexture: String? = nil
+        var lastFloorTexture: String? = nil
+        var lastCeilingTexture: String? = nil
 
 
         // Drag-controlled left/right turning: how many points of
@@ -2238,6 +2382,8 @@ struct HallwaySceneView: UIViewRepresentable {
         private let plaquePinchMinScale: Double = 0.6
         private let plaquePinchMaxScale: Double = 2.5
 
+        var lastHiddenNavigationArrows: Set<GridCoordinate> = []
+
         // Ticks while a long-press-forward is held -- see
         // handleLongPressForward below. nil whenever nothing's held.
         private var forwardHoldTimer: Timer?
@@ -2263,8 +2409,20 @@ struct HallwaySceneView: UIViewRepresentable {
                decorator?.select(at: gesture.location(in: view), in: view) == true {
                 return
             }
-            if let coord = controller.pictureAtCurrentCell {
-                controller.activatePictureMenu(at: coord)
+            if controller.pictureAtCurrentCell != nil {
+                // Sept 28 (picture content moved to Decorator): a
+                // Play-mode tap on a wall picture used to open the
+                // Change Picture menu right here (controller.
+                // activatePictureMenu) -- that menu now opens only from
+                // Decorator's "Content..." button (DecoratorMode.swift),
+                // so ordinary Play no longer mutates picture content at
+                // all. Still an intercepting `return` (not a fall-
+                // through to the hit-testing/advance() logic below), so
+                // a tap landing on a picture continues to do exactly
+                // what it always did to forward movement -- nothing --
+                // and pinch-zoom (handlePinch, unrelated to this tap
+                // gesture) is completely untouched. Reserved for a
+                // future Play tap behavior, probably a sound cue.
                 return
             }
             if let coord = controller.photoBoothAtCurrentCell {
@@ -2314,6 +2472,38 @@ struct HallwaySceneView: UIViewRepresentable {
             if let view = gesture.view as? SCNView {
                 let location = gesture.location(in: view)
                 let hits = view.hitTest(location, options: nil)
+                // BUG 2 fix (manual-mode elevator Change Picture), Sept
+                // 26: gated to the one state this is meant for -- the
+                // player is mid-ride AND has already taken full camera
+                // control (playerHasTakenElevatorCameraControl) -- so an
+                // ordinary hallway tap (this same view, any other time)
+                // is completely unaffected. Checked before every other
+                // hit-test below so a tap landing on a poster can never
+                // fall through to advance() the way it silently did
+                // before this fix (there was no route into Change
+                // Picture for the elevator at all -- see
+                // TapNavigationController.activeElevatorPictureMenu).
+                // Sept 26 (elevator control-panel tap-to-light, visual
+                // only): checked first, ahead of the poster check just
+                // below, so a tap on the new interior control panel
+                // always takes precedence over ordinary wall-thump
+                // handling -- exact same gating (mid-ride, manual
+                // camera control already taken) as the poster check,
+                // since that is the only state the panel is ever
+                // visible/reachable in. Purely a local material swap:
+                // no ride, floor, or navigation state is touched.
+                if controller.isElevatorRideInProgress, controller.playerHasTakenElevatorCameraControl,
+                   let hit = hits.compactMap({ controller.elevatorControlButtonHit(for: $0.node) }).first {
+                    navLog("tap hit elevator control button floor=\(hit.floor)")
+                    controller.setElevatorControlButtonLit(plate: hit.plate, floor: hit.floor)
+                    return
+                }
+                if controller.isElevatorRideInProgress, controller.playerHasTakenElevatorCameraControl,
+                   let target = hits.compactMap({ controller.elevatorPosterTarget(for: $0.node) }).first {
+                    navLog("tap hit elevator poster (\(target)) in manual-control mode")
+                    controller.activeElevatorPictureMenu = target
+                    return
+                }
                 // Sept 12: each hit-test below can find its object's mesh
                 // visible straight down the hall well before the player has
                 // actually reached it -- e.g. the elevator, a chute, or a
@@ -2339,6 +2529,12 @@ struct HallwaySceneView: UIViewRepresentable {
                    controller.isAdjacentToWindowRoomDoor(windowRoomDoorCoord) {
                     navLog("tap hit window room door at \(windowRoomDoorCoord)")
                     controller.openWindowRoomDoor(at: windowRoomDoorCoord)
+                    return
+                }
+                if let roomEntranceDoorCoord = hits.compactMap({ controller.roomEntranceDoorCoordinate(for: $0.node) }).first,
+                   controller.isAdjacentToRoomEntranceDoor(roomEntranceDoorCoord) {
+                    navLog("tap hit room entrance door at \(roomEntranceDoorCoord)")
+                    controller.openRoomEntranceDoor(at: roomEntranceDoorCoord)
                     return
                 }
                 if let roomCoord = hits.compactMap({ controller.roomDoorCoordinate(for: $0.node) }).first,
@@ -2436,6 +2632,10 @@ struct HallwaySceneView: UIViewRepresentable {
                 if let coord = hits.compactMap({ controller.woidleTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
                     controller.activateWoidleTerminal(at: coord)
+                    return
+                }
+                if hits.contains(where: { controller.isElevatorMissionSign($0.node) }), controller.elevatorAtCurrentCell {
+                    controller.openElevator()
                     return
                 }
                 if hits.contains(where: { controller.isElevatorDoor($0.node) }), controller.elevatorAtCurrentCell {
@@ -2769,6 +2969,9 @@ struct HallwaySceneView: UIViewRepresentable {
         // instead of once at build time.
         func applyLivePictureSelection(_ selection: PictureImageSelection, to material: SCNMaterial) {
             switch selection {
+            case .lobbyDefault(let name):
+                let image = HallwayScene.lobbyPictureImage(name)
+                material.diffuse.contents = HallwayScene.framedPhoto(image ?? HallwayScene.mirrorPlaceholder("Photo unavailable"))
             case .builtIn(let name):
                 let image = HallwayScene.namedPictureImage(name)
                 material.diffuse.contents = image.map { HallwayScene.framedPhoto($0) } ?? HallwayScene.mirrorPlaceholder("Photo unavailable")
@@ -2781,53 +2984,55 @@ struct HallwaySceneView: UIViewRepresentable {
             }
         }
 
-        func applyTheme(_ theme: HallwayTheme) {
+        /// Sept 26 (Decorate-mode elevator pictures): the elevator-
+        /// poster counterpart to applyLivePictureSelection just above
+        /// -- same switch/resolution, but hands back a raw UIImage via
+        /// completion instead of writing straight into a material, and
+        /// does NOT frame it (HallwayScene.framedPhoto is an ordinary
+        /// wall Picture's own frame; TapNavigationController.
+        /// applyElevatorPosterImage already applies HallwayScene.
+        /// elevatorPosterPhoto's own poster-specific crop/letterbox).
+        func resolvePictureImage(_ selection: PictureImageSelection, floorNumber: Int, completion: @escaping (UIImage?) -> Void) {
+            switch selection {
+            case .lobbyDefault(let name):
+                completion(HallwayScene.lobbyPictureImage(name))
+            case .builtIn(let name):
+                completion(HallwayScene.namedPictureImage(name))
+            case .cameraRoll(let identifier):
+                PhotoRollProvider.shared.image(forIdentifier: identifier, caller: "floor \(floorNumber) elevator-poster live-update", completion: completion)
+            }
+        }
+
+        // Sept 27 (Decorator Surfaces, explicit-override fix): this
+        // used to compute each surface's effective image with its OWN
+        // inline per-floor switch (Floor 1 -> lobby-wall/floor1/
+        // lobby-ceiling, Floor 2 -> wood-walnut/floor-carpet1/
+        // ceiling-pattern, else -> theme.xImageName) -- a real gap,
+        // since that inline logic never consulted wallTexture/
+        // floorTexture/ceilingTexture at all: cycling the theme button
+        // while an explicit Decorator-authored surface override was
+        // active silently clobbered it back to the bare default. Now
+        // routed through HallwayScene.effectiveWallImageName/
+        // effectiveFloorImageName/effectiveCeilingImageName -- the SAME
+        // shared resolvers the Floor Editor's "resolves to" footer and
+        // the live Decorator wall-backfill fix already use -- which
+        // check the explicit override FIRST and only fall through to
+        // the identical per-floor/theme table this inline code used to
+        // duplicate. Passing nil (no override) reproduces the exact
+        // old behavior; this is a pure refactor for that case, an
+        // actual bug fix only when an override is set.
+        func applyTheme(_ theme: HallwayTheme, wallTexture: String?, floorTexture: String?, ceilingTexture: String?) {
             if theme == .myPhotos {
                 applyPhotoRollTheme()
                 return
             }
-            // Sept 15 fix (Eddie, lobby visual pass): same reasoning
-            // as the Floor-1-floor fix right below -- this is the LAST
-            // point anything writes wallMaterials'/ceilingMaterial's
-            // diffuse.contents, on every theme cycle including the
-            // first updateUIView pass right after the scene is built,
-            // so it's the one place that has to know about Floor 1's
-            // own lobby-wall/lobby-ceiling textures or it silently
-            // overwrites them back to the current theme's. Floors
-            // 2-16: exactly theme.wallImageName, unchanged.
-            // Eddie, Sept 16 (Floor 2 visual pass): same per-floor
-            // override shape as Floor 1's lobby-wall, so tapping the
-            // theme button while on Floor 2 keeps showing the
-            // experimental plaster wall instead of switching back to
-            // brick/cave/etc. Floors 3-16: exactly theme.wallImageName,
-            // unchanged.
-            let effectiveWallImageName: String?
-            switch currentFloorNumber {
-            case 1: effectiveWallImageName = "lobby-wall"
-            // Eddie, Sept 17 (Floor 2 visual pass v2): matches
-            // HallwayScene.build(fromMaze:)'s own case 2 -- wood-oak.jpg
-            // instead of the earlier procedural plaster, so a theme-
-            // cycle tap while on Floor 2 doesn't clobber it back.
-            case 2: effectiveWallImageName = "wood-walnut"
-            default: effectiveWallImageName = theme.wallImageName
-            }
+            let effectiveWallImageName = HallwayScene.effectiveWallImageName(floorNumber: currentFloorNumber, theme: theme, wallTexture: wallTexture)
             for material in wallMaterials {
                 applySurface(material, imageName: effectiveWallImageName, fallbackColor: HallwayScene.wallFallbackColor)
             }
-            // Sept 14 fix (Eddie): this is the LAST point anything
-            // writes floorMaterial.diffuse.contents -- it runs on every
-            // theme cycle, including the first updateUIView pass right
-            // after the scene is built, so it's the one place that has
-            // to know about Floor 1's special texture or it silently
-            // overwrites it. currentFloorNumber is set in makeUIView
-            // above, same "floorNumber" HallwayScene.build(fromMaze:)
-            // itself already uses to pick floor1.png at construction --
-            // this just makes the SAME choice again here, where it
-            // actually sticks. Floors 2-19: exactly theme.floorImageName,
-            // unchanged.
-            let effectiveFloorImageName = currentFloorNumber == 1 ? "floor1" : (currentFloorNumber == 2 ? "floor-carpet1" : theme.floorImageName)
+            let effectiveFloorImageName = HallwayScene.effectiveFloorImageName(floorNumber: currentFloorNumber, theme: theme, floorTexture: floorTexture)
             applySurface(floorMaterial, imageName: effectiveFloorImageName, fallbackColor: HallwayScene.floorFallbackColor)
-            let effectiveCeilingImageName = currentFloorNumber == 1 ? "lobby-ceiling" : (currentFloorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName)
+            let effectiveCeilingImageName = HallwayScene.effectiveCeilingImageName(floorNumber: currentFloorNumber, theme: theme, ceilingTexture: ceilingTexture)
             applySurface(ceilingMaterial, imageName: effectiveCeilingImageName, fallbackColor: HallwayScene.ceilingFallbackColor)
         }
 
@@ -2895,7 +3100,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 material.diffuse.contents = UIColor(white: 0.08, alpha: 1)
                 navigationController?.updatePaintBase(for: material)
             }
-            PhotoRollProvider.shared.randomImages(count: materials.count, caller: "My Photos walls/ceiling") { [weak self] index, image in
+            PhotoRollProvider.shared.randomImages(count: materials.count, caller: "My Photos walls/ceiling") { [weak self] index, _, image in
                 guard let self, self.lastTheme == .myPhotos, self.photoThemeRequestID == requestID else { return }
                 let material = materials[index]
                 SCNTransaction.begin()

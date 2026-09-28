@@ -108,6 +108,7 @@ private enum EditorTool: String, CaseIterable, Identifiable {
     case mirror
     case door
     case windowRoom
+    case roomEntrance
     case light
     case photoBooth
 
@@ -125,6 +126,7 @@ private enum EditorTool: String, CaseIterable, Identifiable {
         case .mirror: return "Mirror"
         case .door: return "Door"
         case .windowRoom: return "Window Room"
+        case .roomEntrance: return "Room Entrance"
         case .light: return "Light"
         case .photoBooth: return "Photo Booth"
         }
@@ -142,6 +144,7 @@ private enum EditorTool: String, CaseIterable, Identifiable {
         case .mirror: return "person.crop.rectangle"
         case .door: return "door.left.hand.closed"
         case .windowRoom: return "macwindow"
+        case .roomEntrance: return "door.left.hand.open"
         case .light: return "lightbulb.fill"
         case .photoBooth: return "camera.fill"
         }
@@ -212,6 +215,10 @@ private final class SuzanimatorSession: ObservableObject {
     @Published var wallLightDirectionToPlace: Direction? = nil
     @Published var doorDirectionToPlace: Direction? = nil
     @Published var windowRoomDirectionToPlace: Direction? = nil
+    /// Sept 27 (first generic-room-door authoring pass): which wall a
+    /// NEW Room Entrance door will be placed on next tap -- same shape
+    /// as windowRoomDirectionToPlace/doorDirectionToPlace.
+    @Published var roomEntranceDirectionToPlace: Direction? = nil
     @Published var mailRoomToPlace: Int? = nil
     @Published var lightTypeToPlace: EditorLightType? = nil
     @Published var selectedTool: EditorTool = .walls
@@ -303,6 +310,13 @@ struct GridEditorView: View {
     @ObservedObject private var session = SuzanimatorSession.shared
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var mazeStore: MazeStore
+    /// Sept 26 (Floor Editor "Default resolves to" inspection fix):
+    /// needed only so the Floor Surfaces sheet can show what "Default"
+    /// currently resolves to for floors 3+ (theme.wallImageName/
+    /// floorImageName/ceilingImageName) -- the exact same live theme
+    /// HallwayScene.build(fromMaze:...) is actually being rendered
+    /// with. Read-only here; nothing in this file ever changes it.
+    @ObservedObject var themeStore: WallThemeStore
     /// Where the player currently is in the 3D maze, if that's even
     /// running (nil for the empty-maze fallback prototype) — a snapshot
     /// taken at the moment this screen opens, not live-updated, since
@@ -450,6 +464,14 @@ struct GridEditorView: View {
         get { session.windowRoomDirectionToPlace }
         nonmutating set { session.windowRoomDirectionToPlace = newValue }
     }
+    /// Sept 27 (first generic-room-door authoring pass): same shape as
+    /// windowRoomDirectionToPlace just above -- a generic operable
+    /// room door, its own small parallel tool rather than folding into
+    /// the existing (decorative, solid-wall-only) Door tool.
+    private var roomEntranceDirectionToPlace: Direction? {
+        get { session.roomEntranceDirectionToPlace }
+        nonmutating set { session.roomEntranceDirectionToPlace = newValue }
+    }
     private var mailRoomToPlace: Int? {
         get { session.mailRoomToPlace }
         nonmutating set { session.mailRoomToPlace = newValue }
@@ -552,8 +574,6 @@ struct GridEditorView: View {
             }
         }
         .onChange(of: mazeStore.version) { newVersion in
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 20, object-placement trace) -- remove after root cause is found.
-            NSLog("%@", "[PLACEDIAG] onChange(version) fired: newVersion=\(newVersion) versionChangeIsFloorLoad=\(mazeStore.versionChangeIsFloorLoad) objects.count=\(mazeStore.objects.count) BEFORE autosave")
             // Sept 20 (autosave pass): every completed edit now
             // persists AND survives an app relaunch on its own --
             // see MazeStore.autosaveAfterVersionChange()'s own
@@ -564,7 +584,6 @@ struct GridEditorView: View {
             // session but never survived quitting the app unless the
             // (now-removed) manual SAVE button was also tapped.
             mazeStore.autosaveAfterVersionChange()
-            NSLog("%@", "[PLACEDIAG] onChange(version): objects.count=\(mazeStore.objects.count) AFTER autosave")
         }
         .sheet(isPresented: $showMissionEditor) {
             missionEditorSheet
@@ -606,7 +625,6 @@ struct GridEditorView: View {
         let gridItems = Array(repeating: GridItem(.fixed(cellSize), spacing: 0), count: columns)
         let gridHeight = cellSize * CGFloat(rows)
 
-        NSLog("%@", "[PLACEDIAG] GRID RENDER floor=\(mazeStore.currentMazeID) version=\(mazeStore.version) tool=\(selectedTool.rawValue) object=\(String(describing: objectKindToPlace)) picture=\(String(describing: pictureDirectionToPlace)) objects=\(mazeStore.objects) pictures=\(mazeStore.pictures)")
         let grid = ZStack {
             Color.white
             LazyVGrid(columns: gridItems, spacing: 0) {
@@ -690,7 +708,6 @@ struct GridEditorView: View {
         let points = screenPoints.map { CGPoint(x: ($0.x - gridOffset.width) / gridZoom,
                                                 y: ($0.y - gridOffset.height) / gridZoom) }
         guard let first = points.first else { return }
-        NSLog("%@", "[PLACEDIAG] NATIVE STROKE points=\(points.count) zoom=\(gridZoom) tool=\(selectedTool.rawValue)")
         if selectedTool == .delete {
             inspectForDeletion(at: first, cellSize: cellSize)
             return
@@ -844,6 +861,15 @@ struct GridEditorView: View {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             if mazeStore.isOpen(neighbor), mazeStore.windowExteriorDirection(for: neighbor) != nil, coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate {
                 Rectangle().stroke(Color.blue, lineWidth: 3)
+            }
+        } else if let direction = roomEntranceDirectionToPlace, mazeStore.isOpen(coord) {
+            // Sept 27: no perimeter/window requirement -- the ONLY
+            // condition is an ordinary already-open cell on the other
+            // side (Eddie is authoring that room cell himself; this
+            // pass never manufactures one).
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            if mazeStore.isOpen(neighbor), coord != MazeStore.elevatorCoordinate, coord != MazeStore.missionCoordinate {
+                Rectangle().stroke(Color.indigo, lineWidth: 3)
             }
         }
     }
@@ -1248,6 +1274,41 @@ struct GridEditorView: View {
                 }
             }
 
+            // Sept 27 (first generic-room-door authoring pass): Room
+            // Entrance door placement -- same per-direction toggle-
+            // button shape as Door/Window Room just above (this is the
+            // SAME physical swinging-door fixture as a bathroom/Window
+            // Room door, reusing its proven interaction model exactly,
+            // just leading to an ordinary already-open cell instead of
+            // a bathroom or a perimeter room). placeRoomEntranceDoor
+            // silently no-ops when there's no open cell behind the
+            // selected wall face -- the preview outline in
+            // roomAndMailBadge below is what surfaces that rejection
+            // to the person painting, same as every other placement
+            // mode here.
+            if selectedTool == .roomEntrance {
+                HStack(spacing: 8) {
+                    Text("Room Entrance:")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.black.opacity(0.6))
+                    ForEach(Direction.allCases, id: \.self) { direction in
+                        Button {
+                            let wasActive = roomEntranceDirectionToPlace == direction
+                            clearPlacementModes()
+                            roomEntranceDirectionToPlace = wasActive ? nil : direction
+                            selectedTool = roomEntranceDirectionToPlace == nil ? .walls : .roomEntrance
+                        } label: {
+                            Image(systemName: "door.left.hand.open")
+                                .foregroundStyle(roomEntranceDirectionToPlace == direction ? Color.indigo : .black)
+                                .rotationEffect(.degrees(facingRotationDegrees(direction)))
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .accessibilityLabel("Place Room Entrance door facing \(direction.rawValue)")
+                    }
+                }
+            }
+
             // Light source placement (Suzanimator lighting pass, Sept 19) --
             // pick WHICH existing physical light to paint, then tap
             // cells to place it. Only REAL runtime sources are listed:
@@ -1635,7 +1696,6 @@ struct GridEditorView: View {
     /// @State vars paint(at:) reads; selectedTool is synced separately by
     /// the callers so the two can never disagree.
     private func clearPlacementModes() {
-        NSLog("%@", "[PLACEDIAG] CLEAR BRUSH tool=\(selectedTool.rawValue) object=\(String(describing: objectKindToPlace))")
         objectKindToPlace = nil
         destinationKindToPlace = nil
         exitDirectionToPlace = nil
@@ -1645,6 +1705,7 @@ struct GridEditorView: View {
         wallLightDirectionToPlace = nil
         doorDirectionToPlace = nil
         windowRoomDirectionToPlace = nil
+        roomEntranceDirectionToPlace = nil
         lightTypeToPlace = nil
         session.pictureLightDirection = nil
         photoBoothDirectionToPlace = nil
@@ -1848,7 +1909,6 @@ struct GridEditorView: View {
     }
 
     private func paint(at location: CGPoint, cellSize: CGFloat, isStart: Bool) {
-        NSLog("%@", "[PLACEDIAG] PAINT ENTER point=\(location) isStart=\(isStart) tool=\(selectedTool.rawValue) object=\(String(describing: objectKindToPlace)) picture=\(String(describing: pictureDirectionToPlace)) door=\(String(describing: doorDirectionToPlace)) window=\(String(describing: windowRoomDirectionToPlace))")
         guard cellSize > 0 else { return }
         let col = Int(location.x / cellSize)
         let row = Int(location.y / cellSize)
@@ -1877,34 +1937,35 @@ struct GridEditorView: View {
             return
         }
 
+        if let direction = roomEntranceDirectionToPlace {
+            guard mazeStore.isOpen(coord) else { return }
+            if isStart { paintMode = mazeStore.roomEntranceDoors[coord]?.direction != direction }
+            if paintMode {
+                if mazeStore.roomEntranceDoors[coord]?.direction != direction { mazeStore.placeRoomEntranceDoor(direction, at: coord) }
+            } else {
+                mazeStore.removeRoomEntranceDoor(at: coord)
+            }
+            return
+        }
+
         if let kind = objectKindToPlace {
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 20, object-placement trace) -- remove after root cause is found.
-            NSLog("%@", "[PLACEDIAG] paint(): objectKindToPlace branch ENTERED, kind=\(kind), coord=\(coord), isOpen=\(mazeStore.isOpen(coord)), isStart=\(isStart), currentObjectAtCoord=\(String(describing: mazeStore.object(at: coord)))")
             // Objects only make sense on real hallway cells — dragging
             // across a wall cell in this mode just does nothing there.
-            guard mazeStore.isOpen(coord) else {
-                NSLog("%@", "[PLACEDIAG] paint(): coord \(coord) is NOT open -- rejected, nothing placed")
-                return
-            }
+            guard mazeStore.isOpen(coord) else { return }
             if isStart {
                 // Starting on a cell that already holds exactly this
                 // kind begins an erase stroke; anything else (empty, or
                 // a different kind) begins a place-this-kind stroke.
                 paintMode = mazeStore.object(at: coord) != kind || ((kind == .envelope || kind == .key) && mailRoomToPlace != nil && mazeStore.itemRooms[coord] != mailRoomToPlace)
             }
-            NSLog("%@", "[PLACEDIAG] paint(): paintMode=\(paintMode) for coord=\(coord) kind=\(kind)")
             if paintMode {
                 if mazeStore.object(at: coord) != kind {
                     mazeStore.placeObject(kind, at: coord)
-                    NSLog("%@", "[PLACEDIAG] paint(): called mazeStore.placeObject(\(kind), at: \(coord)) -- now reads back as \(String(describing: mazeStore.object(at: coord)))")
-                } else {
-                    NSLog("%@", "[PLACEDIAG] paint(): SKIPPED placeObject because mazeStore.object(at: coord) already == kind")
                 }
                 if kind == .envelope || kind == .key, let room = mailRoomToPlace { mazeStore.setItemRoom(room, at: coord) }
             } else {
                 if mazeStore.object(at: coord) != nil {
                     mazeStore.removeObject(at: coord)
-                    NSLog("%@", "[PLACEDIAG] paint(): paintMode=false -- REMOVED object at \(coord)")
                 }
             }
             return
@@ -2051,7 +2112,6 @@ struct GridEditorView: View {
         }
 
         if let direction = pictureDirectionToPlace {
-            NSLog("%@", "[PLACEDIAG] PICTURE BRANCH coord=\(coord) direction=\(direction) open=\(mazeStore.isOpen(coord)) neighborOpen=\(mazeStore.isOpen(GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)))")
             // Same open-cell, place-vs-erase, wall-required shape as
             // floor maps above -- a picture hangs ON a wall too, so the
             // neighbor in `direction` has to actually be closed.
@@ -2066,7 +2126,6 @@ struct GridEditorView: View {
             }
             if paintMode {
                 if (!mazeStore.hasPicture(direction, at: coord) || mazeStore.pictureSize(direction: direction, at: coord) != pictureSizeToPlace) {
-                    NSLog("%@", "[PLACEDIAG] CALL placePicture coord=\(coord) direction=\(direction)")
                     mazeStore.placePicture(direction, at: coord, size: pictureSizeToPlace)
                 }
             } else {
@@ -2209,31 +2268,57 @@ struct GridEditorView: View {
     /// this only ever writes a name string, never a file.
     private var surfaceEditorSheet: some View {
         let options = HallwayScene.availableHallwayTextureNames()
+        // Sept 26 (Floor Editor "Default resolves to" inspection fix):
+        // "Default" means a different concrete texture on every floor
+        // (Floor 1/2 have their own hardcoded look, every other floor
+        // falls back to the current theme) -- see effectiveWallImageName/
+        // effectiveFloorImageName/effectiveCeilingImageName's own doc
+        // comments. Passing nil for the override always asks "what does
+        // Default resolve to right now," regardless of whether this
+        // floor currently has an explicit override in place, so this
+        // reads correctly whether the picker below is showing Default
+        // or a named texture checked.
+        let floorNumber = mazeStore.currentMazeID
+        let resolvedWallDefault = HallwayScene.effectiveWallImageName(floorNumber: floorNumber, theme: themeStore.current, wallTexture: nil) ?? "(flat color)"
+        let resolvedFloorDefault = HallwayScene.effectiveFloorImageName(floorNumber: floorNumber, theme: themeStore.current, floorTexture: nil) ?? "(flat color)"
+        let resolvedCeilingDefault = HallwayScene.effectiveCeilingImageName(floorNumber: floorNumber, theme: themeStore.current, ceilingTexture: nil) ?? "(flat color)"
         return NavigationView {
             Form {
-                Section("Wall") {
+                Section {
                     Picker("Wall texture", selection: $wallTextureDraft) {
                         Text("Default").tag(String?.none)
                         ForEach(options, id: \.self) { name in
                             Text(name).tag(String?.some(name))
                         }
                     }
+                } header: {
+                    Text("Wall")
+                } footer: {
+                    Text("Default currently resolves to \u{201c}\(resolvedWallDefault)\u{201d}.")
                 }
-                Section("Floor") {
+                Section {
                     Picker("Floor texture", selection: $floorTextureDraft) {
                         Text("Default").tag(String?.none)
                         ForEach(options, id: \.self) { name in
                             Text(name).tag(String?.some(name))
                         }
                     }
+                } header: {
+                    Text("Floor")
+                } footer: {
+                    Text("Default currently resolves to \u{201c}\(resolvedFloorDefault)\u{201d}.")
                 }
-                Section("Ceiling") {
+                Section {
                     Picker("Ceiling texture", selection: $ceilingTextureDraft) {
                         Text("Default").tag(String?.none)
                         ForEach(options, id: \.self) { name in
                             Text(name).tag(String?.some(name))
                         }
                     }
+                } header: {
+                    Text("Ceiling")
+                } footer: {
+                    Text("Default currently resolves to \u{201c}\(resolvedCeilingDefault)\u{201d}.")
                 }
             }
             .navigationTitle("Floor Surfaces")
@@ -2256,7 +2341,7 @@ struct GridEditorView: View {
 }
 
 #Preview {
-    GridEditorView(mazeStore: MazeStore())
+    GridEditorView(mazeStore: MazeStore(), themeStore: WallThemeStore())
 }
 
 /// A full-screen, READ-ONLY look at the current floor's layout --

@@ -16,7 +16,6 @@ struct EditorGridViewport<Content: View>: UIViewRepresentable {
             view.cancelPendingEdits()
             view.interactionID = interactionID
         }
-        NSLog("%@", "[PLACEDIAG] VIEW UPDATE id=\(interactionID) viewport=\(ObjectIdentifier(view))")
         view.host.rootView = content
         view.edit = edit
     }
@@ -59,7 +58,6 @@ final class GridTouchViewport<Content: View>: UIView {
         applyTransform()
     }
     func cancelPendingEdits() {
-        NSLog("%@", "[PLACEDIAG] CANCEL PENDING id=\(interactionID) fingers=\(fingers.count) samples=\(points.count)")
         points = []
         // Suppress the rest of any gesture spanning a floor/tool change.
         if !fingers.isEmpty { usedMultipleFingers = true }
@@ -79,7 +77,6 @@ final class GridTouchViewport<Content: View>: UIView {
                 max(1, hypot(p[0].x - p[1].x, p[0].y - p[1].y)))
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        NSLog("%@", "[PLACEDIAG] TOUCH BEGIN id=\(interactionID) points=\(touches.map { $0.location(in: self) }) tapCounts=\(touches.map { $0.tapCount }) bounds=\(bounds)")
         if fingers.isEmpty, let touch = touches.first {
             moved = false
             usedMultipleFingers = false
@@ -138,16 +135,12 @@ final class GridTouchViewport<Content: View>: UIView {
         for touch in touches { fingers.removeValue(forKey: touch) }
         guard fingers.isEmpty else { return }
         guard !usedMultipleFingers, !resetting else {
-            NSLog("%@", "[PLACEDIAG] GridTouchViewport.touchesEnded: SWALLOWED -- usedMultipleFingers=\(usedMultipleFingers) resetting=\(resetting), edit() NOT called")
             points = []
             return
         }
         if moved {
             if zoom == 1 {
-                NSLog("%@", "[PLACEDIAG] GridTouchViewport.touchesEnded: MOVED gesture, delivering edit(points) with \(points.count) points, zoom=\(zoom)")
                 edit(points)
-            } else {
-                NSLog("%@", "[PLACEDIAG] GridTouchViewport.touchesEnded: MOVED gesture but zoom=\(zoom) != 1 -- edit() NOT called (pan, not paint)")
             }
         } else {
             // Sept 20 (tap-latency/dropped-placement fix): deliver a
@@ -158,15 +151,11 @@ final class GridTouchViewport<Content: View>: UIView {
             // which reaches the guard right above this and returns
             // without editing), it just no longer holds the first tap
             // hostage while it waits to find out.
-            // TEMPORARY DIAGNOSTIC (Eddie, Sept 20, object-placement trace) -- remove after root cause is found.
-            let tapLocation = gridPoint(start)
-            NSLog("%@", "[PLACEDIAG] GridTouchViewport.touchesEnded: PLAIN TAP at start=\(start) -> gridPoint=\(tapLocation), zoom=\(zoom), offset=\(offset), bounds=\(bounds), delivering edit([\(tapLocation)])")
-            edit([tapLocation])
+            edit([gridPoint(start)])
         }
         points = []
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        NSLog("%@", "[PLACEDIAG] TOUCH CANCELLED id=\(interactionID) samples=\(points.count)")
         for touch in touches { fingers.removeValue(forKey: touch) }
         usedMultipleFingers = true
         points = []

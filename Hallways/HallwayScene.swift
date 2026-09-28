@@ -72,7 +72,7 @@ enum HallwayScene {
     /// Arrival reuses these values without starting new Photos requests.
     static func elevatorArtwork(in scene: SCNScene) -> [String: Any] {
         var artwork: [String: Any] = [:]
-        for name in ["elevatorBackImage", "elevatorSideImage"] {
+        for name in ["elevatorBackImage", "elevatorSideImage", "elevatorSideRightImage"] {
             artwork[name] = scene.rootNode.childNode(withName: name, recursively: true)?.geometry?.firstMaterial?.diffuse.contents
         }
         return artwork
@@ -80,6 +80,17 @@ enum HallwayScene {
 
 
     /// Cab dimensions are independent of the centered passenger doorway.
+    // Temporary gameplay experiment: set false to restore authored/default visibility.
+    static let suppressNavigationArrowsForExperiment = true
+
+    static func navigationArrowNodeName(at coord: GridCoordinate) -> String {
+        "navigationArrows_\(coord.row)_\(coord.col)"
+    }
+
+    static func setNavigationArrowsHidden(_ hidden: Bool, at coord: GridCoordinate, in scene: SCNScene) {
+        scene.rootNode.childNode(withName: navigationArrowNodeName(at: coord), recursively: true)?.isHidden = suppressNavigationArrowsForExperiment || hidden
+    }
+
     struct ElevatorGeometry {
         let cellSize: CGFloat
         var cabWidth: CGFloat { cellSize }
@@ -1572,6 +1583,48 @@ enum HallwayScene {
         }
     }
 
+    /// Sept 26 (Floor Editor "Default resolves to" inspection fix):
+    /// same per-floor floor-image override table build(fromMaze:...)
+    /// has always used inline, extracted standalone for the exact same
+    /// reason effectiveWallImageName just above already was -- so the
+    /// Floor Surfaces picker can show what "Default" actually means for
+    /// THIS floor without duplicating the fallback table. Passing nil
+    /// for floorTexture (as the picker does) always returns the
+    /// fallback identity, ignoring any current override -- exactly the
+    /// "what does Default resolve to" question, independent of what's
+    /// currently selected. Same values, same behavior as the inline
+    /// expression it replaces below.
+    static func effectiveFloorImageName(floorNumber: Int, theme: HallwayTheme, floorTexture: String? = nil) -> String? {
+        if let floorTexture {
+            return floorTexture
+        }
+        switch floorNumber {
+        case 1:
+            return "floor1"
+        case 2:
+            return "floor-carpet1"
+        default:
+            return theme.floorImageName
+        }
+    }
+
+    /// Sept 26 (Floor Editor "Default resolves to" inspection fix):
+    /// same reasoning as effectiveFloorImageName just above, for the
+    /// ceiling's per-floor override table.
+    static func effectiveCeilingImageName(floorNumber: Int, theme: HallwayTheme, ceilingTexture: String? = nil) -> String? {
+        if let ceilingTexture {
+            return ceilingTexture
+        }
+        switch floorNumber {
+        case 1:
+            return "lobby-ceiling"
+        case 2:
+            return "ceiling-pattern"
+        default:
+            return theme.ceilingImageName
+        }
+    }
+
     /// The ordinary per-cell wall panel -- was the local `addWall`
     /// closure inside build(fromMaze:...)'s per-cell loop. Behavior is
     /// unchanged; `direction` is new (needed to tag the node's own
@@ -1803,7 +1856,7 @@ enum HallwayScene {
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
     static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [WallFace: PictureSize] = [:], mirrors: [GridCoordinate: Direction] = [:],
-                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:]) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
+                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], hiddenNavigationArrows: Set<GridCoordinate> = [], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -1898,7 +1951,8 @@ enum HallwayScene {
         // existing floor/maze identifier. Floors 2-19 are completely
         // unaffected -- they still resolve theme.floorImageName exactly
         // as before.
-        let floorMaterial = makeFloorMaterial(imageName: floorTexture ?? (floorNumber == 1 ? "floor1" : (floorNumber == 2 ? "floor-carpet1" : theme.floorImageName)))
+        let effectiveFloorImageName = Self.effectiveFloorImageName(floorNumber: floorNumber, theme: theme, floorTexture: floorTexture)
+        let floorMaterial = makeFloorMaterial(imageName: effectiveFloorImageName)
         if floorNumber == 1 {
             // floor1.png's own diamond grid is denser than the plain
             // 2x2 tiling makeSurfaceMaterial gives every other floor
@@ -1948,7 +2002,7 @@ enum HallwayScene {
         // fresh build would have used, without duplicating this
         // per-floor override table. Same values, same behavior.
         let effectiveWallImageName = Self.effectiveWallImageName(floorNumber: floorNumber, theme: theme, wallTexture: wallTexture)
-        let effectiveCeilingImageName = ceilingTexture ?? (floorNumber == 1 ? "lobby-ceiling" : (floorNumber == 2 ? "ceiling-pattern" : theme.ceilingImageName))
+        let effectiveCeilingImageName = Self.effectiveCeilingImageName(floorNumber: floorNumber, theme: theme, ceilingTexture: ceilingTexture)
         let ceilingMaterial = makeCeilingMaterial(imageName: effectiveCeilingImageName)
         var wallMaterials: [SCNMaterial] = []
 
@@ -1969,7 +2023,11 @@ enum HallwayScene {
         // arrowhead pointing out into that doorway -- Eddie's "2 cris
         // cross lines that form arrows pointing in 4 directions,"
         // replacing the old per-doorway header bars.
-        func addIntersectionMarker(atX x: CGFloat, z: CGFloat, openNorth: Bool, openSouth: Bool, openEast: Bool, openWest: Bool) {
+        func addIntersectionMarker(at coord: GridCoordinate, atX x: CGFloat, z: CGFloat, openNorth: Bool, openSouth: Bool, openEast: Bool, openWest: Bool) {
+            let marker = SCNNode()
+            marker.name = navigationArrowNodeName(at: coord)
+            marker.isHidden = suppressNavigationArrowsForExperiment || hiddenNavigationArrows.contains(coord)
+            root.addChildNode(marker)
             let armLength = cellSize * 0.42
             let armThickness: CGFloat = 0.08
             let markerY: CGFloat = 0.015 // just proud of the floor, like the old threshold lines were
@@ -1983,12 +2041,12 @@ enum HallwayScene {
                 shaft.materials = [doorwayMaterial]
                 let shaftNode = SCNNode(geometry: shaft)
                 shaftNode.position = SCNVector3(Float(x + dx * armLength / 2), Float(markerY), Float(z + dz * armLength / 2))
-                root.addChildNode(shaftNode)
+                marker.addChildNode(shaftNode)
 
                 let arrowGeometry = makeArrowheadGeometry(direction: direction, baseWidth: arrowBaseWidth, length: arrowLength, material: doorwayMaterial)
                 let arrowNode = SCNNode(geometry: arrowGeometry)
                 arrowNode.position = SCNVector3(Float(x + dx * armLength), Float(markerY), Float(z + dz * armLength))
-                root.addChildNode(arrowNode)
+                marker.addChildNode(arrowNode)
             }
 
             if openNorth { addArm(.north, dx: 0, dz: -1) }
@@ -2058,11 +2116,20 @@ enum HallwayScene {
         // opening instead of a full cell) fill in everything AROUND
         // the door, so the cubby becomes a small hole in a
         // normal-looking wall again, not the entire wall itself.
-        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0) {
+        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, into container: SCNNode? = nil, tag: ((SCNNode) -> Void)? = nil) {
             // Sept 21 (3D Decorator wall authoring): now forwards to the
             // real HallwayScene.buildDoorFrame static method -- see this
             // file's "Sept 21" MARK section above. Behavior unchanged.
-            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: root, wallMaterials: &wallMaterials)
+            // Sept 27 (Room Entrance live-delete leak fix): `container`/
+            // `tag` are new, both optional and defaulted so every
+            // existing call site (bathroom doors, window rooms, the
+            // elevator cubby, picture backfill, etc.) is completely
+            // unaffected -- strips still land straight in the scene's
+            // own root, untagged, exactly as before. Only the
+            // roomEntranceDoors loop below passes them, so that door's
+            // own frame strips land inside its owning assembly node
+            // instead of loose in the scene root.
+            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: container ?? root, wallMaterials: &wallMaterials, tag: tag)
         }
 
         func addDestinationDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, kind: ObjectKind) -> SCNNode {
@@ -2373,13 +2440,14 @@ enum HallwayScene {
             // width instead of restoring it. elevatorPosterWidth/
             // Height below now matches the side wall's ORIGINAL
             // portrait box (0.48 x 0.65 frame, 0.40-wide plane) exactly
-            // -- both walls share it so the physical frame is identical
+            // -- all three walls share it (Sept 26: extended to the
+            // right side wall too) so the physical frame is identical
             // no matter which bundled image is picked (elevatorPosterPhoto
             // cover-crops every pick to the same fixed portrait aspect).
             let elevatorPosterWidth: CGFloat = 0.80
             let elevatorPosterHeight = elevatorPosterWidth * elevatorPosterAspect
 
-            // Symmetric cab and centered camera: both posters use the same size.
+            // Symmetric cab and centered camera: all three posters use the same size.
             let elevatorBackPosterWidth = elevatorPosterWidth
             let elevatorBackPosterHeight = elevatorPosterHeight
 
@@ -2389,7 +2457,7 @@ enum HallwayScene {
             // this function already relies on. Empty when
             // picturesUseCameraRoll is true, since that branch below
             // never reads this array at all.
-            let builtInPosterImages: [UIImage] = picturesUseCameraRoll ? [] : Self.randomBuiltInImages(count: 2)
+            let builtInPosterImages: [(name: String, image: UIImage)] = picturesUseCameraRoll ? [] : Self.randomBuiltInImages(count: 3)
 
             // Eddie, Sept 13: "The elevator poster images currently
             // appear to be coming from the bundled pattern/texture
@@ -2468,6 +2536,15 @@ enum HallwayScene {
                 // (1.3 + 0.3 = 1.6, same as before's 1.1 + 0.5).
                 photoFrame.name = "elevatorBackPhoto"
                 photoFrame.position = SCNVector3(0, 0.3, -depth + thick / 2 + 0.02)
+                // Sept 26 (Decorate-mode elevator pictures): gives this
+                // poster a DecoratorTarget identity for the first time --
+                // previously Decorate-mode's tap-to-select (which relies
+                // entirely on this objc_setAssociatedObject-based
+                // tagging, completely separate from Play mode's
+                // node-name-based elevatorPosterTarget(for:) lookup)
+                // found nothing here at all, which is why tapping this
+                // poster in Decorate mode never worked.
+                DecoratorTarget(floor: floorNumber, location: .elevatorPoster(.back), kind: .picture).tag(photoFrame)
 
                 let photoPlaneMaterial = SCNMaterial()
                 photoPlaneMaterial.diffuse.contents = UIColor(white: 0.08, alpha: 1) // neutral until the camera-roll fetch below lands
@@ -2484,15 +2561,58 @@ enum HallwayScene {
 
                 if let contents = elevatorArtwork["elevatorBackImage"] {
                     photoPlaneMaterial.diffuse.contents = contents
+                } else if let selection = elevatorCabDecoration.backArtwork {
+                    // Sept 26 (Decorate-mode elevator pictures): an
+                    // authored choice (setElevatorBackArtwork) beats
+                    // the random camera-roll/built-in fallback below,
+                    // but a live/transient ride-handoff artwork above
+                    // still always wins over it -- same priority order
+                    // an ordinary Picture's own explicit
+                    // pictureImageSelections entry already has over
+                    // its random per-build pick.
+                    // Sept 26 ("Keep This Picture"): this tier's
+                    // identity is already fully known (it came from an
+                    // authored selection) -- reporting it here just
+                    // keeps currentElevatorBackIdentity in sync with
+                    // whatever's actually rendered, same as every other
+                    // tier; the Keep button's own enable-check compares
+                    // against elevatorCabDecoration.backArtwork itself,
+                    // so this alone never wrongly re-enables it.
+                    reportElevatorBackIdentity(selection)
+                    switch selection {
+                    case .builtIn(let name):
+                        let image = Self.namedPictureImage(name)
+                        photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(image ?? Self.mirrorPlaceholder("Photo unavailable"))
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=AUTHORED_BUILT_IN")
+                    case .cameraRoll(let identifier):
+                        PhotoRollProvider.shared.image(forIdentifier: identifier, caller: "floor \(floorNumber) elevator-back authored") { [weak photoPlaneMaterial] image in
+                            guard let photoPlaneMaterial else { return }
+                            photoPlaneMaterial.diffuse.contents = image.map { Self.elevatorPosterPhoto($0) } ?? Self.mirrorPlaceholder("Photo unavailable")
+                            navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=AUTHORED_PHOTOS")
+                        }
+                    case .lobbyDefault(let name):
+                        let image = Self.lobbyPictureImage(name)
+                        photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(image ?? Self.mirrorPlaceholder("Photo unavailable"))
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=AUTHORED_LOBBY")
+                    }
                 } else if picturesUseCameraRoll {
-                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-back") { [weak photoPlaneMaterial] _, image in
+                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-back") { [weak photoPlaneMaterial] _, identifier, image in
                         guard let photoPlaneMaterial, let image else { return }
                         photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
                         navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=PHOTOS")
+                        // Sept 26 ("Keep This Picture"): captures the
+                        // identity this random pick discarded before --
+                        // reportElevatorBackIdentity's own doc comment
+                        // (see the build(fromMaze:...) signature) covers
+                        // why this lives on MazeStore, not here.
+                        if let identifier {
+                            reportElevatorBackIdentity(.cameraRoll(identifier))
+                        }
                     }
-                } else if let image = builtInPosterImages.first {
-                    photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
+                } else if let picked = builtInPosterImages.first {
+                    photoPlaneMaterial.diffuse.contents = Self.elevatorPosterPhoto(picked.image)
                     navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-back source=BUILT_IN")
+                    reportElevatorBackIdentity(.builtIn(picked.name))
                 }
             }
 
@@ -2509,6 +2629,10 @@ enum HallwayScene {
                 sidePhoto.geometry?.materials = [sideFrameMaterial]
                 sidePhoto.name = "elevatorSidePhoto"
                 sidePhoto.position = SCNVector3(-halfW + 0.035, 0.3, -depth / 2)
+                // Sept 26 (Decorate-mode elevator pictures): see the
+                // matching elevator-back DecoratorTarget.tag comment
+                // just above.
+                DecoratorTarget(floor: floorNumber, location: .elevatorPoster(.side), kind: .picture).tag(sidePhoto)
                 sidePhoto.eulerAngles.y = .pi / 2
                 let sideImage = SCNNode(geometry: SCNPlane(width: photoWidth, height: photoHeight))
                 sideImage.name = "elevatorSideImage"
@@ -2522,15 +2646,114 @@ enum HallwayScene {
 
                 if let contents = elevatorArtwork["elevatorSideImage"] {
                     sideMaterial.diffuse.contents = contents
+                } else if let selection = elevatorCabDecoration.sideArtwork {
+                    // Sept 26 (Decorate-mode elevator pictures): see
+                    // the matching elevator-back AUTHORED tier just
+                    // above -- same priority order, same resolution.
+                    // Sept 26 ("Keep This Picture"): see the matching
+                    // reportElevatorBackIdentity call just above.
+                    reportElevatorSideIdentity(selection)
+                    switch selection {
+                    case .builtIn(let name):
+                        let image = Self.namedPictureImage(name)
+                        sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(image ?? Self.mirrorPlaceholder("Photo unavailable"))
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=AUTHORED_BUILT_IN")
+                    case .cameraRoll(let identifier):
+                        PhotoRollProvider.shared.image(forIdentifier: identifier, caller: "floor \(floorNumber) elevator-side authored") { [weak sideMaterial] image in
+                            guard let sideMaterial else { return }
+                            sideMaterial.diffuse.contents = image.map { Self.elevatorPosterPhoto($0) } ?? Self.mirrorPlaceholder("Photo unavailable")
+                            navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=AUTHORED_PHOTOS")
+                        }
+                    case .lobbyDefault(let name):
+                        let image = Self.lobbyPictureImage(name)
+                        sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(image ?? Self.mirrorPlaceholder("Photo unavailable"))
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=AUTHORED_LOBBY")
+                    }
                 } else if picturesUseCameraRoll {
-                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-side") { [weak sideMaterial] _, image in
+                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-side") { [weak sideMaterial] _, identifier, image in
                         guard let sideMaterial, let image else { return }
                         sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
                         navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=PHOTOS")
+                        if let identifier {
+                            reportElevatorSideIdentity(.cameraRoll(identifier))
+                        }
                     }
-                } else if let image = builtInPosterImages.count > 1 ? builtInPosterImages[1] : builtInPosterImages.first {
-                    sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
+                } else if let picked = builtInPosterImages.count > 1 ? builtInPosterImages[1] : builtInPosterImages.first {
+                    sideMaterial.diffuse.contents = Self.elevatorPosterPhoto(picked.image)
                     navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-side source=BUILT_IN")
+                    reportElevatorSideIdentity(.builtIn(picked.name))
+                }
+            }
+
+            // Sept 26 (third elevator poster, right wall): the ride's
+            // 180-degree turn also sweeps past the car's RIGHT wall --
+            // Eddie: "the RIGHT elevator wall should support a picture
+            // exactly like the existing LEFT elevator side poster."
+            // Exact mirror of the LEFT side-wall block just above:
+            // same size, same camera-roll-vs-built-in branch, same
+            // HANDOFF/AUTHORED/RANDOM precedence -- only the mount
+            // position/rotation (opposite wall, mirrored inward-facing
+            // angle) and the node names/DecoratorTarget surface differ.
+            do {
+                let photoWidth = elevatorPosterWidth
+                let photoHeight = elevatorPosterHeight
+                let sideRightPhoto = SCNNode(geometry: SCNBox(width: photoWidth + 0.08, height: photoHeight + 0.08, length: 0.03, chamferRadius: 0.005))
+                let sideRightFrameMaterial = SCNMaterial()
+                sideRightFrameMaterial.diffuse.contents = UIColor(red: 0.62, green: 0.47, blue: 0.26, alpha: 1)
+                sideRightPhoto.geometry?.materials = [sideRightFrameMaterial]
+                sideRightPhoto.name = "elevatorSideRightPhoto"
+                sideRightPhoto.position = SCNVector3(halfW - 0.035, 0.3, -depth / 2)
+                // Sept 26 (third elevator poster, right wall): see the
+                // matching elevator-back/elevator-side DecoratorTarget.tag
+                // comments above.
+                DecoratorTarget(floor: floorNumber, location: .elevatorPoster(.sideRight), kind: .picture).tag(sideRightPhoto)
+                sideRightPhoto.eulerAngles.y = -.pi / 2
+                let sideRightImage = SCNNode(geometry: SCNPlane(width: photoWidth, height: photoHeight))
+                sideRightImage.name = "elevatorSideRightImage"
+                sideRightImage.position.z = 0.016
+                let sideRightMaterial = SCNMaterial()
+                sideRightMaterial.lightingModel = .constant
+                sideRightMaterial.diffuse.contents = UIColor(white: 0.08, alpha: 1) // neutral until the camera-roll fetch below lands
+                sideRightImage.geometry?.materials = [sideRightMaterial]
+                sideRightPhoto.addChildNode(sideRightImage)
+                shaft.addChildNode(sideRightPhoto)
+
+                if let contents = elevatorArtwork["elevatorSideRightImage"] {
+                    sideRightMaterial.diffuse.contents = contents
+                } else if let selection = elevatorCabDecoration.sideRightArtwork {
+                    // Sept 26 (third elevator poster, right wall): see
+                    // the matching elevator-back/elevator-side AUTHORED
+                    // tier above -- same priority order, same resolution.
+                    reportElevatorSideRightIdentity(selection)
+                    switch selection {
+                    case .builtIn(let name):
+                        let image = Self.namedPictureImage(name)
+                        sideRightMaterial.diffuse.contents = Self.elevatorPosterPhoto(image ?? Self.mirrorPlaceholder("Photo unavailable"))
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-sideright source=AUTHORED_BUILT_IN")
+                    case .cameraRoll(let identifier):
+                        PhotoRollProvider.shared.image(forIdentifier: identifier, caller: "floor \(floorNumber) elevator-sideright authored") { [weak sideRightMaterial] image in
+                            guard let sideRightMaterial else { return }
+                            sideRightMaterial.diffuse.contents = image.map { Self.elevatorPosterPhoto($0) } ?? Self.mirrorPlaceholder("Photo unavailable")
+                            navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-sideright source=AUTHORED_PHOTOS")
+                        }
+                    case .lobbyDefault(let name):
+                        let image = Self.lobbyPictureImage(name)
+                        sideRightMaterial.diffuse.contents = Self.elevatorPosterPhoto(image ?? Self.mirrorPlaceholder("Photo unavailable"))
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-sideright source=AUTHORED_LOBBY")
+                    }
+                } else if picturesUseCameraRoll {
+                    PhotoRollProvider.shared.randomImages(count: 1, caller: "floor \(floorNumber) elevator-sideright") { [weak sideRightMaterial] _, identifier, image in
+                        guard let sideRightMaterial, let image else { return }
+                        sideRightMaterial.diffuse.contents = Self.elevatorPosterPhoto(image)
+                        navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-sideright source=PHOTOS")
+                        if let identifier {
+                            reportElevatorSideRightIdentity(.cameraRoll(identifier))
+                        }
+                    }
+                } else if let picked = builtInPosterImages.count > 2 ? builtInPosterImages[2] : builtInPosterImages.first {
+                    sideRightMaterial.diffuse.contents = Self.elevatorPosterPhoto(picked.image)
+                    navLog("PHOTO-PATH-V1 APPLIED caller=floor \(floorNumber) elevator-sideright source=BUILT_IN")
+                    reportElevatorSideRightIdentity(.builtIn(picked.name))
                 }
             }
 
@@ -2564,6 +2787,253 @@ enum HallwayScene {
             }
             addHandrail(x: -halfW + handrailInset)
             addHandrail(x: halfW - handrailInset)
+
+            // Sept 26 (elevator interior control panel -- VISUAL/
+            // ENVIRONMENTAL ONLY, no navigation): Eddie: "the wall
+            // containing the elevator doors... has substantial empty
+            // space immediately to the RIGHT of the doors when viewed
+            // from INSIDE the elevator. That is where the elevator
+            // control panel belongs." This does NOT implement
+            // player-selected floor travel, does NOT change automatic
+            // progression, and is NOT exposed through Decorate mode --
+            // deliberately never given a DecoratorTarget tag (unlike
+            // every picture/fixture above), so Decorate's tap-to-select
+            // finds nothing here, same as it finds nothing on a plain
+            // wall. Its nodes are likewise never registered with
+            // TapNavigationController.elevatorPosterTarget(for:) (all
+            // new, distinct node names below, none of the 6 names that
+            // function recognizes), so a tap here falls through to
+            // ordinary "walk into a wall" handling exactly like any
+            // other blank surface -- no interaction, no UI, no camera
+            // change, by construction rather than by a guard clause
+            // that could be bypassed.
+            //
+            // WHICH SIDE IS "PASSENGER'S RIGHT" HERE: this is the
+            // opposite question from the one already answered (and
+            // physically confirmed) for the 3 elevator pictures --
+            // those were placed relative to a passenger facing the
+            // BACK wall (the standard "just walked in" pose), where
+            // "my LEFT" was confirmed to be the elevatorCabLeft/.side
+            // wall (local x = -halfW) and the new right poster sits at
+            // local x = +halfW. Facing the DOORS instead (this panel's
+            // wall) is a 180-degree turn from that pose -- turning
+            // around swaps which physical side reads as left and
+            // right, full stop, independent of any world-axis or
+            // rotation convention. So the panel belongs on the SAME
+            // local x = -halfW side as elevatorCabLeft/the .side
+            // poster (not +halfW/.sideRight, despite the coincidental
+            // name), mounted on that side's door-wall liner (the
+            // sign == -1 panel in the loop above), which is exactly
+            // where it's placed below. This whole panel is built as a
+            // child of `shaft`, the same node the back/side/sideRight
+            // posters and handrails are already children of, so it
+            // automatically follows the per-`direction` rotation/
+            // position applied to `shaft` further down -- correct for
+            // every elevator mount direction without special-casing
+            // north/south/east/west here.
+            do {
+                // ONE clear place to change the button count later
+                // (16/25/30/...): every dimension below derives from
+                // this value and from `columns`, so nothing else needs
+                // hand-editing to change the panel's size.
+                let controlPanelFloorCount = 21
+                let columns = 2
+                let rows = (controlPanelFloorCount + columns - 1) / columns
+
+                // Sept 26: buttonRadius/rimRadius keep the large,
+                // confirmed-good iPhone-tap-target size from the
+                // previous pass unchanged. colSpacing/rowSpacing and
+                // both margins are now cut back to just clear each
+                // button's own rim (rimRadius * 2) plus a small real-
+                // panel-style gap, instead of scaling with the
+                // buttons -- that's what was making the plate "an
+                // absurdly tall slab": row spacing/margins had scaled
+                // right along with the buttons, so the plate kept
+                // buttons a fixed, roomy distance apart rather than
+                // packing them. The plate now hugs the button array.
+                // plateThickness and the plate's own mounting
+                // position/orientation below remain unchanged.
+                let buttonRadius: CGFloat = 0.048
+                let rimRadius: CGFloat = 0.063
+                let colSpacing: CGFloat = 0.16
+                let rowSpacing: CGFloat = 0.145
+                let marginX: CGFloat = 0.075
+                let marginY: CGFloat = 0.075
+                let plateThickness: CGFloat = 0.02
+                let plateWidth = colSpacing + marginX * 2
+                let plateHeight = CGFloat(max(rows - 1, 0)) * rowSpacing + marginY * 2
+
+                let plateMaterial = SCNMaterial()
+                // Sept 26: diagnostic red material confirmed the
+                // plate's placement on-device; restored here to the
+                // intended brushed-stainless look.
+                plateMaterial.diffuse.contents = UIColor(white: 0.62, alpha: 1)
+                plateMaterial.lightingModel = .physicallyBased
+                plateMaterial.metalness.contents = 0.75
+                plateMaterial.roughness.contents = 0.35
+
+                let plateGeo = SCNBox(width: plateWidth, height: plateHeight, length: plateThickness, chamferRadius: 0.004)
+                plateGeo.materials = [plateMaterial]
+                let plate = SCNNode(geometry: plateGeo)
+                plate.name = "elevatorControlPanel"
+
+                // CORRECTED Sept 26 (panel-not-visible investigation):
+                // the liner's CAB-INTERIOR-facing surface is its MORE
+                // NEGATIVE-Z face, not its more-positive one -- verified
+                // against the back-wall poster's own already-working
+                // convention just above in this function: the back wall
+                // sits at very negative Z (position.z = -depth) and its
+                // poster is mounted proud toward LESS negative Z
+                // (-depth + thick/2 + 0.02), i.e. proud TOWARD the
+                // interior where the passenger stands (between the
+                // back wall and the doors). The liner sits at the
+                // OPPOSITE end of that same interior span (close to
+                // Z=0, near the doors), so by the identical logic its
+                // proud-toward-the-passenger direction is the opposite
+                // sign: MORE negative Z, back toward where the
+                // passenger actually stands. The previous version
+                // mounted this plate proud toward LESS negative Z
+                // instead -- the liner's hallway-facing side -- which
+                // put the whole plate on the far side of the liner
+                // from anyone standing inside the cab, with the solid
+                // liner panel itself occluding it. Fixed here; the
+                // button loop below is updated to match (proud toward
+                // more-negative Z as well).
+                let linerInteriorFaceZ = -Float(elevatorGeometry.shaftOffset + 0.14) - Float(0.03) / 2
+                let standoff: Float = 0.015
+                plate.position = SCNVector3(
+                    Float(-(elevatorDoorWidth + linerWidth) / 2),
+                    Float(elevatorCenterY - elevatorCabCenterY), // same vertical center as the doors themselves
+                    linerInteriorFaceZ - standoff - Float(plateThickness) / 2
+                )
+                shaft.addChildNode(plate)
+
+                let recessMaterial = SCNMaterial()
+                recessMaterial.diffuse.contents = UIColor(white: 0.12, alpha: 1)
+                recessMaterial.lightingModel = .physicallyBased
+                recessMaterial.metalness.contents = 0.5
+                recessMaterial.roughness.contents = 0.5
+
+                let buttonMetal = SCNMaterial()
+                buttonMetal.diffuse.contents = UIColor(white: 0.82, alpha: 1)
+                buttonMetal.lightingModel = .physicallyBased
+                buttonMetal.metalness.contents = 0.6
+                buttonMetal.roughness.contents = 0.3
+
+                // Sept 26: DISPLAY ONLY -- addElevatorDoor already
+                // receives `floorNumber` (the floor THIS scene build
+                // represents) as a plain parameter, the same value the
+                // existing hidden in-ride digit row above (buttonNodes/
+                // billboardedText) already compares against for its own
+                // "if f == floorNumber" lighting check. Reusing that
+                // exact, already-reliable value here -- a one-time,
+                // build-time comparison, never updated afterward -- is
+                // what keeps this purely decorative: no new navigation
+                // state, no coupling to TapNavigationController.
+                // lightElevatorPanel (that method keeps driving the
+                // OTHER, pre-existing digit row for the in-ride
+                // progression indicator; this panel's buttons are a
+                // separate, static-per-build set of nodes entirely).
+                let activeButtonMetal = buttonMetal.copy() as! SCNMaterial
+                activeButtonMetal.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
+                activeButtonMetal.emission.contents = UIColor(red: 0.5, green: 0.32, blue: 0.05, alpha: 1)
+
+                let contentTop = plateHeight / 2 - marginY
+                for index in 0..<controlPanelFloorCount {
+                    let floorLabel = index + 1
+                    let row = index / columns
+                    // Clean, general odd-final-row handling: only the
+                    // LAST button, only when the count doesn't divide
+                    // evenly by `columns`, centers instead of taking a
+                    // left/right slot -- no hand-picked coordinates for
+                    // any specific floor count.
+                    let isLastSingle = (index == controlPanelFloorCount - 1) && (controlPanelFloorCount % columns != 0)
+                    let x: CGFloat = isLastSingle ? 0 : (index % columns == 0 ? -colSpacing / 2 : colSpacing / 2)
+                    let y = contentTop - CGFloat(row) * rowSpacing
+                    let isCurrentFloor = floorLabel == floorNumber
+
+                    let recess = SCNNode(geometry: SCNCylinder(radius: rimRadius, height: 0.009))
+                    recess.geometry?.materials = [recessMaterial]
+                    recess.eulerAngles.x = .pi / 2
+                    recess.position = SCNVector3(Float(x), Float(y), -(Float(plateThickness) / 2 + 0.0045))
+                    plate.addChildNode(recess)
+
+                    let cap = SCNNode(geometry: SCNCylinder(radius: buttonRadius, height: 0.015))
+                    cap.geometry?.materials = [isCurrentFloor ? activeButtonMetal : buttonMetal]
+                    cap.eulerAngles.x = .pi / 2
+                    cap.position = SCNVector3(Float(x), Float(y), -(Float(plateThickness) / 2 + 0.0135))
+                    // Sept 26: stable, clear names for future work (per
+                    // Eddie's request) -- NOT wired into any tap/
+                    // navigation handling yet. elevatorPosterTarget(for:)
+                    // does not recognize these names, so a tap here
+                    // still falls through to ordinary wall handling.
+                    cap.name = "elevatorControlButton_\(floorLabel)"
+                    plate.addChildNode(cap)
+
+                    let digitText = SCNText(string: "\(floorLabel)", extrusionDepth: 0)
+                    digitText.font = UIFont.monospacedDigitSystemFont(ofSize: 30, weight: .medium)
+                    digitText.flatness = 0.1
+                    let digitMaterial = SCNMaterial()
+                    // Sept 26 (still invisible, second pass): black,
+                    // .constant (unaffected by cab lighting), and
+                    // explicitly double-sided -- this alone guarantees
+                    // the digit renders regardless of which way its
+                    // front face happens to point, removing backface
+                    // culling as a variable entirely rather than
+                    // re-guessing a rotation sign.
+                    digitMaterial.diffuse.contents = UIColor(white: 0, alpha: 1)
+                    digitMaterial.lightingModel = .constant
+                    digitMaterial.isDoubleSided = true
+                    digitText.materials = [digitMaterial]
+                    let (lo, hi) = digitText.boundingBox
+                    let digitScale = min(0.045 / max(hi.y - lo.y, 1), 0.0675 / max(hi.x - lo.x, 1))
+                    // Sept 26 (still invisible, second pass): found the
+                    // actual bug on inspection -- the previous single-
+                    // node version applied BOTH the 180-degree Y turn
+                    // AND the bounding-box centering offset to the same
+                    // node. eulerAngles rotates a node's geometry about
+                    // that node's OWN origin before `position`
+                    // translates it, so the centering math (subtracting
+                    // half the bounding box in X) was computed for the
+                    // UNROTATED box, then a 180-degree Y turn silently
+                    // flipped the sign of that already-applied X
+                    // offset -- every digit landed shifted sideways by
+                    // roughly its own width, off the button entirely
+                    // for some/all floors depending on glyph metrics.
+                    // Splitting this into two nodes fixes it for good:
+                    // the inner node only scales and centers the raw
+                    // text (identical math to before, but now genuinely
+                    // unrotated, so it is correct regardless of any
+                    // rotation applied above it), and the outer
+                    // wrapper only orients and places the already-
+                    // centered result -- the two computations can no
+                    // longer interfere with each other.
+                    let digitGeometryNode = SCNNode(geometry: digitText)
+                    digitGeometryNode.scale = SCNVector3(digitScale, digitScale, digitScale)
+                    digitGeometryNode.position = SCNVector3(
+                        -(lo.x + hi.x) * digitScale / 2,
+                        -(lo.y + hi.y) * digitScale / 2,
+                        0
+                    )
+                    let digitNode = SCNNode()
+                    digitNode.addChildNode(digitGeometryNode)
+                    // Same reasoning as before for facing the
+                    // passenger (this panel's proud direction is more-
+                    // negative Z, the opposite of the default text-
+                    // facing/exterior-digit convention), kept as the
+                    // primary orientation; isDoubleSided above is the
+                    // safety net if this sign still isn't the whole
+                    // story on-device.
+                    digitNode.eulerAngles.y = .pi
+                    digitNode.position = SCNVector3(
+                        Float(x),
+                        Float(y),
+                        -(Float(plateThickness) / 2 + 0.0225)
+                    )
+                    digitNode.name = "elevatorControlButtonLabel_\(floorLabel)"
+                    plate.addChildNode(digitNode)
+                }
+            }
 
             // Which world axis the wall itself runs along -- north/
             // south walls run east-west (world X), east/west walls run
@@ -3297,7 +3767,10 @@ enum HallwayScene {
             // more than one Picture, so a single shared "the" picture
             // direction no longer means anything -- each of the four wall-
             // skip checks below now asks about ITS OWN face directly.
-            func hasPictureFace(_ direction: Direction) -> Bool { pictures[WallFace(coord: coord, direction: direction)] != nil }
+            func hasPictureFace(_ direction: Direction) -> Bool {
+                guard let size = pictures[WallFace(coord: coord, direction: direction)] else { return false }
+                return size != .lobbyOriginal
+            }
             let mirrorDirection = mirrors[coord]
 
             // Same idea once more, for a Window Room's own exterior
@@ -3342,7 +3815,7 @@ enum HallwayScene {
             // so arriving there it's obvious you've hit a choice.
             let openSides = [!hasWallNorth, !hasWallSouth, !hasWallEast, !hasWallWest].filter { $0 }.count
             if openSides >= 3 {
-                addIntersectionMarker(atX: x, z: z, openNorth: !hasWallNorth, openSouth: !hasWallSouth, openEast: !hasWallEast, openWest: !hasWallWest)
+                addIntersectionMarker(at: coord, atX: x, z: z, openNorth: !hasWallNorth, openSouth: !hasWallSouth, openEast: !hasWallEast, openWest: !hasWallWest)
             }
 
             // First slice of the pick-up/deliver mechanic — this pass
@@ -3640,6 +4113,11 @@ enum HallwayScene {
         // different photos, not the same one repeated.
         navLog("PHOTO-PATH-V1 compiled=\(#filePath) floor=\(floorNumber) hallwaySource=\(picturesUseCameraRoll ? "CAMERA_ROLL" : "BUNDLED_NINE") count=\(pictures.count)")
         var cameraRollMaterials: [SCNMaterial] = []
+        // Sept 26 ("Keep This Picture"): parallel to cameraRollMaterials,
+        // same index-for-index lockstep -- lets the PhotoRollProvider
+        // completion below report which WallFace each resolved random
+        // identifier actually belongs to.
+        var cameraRollFaces: [WallFace] = []
         // Sept 20 (picture-teleport fix): every picture's own SCNMaterial,
         // by its wall coord -- lets ContentView's Coordinator update a
         // SINGLE picture's texture in place later (a live in-gameplay
@@ -3676,13 +4154,30 @@ enum HallwayScene {
                 var pendingIdentifier: String? = nil
                 let pictureTexture: UIImage?
                 switch explicitSelection {
+                case .lobbyDefault(let name):
+                    pictureTexture = Self.lobbyPictureImage(name) ?? Self.mirrorPlaceholder("Photo unavailable")
                 case .builtIn(let name):
                     pictureTexture = Self.namedPictureImage(name) ?? randomPictureImage(caller: "floor \(floorNumber) hallway \(coord) wall \(direction) builtIn=\(name) MISSING")
                 case .cameraRoll(let identifier):
                     pendingIdentifier = identifier
                     pictureTexture = Self.mirrorPlaceholder("Loading photo…")
                 case nil:
-                    pictureTexture = pendingPhoto ?? randomPictureImage(caller: "floor \(floorNumber) hallway \(coord) wall \(direction)")
+                    // Sept 26 ("Keep This Picture"): when picturesUseCameraRoll
+                    // is false, this resolves synchronously -- reports the
+                    // picked name right here, same face this loop iteration
+                    // already has in scope. The picturesUseCameraRoll=true
+                    // half of this same "no explicit choice" case is reported
+                    // later, in the cameraRollMaterials completion below,
+                    // once the async fetch actually knows which identifier
+                    // was picked.
+                    if let pendingPhoto {
+                        pictureTexture = pendingPhoto
+                    } else if let picked = randomPictureImageWithName(caller: "floor \(floorNumber) hallway \(coord) wall \(direction)") {
+                        pictureTexture = picked.image
+                        reportPictureIdentity(face, .builtIn(picked.name))
+                    } else {
+                        pictureTexture = nil
+                    }
                 }
                 guard let pictureTexture else { continue }
                 let picX = worldX(coord.col)
@@ -3696,75 +4191,21 @@ enum HallwayScene {
                 case .west: (wx, wz) = (picX - half, picZ)
                 }
                 let texture = Self.framedPhoto(pictureTexture)
-                let (material, frameNode) = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, scale: size.scale, pictureLightLevel: pictureLights.contains(face) ? LightBrightness.level(for: .picture, at: coord, direction: direction, in: lightBrightness) : nil, coord: coord)
-                // Sept 21 (Decorator Picture support): ONLY ordinary
-                // authored pictures from this loop get tagged -- Floor
-                // 1's hardcoded lobbyPhotos loop below deliberately does
-                // not call this, same for every other image-like
-                // surface (mission boards, signs, elevator posters,
-                // maps, mirrors), exactly per Eddie's scope. Sept 22:
-                // now carries `direction` too, so DecoratorState can
-                // tell apart two Pictures tagged at the same coord.
+                let (material, frameNode) = addPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, backfillWall: size != .lobbyOriginal, scale: size.scale, pictureLightLevel: pictureLights.contains(face) ? LightBrightness.level(for: .picture, at: coord, direction: direction, in: lightBrightness) : nil, coord: coord)
+                // All authored pictures, including migrated lobby originals, share identity.
                 DecoratorTarget(floor: floorNumber, coord: coord, kind: .picture, direction: direction).tag(frameNode)
                 pictureMaterials[face] = material
                 if let pendingIdentifier {
                     explicitCameraRollMaterials.append((identifier: pendingIdentifier, material: material))
                 } else if explicitSelection == nil, picturesUseCameraRoll {
                     cameraRollMaterials.append(material)
+                    cameraRollFaces.append(face)
                 }
             }
         }
 
-        // Lobby decoration sits over intact walls, with no navigation interactions.
+        // The lobby mirror remains a special live fixture, independent of authored pictures.
         if floorNumber == 1 {
-            // Eddie, Sept 16 (Floor 1 lobby artwork): these three are
-            // FIXED, hand-picked pieces -- the building's exterior, its
-            // front desk, and the Hallways Building plaque -- not random
-            // camera-roll photos like every other picture frame in the
-            // game. Walking from the entrance (row 14) toward the
-            // elevator (row 10): the LEFT wall (west, since facing north
-            // puts west on your left) shows the exterior first, then the
-            // front desk, closer to the elevator; the RIGHT wall (east)
-            // shows the plaque, then the live mirror (Mirror.swift,
-            // unchanged) at row 11. Loaded synchronously from bundled
-            // files -- same Bundle.main.path(forResource:ofType:) +
-            // UIImage(contentsOfFile:) pattern as "back-of-front-door"
-            // below -- and passed straight to addPictureNode already
-            // framed, so unlike the random-photo loop above these are
-            // NEVER appended to cameraRollMaterials and can't be
-            // overwritten by the later PhotoRollProvider.shared.randomImages(...)
-            // call that fills every camera-roll picture in one pass.
-            // Wall positions, frame, size (scale: 1.4), and navigation are
-            // all exactly as before -- only the texture source changed.
-            let lobbyPhotos: [(GridCoordinate, Direction, resourceName: String)] = [
-                (GridCoordinate(row: 13, col: 7), .west, "lobby-outside"),
-                (GridCoordinate(row: 11, col: 7), .west, "lobby-front-desk"),
-                (GridCoordinate(row: 13, col: 7), .east, "lobby-plaque")
-            ]
-            for (coord, direction, resourceName) in lobbyPhotos where cells.contains(coord) {
-                let delta = direction.delta
-                guard !isOpen(coord.row + delta.row, coord.col + delta.col) else { continue }
-                let texture: UIImage
-                // Sept 26 (intro/lobby resource organization): these three
-                // now live in Hallways-Assets/lobby, bundled as the
-                // "lobby" subdirectory -- tried first, then falls
-                // through to the original flat lookup for resilience.
-                if let url = Bundle.main.url(forResource: resourceName, withExtension: "png", subdirectory: "lobby"),
-                   let bundled = UIImage(contentsOfFile: url.path) {
-                    texture = Self.framedPhoto(bundled)
-                } else if let path = Bundle.main.path(forResource: resourceName, ofType: "png"),
-                          let bundled = UIImage(contentsOfFile: path) {
-                    texture = Self.framedPhoto(bundled)
-                } else {
-                    navLog("PHOTO-PATH-V1 floor \(floorNumber) lobby fixed photo MISSING resource=\(resourceName).png")
-                    texture = Self.framedPhoto(Self.mirrorPlaceholder("Photo unavailable"))
-                }
-                _ = addPictureNode(direction: direction,
-                    wallCenterX: worldX(coord.col) + CGFloat(delta.col) * half,
-                    wallCenterZ: worldZ(coord.row) + CGFloat(delta.row) * half,
-                    texture: texture,
-                    backfillWall: false, scale: 1.4, coord: coord)
-            }
             let mirrorCell = GridCoordinate(row: 11, col: 7)
             if cells.contains(mirrorCell), !isOpen(mirrorCell.row, mirrorCell.col + 1) {
                 // Blinn remains bright in an unlit scene; this physical lobby frame must not.
@@ -3963,6 +4404,74 @@ enum HallwayScene {
             root.addChildNode(windowResult.node)
             windowRoomMaterials.append(windowResult.glassMaterial)
             windowRoomFallbacks.append(windowViewFallback)
+        }
+
+        // Sept 27 (generic Room Entrance door -- first authoring
+        // pass): an ordinary interior room door between two ALREADY
+        // OPEN cells, reusing the EXACT bathroom/window-room swinging-
+        // door construction just above -- same makeBathroomDoorPanel
+        // call, same addDoorFrame framing, same "requires
+        // cells.contains(neighbor)" gate confirming a real walkable
+        // cell sits on the other side -- just its own hinge-name
+        // prefix ("roomEntranceDoor_<row>_<col>") and, via
+        // includeSign:false, no RESTROOM sign and no window (this is
+        // NOT a bathroom or a Window Room). See
+        // TapNavigationController's roomEntranceDoorAnchor/
+        // openRoomEntranceDoors for the movement gate, and
+        // MazeStore.placeRoomEntranceDoor for the authoring-side
+        // validation that a real cell already exists behind the
+        // selected wall face before this ever gets data to render.
+        let roomEntranceDoorWidth: CGFloat = 1.0
+        let roomEntranceDoorHeight: CGFloat = 2.2
+        let roomEntranceDoorCenterY: CGFloat = roomEntranceDoorHeight / 2
+        for (coord, placement) in roomEntranceDoors where cells.contains(coord) {
+            let direction = placement.direction
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard cells.contains(neighbor) else { continue }
+            let doorX = worldX(coord.col)
+            let doorZ = worldZ(coord.row)
+            let rwx: CGFloat
+            let rwz: CGFloat
+            switch direction {
+            case .north: (rwx, rwz) = (doorX, doorZ - half)
+            case .south: (rwx, rwz) = (doorX, doorZ + half)
+            case .east: (rwx, rwz) = (doorX + half, doorZ)
+            case .west: (rwx, rwz) = (doorX - half, doorZ)
+            }
+            // Sept 27 (Room Entrance live-delete leak fix): every
+            // node this door creates -- frame strips AND hinge -- now
+            // lives under one owning "assembly" node, tagged the same
+            // way the mirror/extinguisher build-time loops already tag
+            // their own fixture root, PLUS given a stable, predictable
+            // name (mirroring the hinge's own "roomEntranceDoor_<row>_
+            // <col>" convention) so DecoratorState.deleteRoomEntranceDoor
+            // can also find and remove the WHOLE assembly by name as a
+            // deterministic safety net, not only via tag-based lookup.
+            // This is the exact "give the live-created structure a
+            // clear common ownership/container" fix Eddie asked for --
+            // applied here too (not just the live-add path) so a
+            // build-time-loaded or reloaded Room Entrance is exactly as
+            // fully deletable as one placed live in the same session.
+            let assembly = SCNNode()
+            assembly.name = "roomEntranceDoorAssembly_\(coord.row)_\(coord.col)"
+            let roomEntranceAssemblyTarget = DecoratorTarget(floor: floorNumber, coord: coord, kind: .roomEntranceDoor, direction: direction)
+            roomEntranceAssemblyTarget.tag(assembly)
+            root.addChildNode(assembly)
+            addDoorFrame(direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: roomEntranceDoorWidth, doorHeight: roomEntranceDoorHeight, doorCenterY: roomEntranceDoorCenterY, into: assembly, tag: { roomEntranceAssemblyTarget.tag($0) })
+            let roomEntranceHinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: roomEntranceDoorWidth, doorHeight: roomEntranceDoorHeight, doorCenterY: roomEntranceDoorCenterY, style: placement.style, textureName: placement.textureName)
+            // Sept 27 (door cosmetics tap-routing fix): tagged so a
+            // build-time Room Entrance (any floor reload or app
+            // restart, not just a live "+" -> Door Entry placement) is
+            // selectable in Decorator instead of falling through past
+            // decorator?.select(...) into Play-mode's own name-based
+            // lookup (TapNavigationController.roomEntranceDoorCoordinate,
+            // which matches on the hinge's NAME alone and has no idea
+            // Decorator exists) and opening the door on a Decorate tap.
+            // Same "tag rides the fixture's own root node" pattern as
+            // the mirror/extinguisher build-time loops elsewhere in
+            // this function.
+            roomEntranceAssemblyTarget.tag(roomEntranceHinge)
+            assembly.addChildNode(roomEntranceHinge)
         }
 
         // Floor 7's aptitude-test terminal -- same "small wall fixture
@@ -4194,9 +4703,13 @@ enum HallwayScene {
                     material.diffuse.contents = image.map { Self.framedPhoto($0) } ?? Self.mirrorPlaceholder("Photo unavailable")
                 }
             }
-            PhotoRollProvider.shared.randomImages(count: applyImages.count, caller: "floor \(floorNumber) hallway-picture") { index, image in
+            PhotoRollProvider.shared.randomImages(count: applyImages.count, caller: "floor \(floorNumber) hallway-picture") { index, identifier, image in
                 navLog("PHOTO-PATH-V1 DELIVER caller=floor \(floorNumber) hallway-picture[\(index)] source=\(image == nil ? "UNAVAILABLE_PLACEHOLDER" : "PHOTOS")")
                 applyImages[index](image)
+                // Sept 26 ("Keep This Picture"): cameraRollFaces was
+                // built in the same lockstep as cameraRollMaterials, so
+                // index lines up here too.
+                if let identifier { reportPictureIdentity(cameraRollFaces[index], .cameraRoll(identifier)) }
             }
         }
 
@@ -4239,7 +4752,7 @@ enum HallwayScene {
                     HallwayScene.applyWindowPhoto(image, to: material, fallback: fallback)
                 }
             }
-            PhotoRollProvider.shared.randomImages(count: applyWindowImages.count, caller: "floor \(floorNumber) window room") { index, image in
+            PhotoRollProvider.shared.randomImages(count: applyWindowImages.count, caller: "floor \(floorNumber) window room") { index, _, image in
                 navLog("PHOTO-PATH-V1 DELIVER caller=floor \(floorNumber) window room[\(index)] source=\(image == nil ? "UNAVAILABLE_PLACEHOLDER" : "PHOTOS")")
                 applyWindowImages[index](image)
             }
@@ -4466,10 +4979,23 @@ enum HallwayScene {
     // explicit selection, exactly the fallback build(fromMaze:...)
     // itself already uses. No behavior change to this function itself.
     static func randomPictureImage(caller: String) -> UIImage? {
+        randomPictureImageWithName(caller: caller)?.image
+    }
+
+    /// Sept 26 ("Keep This Picture"): same random built-in pick as
+    /// randomPictureImage above, but also hands back WHICH bundled
+    /// image (pictureAssetNames' own identifier, no extension) was
+    /// chosen -- randomPictureImage discarded that name before
+    /// returning, which is exactly the "random path throws away
+    /// source identity" gap for a build-time random built-in picture.
+    /// randomPictureImage above is kept as a thin wrapper so every
+    /// caller that genuinely doesn't need the name (none currently do,
+    /// but this keeps the smaller call available) is unaffected.
+    static func randomPictureImageWithName(caller: String) -> (name: String, image: UIImage)? {
         guard let name = pictureAssetNames.randomElement(),
               let image = namedPictureImage(name) else { return nil }
         navLog("PHOTO-PATH-V1 caller=\(caller) BUNDLED FALLBACK USED (configured bundled mode) file=\(name)")
-        return image
+        return (name, image)
     }
 
     /// One specific bundled Hallways Art image by name (no extension,
@@ -4478,6 +5004,15 @@ enum HallwayScene {
     /// Change Picture actions, which know exactly which one they want
     /// rather than any random one. Not `private`: the same reason
     /// pictureAssetNames above isn't.
+    /// Same lobby subdirectory/flat PNG lookup used by the original fixed frames.
+    static func lobbyPictureImage(_ resourceName: String) -> UIImage? {
+        if let url = Bundle.main.url(forResource: resourceName, withExtension: "png", subdirectory: "lobby"),
+           let bundled = UIImage(contentsOfFile: url.path) { return bundled }
+        if let path = Bundle.main.path(forResource: resourceName, ofType: "png"),
+           let bundled = UIImage(contentsOfFile: path) { return bundled }
+        return nil
+    }
+
     static func namedPictureImage(_ name: String) -> UIImage? {
         // Sept 26 (unified Hallways picture library): persisted
         // PictureImageSelection.builtIn(name) identifiers never carry
@@ -4530,7 +5065,12 @@ enum HallwayScene {
     /// technique as framedPhoto above (scale uniformly to fill, center,
     /// clip the overflow) but for the posters' own fixed aspect instead
     /// of the hallway picture frame's 0.6:0.85.
-    private static func elevatorPosterPhoto(_ image: UIImage) -> UIImage {
+    // Sept 26 (BUG 2 fix, manual-mode elevator Change Picture):
+    // widened from private -- TapNavigationController.applyElevatorPosterImage(_:to:)
+    // now reuses this exact same crop/letterbox treatment for a
+    // manually chosen photo, so it matches a randomly assigned one
+    // pixel-for-pixel instead of duplicating this logic.
+    static func elevatorPosterPhoto(_ image: UIImage) -> UIImage {
         let size = CGSize(width: 1000, height: 1000 * elevatorPosterAspect)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -4555,12 +5095,16 @@ enum HallwayScene {
     /// addElevatorDoor's two poster blocks below when
     /// picturesUseCameraRoll is false; camera-roll mode is unchanged
     /// and does not call this.
-    private static func randomBuiltInImages(count: Int) -> [UIImage] {
-        var images: [UIImage] = []
+    /// Sept 26 ("Keep This Picture"): now also hands back each
+    /// picked image's own name -- same "random path discarded source
+    /// identity" gap as randomPictureImage/randomPictureImageWithName
+    /// above, for the elevator posters' own built-in random fallback.
+    private static func randomBuiltInImages(count: Int) -> [(name: String, image: UIImage)] {
+        var images: [(name: String, image: UIImage)] = []
         for name in pictureAssetNames.shuffled() {
             guard images.count < count else { break }
             if let image = namedPictureImage(name) {
-                images.append(image)
+                images.append((name, image))
             }
         }
         return images
@@ -5074,7 +5618,7 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false) -> UIImage {
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], fireCells: [GridCoordinate] = [], extinguisherCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false, wallObjectFaces: Set<WallFace> = [], doorFaces: Set<WallFace> = [], exitSignFaces: Set<WallFace> = []) -> UIImage {
         // simplified (the handheld mini-map): a small, clean corridor
         // shape -- floor cells plus the live player marker only. No
         // room numbers, mission dots, elevator, booths, painted fill,
@@ -5154,6 +5698,137 @@ enum HallwayScene {
                 cg.fill(rect)
             }
 
+            // Sept 27 (wall-object map indicators): a short solid black
+            // bar just inside the appropriate cell edge for any Picture,
+            // Mirror, Mission sign, or Floor map mounted on that wall
+            // face -- deliberately the SAME single indicator for all
+            // four kinds (Eddie: "It deliberately does NOT tell the
+            // player what kind of object it is"), no icon/color/legend
+            // variation. Direction -> edge uses this function's own
+            // existing row/col -> y/x transform (row grows south/down,
+            // col grows east/right -- see Direction.delta), so north
+            // sits at the cell's small-y edge, south at large-y, east
+            // at large-x, west at small-x -- no separate orientation
+            // math invented. Drawn here, before the elevator/mission
+            // dots/player marker below, so those stay visually on top
+            // whenever they'd otherwise coincide (Eddie: "keep it
+            // visually subordinate to the existing player marker and
+            // mission-item dots"). A Set<WallFace> already collapsed
+            // two supported kinds sharing one face to a single entry
+            // before this loop ever runs (see currentFloorMapImage's
+            // caller-side comment), so there is no per-face duplicate
+            // check needed here.
+            UIColor.black.setFill()
+            let wallBarLength = cellPx * 0.5
+            let wallBarThickness = cellPx * 0.12
+            let wallBarInset = cellPx * 0.08
+            for face in wallObjectFaces {
+                let cellRect = CGRect(x: margin + CGFloat(face.coord.col) * cellPx, y: margin + CGFloat(face.coord.row) * cellPx, width: cellPx, height: cellPx)
+                let bar: CGRect
+                switch face.direction {
+                case .north:
+                    bar = CGRect(x: cellRect.midX - wallBarLength / 2, y: cellRect.minY + wallBarInset, width: wallBarLength, height: wallBarThickness)
+                case .south:
+                    bar = CGRect(x: cellRect.midX - wallBarLength / 2, y: cellRect.maxY - wallBarInset - wallBarThickness, width: wallBarLength, height: wallBarThickness)
+                case .east:
+                    bar = CGRect(x: cellRect.maxX - wallBarInset - wallBarThickness, y: cellRect.midY - wallBarLength / 2, width: wallBarThickness, height: wallBarLength)
+                case .west:
+                    bar = CGRect(x: cellRect.minX + wallBarInset, y: cellRect.midY - wallBarLength / 2, width: wallBarThickness, height: wallBarLength)
+                }
+                cg.fill(bar)
+            }
+
+            // Sept 27 (door map indicators): doors get the EXACT SAME
+            // wall-face bar geometry as the black wall-object indicators
+            // just above -- same wallBarLength/wallBarThickness/
+            // wallBarInset, same direction -> edge transform, same
+            // centering -- only the fill color changes, per Eddie's
+            // explicit "do not invent a new symbol for doors... the
+            // only visual distinction is BLACK BAR = wall-mounted
+            // object, RED BAR = door." A separate loop (not merged into
+            // the one above) so the already-approved black indicator
+            // code stays byte-for-byte untouched. doorFaces is already
+            // a Set<WallFace>, so two records that somehow named the
+            // same cell+face collapse to one bar here exactly like the
+            // black loop above.
+            UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1).setFill()
+            for face in doorFaces {
+                let cellRect = CGRect(x: margin + CGFloat(face.coord.col) * cellPx, y: margin + CGFloat(face.coord.row) * cellPx, width: cellPx, height: cellPx)
+                let bar: CGRect
+                switch face.direction {
+                case .north:
+                    bar = CGRect(x: cellRect.midX - wallBarLength / 2, y: cellRect.minY + wallBarInset, width: wallBarLength, height: wallBarThickness)
+                case .south:
+                    bar = CGRect(x: cellRect.midX - wallBarLength / 2, y: cellRect.maxY - wallBarInset - wallBarThickness, width: wallBarLength, height: wallBarThickness)
+                case .east:
+                    bar = CGRect(x: cellRect.maxX - wallBarInset - wallBarThickness, y: cellRect.midY - wallBarLength / 2, width: wallBarThickness, height: wallBarLength)
+                case .west:
+                    bar = CGRect(x: cellRect.minX + wallBarInset, y: cellRect.midY - wallBarLength / 2, width: wallBarThickness, height: wallBarLength)
+                }
+                cg.fill(bar)
+            }
+
+            // Sept 28 (EXIT sign map markers): one thin arrow, centered
+            // in the cell, pointing in the sign's own authored
+            // direction -- the same coord+direction data
+            // (exitSignDirections in TapNavigationController, threaded
+            // in exactly like missionSignDirections/floorMapDirections
+            // above, no second direction concept) that already builds
+            // the real ceiling fixture. Deliberately NOT the wall-face
+            // bar shape the black/red indicators just above use -- an
+            // Exit Sign hangs over the cell's own CENTER, not a wall,
+            // and is commonly the only thing in an otherwise-empty
+            // intersection, so it needs a marker that reads there on
+            // its own rather than one more edge-aligned bar. Black,
+            // the same neutral the wall-object bars use (red is
+            // door/hazard, green is mission/pickup -- both already
+            // claimed), but an unmistakably different SHAPE keeps it
+            // from reading as "another wall object." Same row/col ->
+            // y/x convention as the bars above: north is -y (up the
+            // page), south +y, east +x, west -x -- no separate
+            // orientation math invented.
+            UIColor.black.setFill()
+            let exitArrowHalfLength = cellPx * 0.28
+            let exitArrowShaftWidth = cellPx * 0.07
+            let exitArrowHeadWidth = cellPx * 0.22
+            let exitArrowHeadLength = cellPx * 0.16
+            for face in exitSignFaces {
+                let cellRect = CGRect(x: margin + CGFloat(face.coord.col) * cellPx, y: margin + CGFloat(face.coord.row) * cellPx, width: cellPx, height: cellPx)
+                let center = CGPoint(x: cellRect.midX, y: cellRect.midY)
+                let dx: CGFloat
+                let dy: CGFloat
+                switch face.direction {
+                case .north: dx = 0; dy = -1
+                case .south: dx = 0; dy = 1
+                case .east: dx = 1; dy = 0
+                case .west: dx = -1; dy = 0
+                }
+                let tip = CGPoint(x: center.x + dx * exitArrowHalfLength, y: center.y + dy * exitArrowHalfLength)
+                let tail = CGPoint(x: center.x - dx * exitArrowHalfLength, y: center.y - dy * exitArrowHalfLength)
+                let headBase = CGPoint(x: tip.x - dx * exitArrowHeadLength, y: tip.y - dy * exitArrowHeadLength)
+                // Perpendicular unit vector -- the shaft's two long
+                // edges and the arrowhead's two back corners all sit
+                // this many points off the tip/tail/headBase center
+                // line.
+                let px = -dy
+                let py = dx
+
+                let shaftPath = UIBezierPath()
+                shaftPath.move(to: CGPoint(x: tail.x + px * exitArrowShaftWidth / 2, y: tail.y + py * exitArrowShaftWidth / 2))
+                shaftPath.addLine(to: CGPoint(x: headBase.x + px * exitArrowShaftWidth / 2, y: headBase.y + py * exitArrowShaftWidth / 2))
+                shaftPath.addLine(to: CGPoint(x: headBase.x - px * exitArrowShaftWidth / 2, y: headBase.y - py * exitArrowShaftWidth / 2))
+                shaftPath.addLine(to: CGPoint(x: tail.x - px * exitArrowShaftWidth / 2, y: tail.y - py * exitArrowShaftWidth / 2))
+                shaftPath.close()
+                shaftPath.fill()
+
+                let headPath = UIBezierPath()
+                headPath.move(to: tip)
+                headPath.addLine(to: CGPoint(x: headBase.x + px * exitArrowHeadWidth / 2, y: headBase.y + py * exitArrowHeadWidth / 2))
+                headPath.addLine(to: CGPoint(x: headBase.x - px * exitArrowHeadWidth / 2, y: headBase.y - py * exitArrowHeadWidth / 2))
+                headPath.close()
+                headPath.fill()
+            }
+
             // The elevator -- a black circle, deliberately oversized
             // relative to a single cell (8% inset, not 15%) so it
             // still reads as a clear dot once this whole texture is
@@ -5177,11 +5852,61 @@ enum HallwayScene {
             // refreshFloorMapTexture()) and wherever it gets delivered
             // (missionDestinationCells, fixed). Same legend row these
             // match -- see makeMapLegendTexture below.
+            // Sept 27 (dot/wall-bar clearance): a fire, extinguisher,
+            // or destination cell can also carry a wall-mounted object
+            // or door on one of its own walls (same GridCoordinate,
+            // face.coord == the dot's coord), and the wall bar for that
+            // face is centered on the exact same axis as the dot (both
+            // keyed off cellRect.midX/midY) -- so the closest point on
+            // that bar to the dot's center is always a straight-line
+            // distance of cellPx/2 - (wallBarInset + wallBarThickness)
+            // = cellPx * (0.5 - 0.2) = cellPx * 0.3 (the bar's own inner
+            // edge, at cellPx * 0.08 + cellPx * 0.12 = cellPx * 0.2 in
+            // from the cell edge). The previous flat "+1" trim (inset
+            // 0.08*cellPx+1 = 4.84pt, radius 19.16pt at cellPx=48) left
+            // the dot's edge inside that bar's footprint by ~4.76pt --
+            // an actual overlap, not just "close," in the worst-case
+            // aligned case Eddie's screenshot showed. Solving inset =
+            // cellPx*0.2 + gap for a small gap (using gap=1.5, the
+            // middle of Eddie's requested ~1-2pt) reliably clears the
+            // bar everywhere with a small, uniform, visible gap.
+            // Centers stay exactly where they were -- only the radius
+            // shrinks, and by the same amount on every side, same as
+            // before. Both dot loops below (and the fire loop further
+            // down) already shared this one inset value, so the fix
+            // lives here, centrally, same as last time.
+            let dotInset = cellPx * 0.2 + 1.5
             let missionColor = UIColor(red: 0.15, green: 0.65, blue: 0.25, alpha: 1)
             missionColor.setFill()
-            for coord in missionItemCells {
+            // Sept 27 (Floor 5 fire/extinguisher map markers): active
+            // fires and available extinguishers were originally drawn
+            // with this SAME green dot -- same color, same size, same
+            // shape -- as an ordinary mission item, per Eddie's earlier
+            // "do not introduce new icons/colors/legends" instruction.
+            // The caller (TapNavigationController.currentFloorMapImage)
+            // already filters both lists down to "still needs
+            // attention" before passing them in, exactly like
+            // missionItemCells already filters out collectedCoords.
+            // Sept 27 (Floor 5 fire color correction): Eddie reviewed
+            // Floors 2-5 physically and asked for ONE change -- active
+            // fires now read as a hazard (RED), while an available
+            // extinguisher stays the pickup color (GREEN), matching the
+            // RED = hazard / GREEN = tool-to-acquire meaning already
+            // used elsewhere on this same map (destination dot, door
+            // bars). fireCells moves into its own loop below with no
+            // other change: same dotInset geometry, same fill/ellipse
+            // call, same "still active" filtering from the caller --
+            // only the fill color differs. missionItemCells and
+            // extinguisherCells are untouched here.
+            for coord in missionItemCells + extinguisherCells {
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
-                cg.fillEllipse(in: rect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+                cg.fillEllipse(in: rect.insetBy(dx: dotInset, dy: dotInset))
+            }
+
+            UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1).setFill()
+            for coord in fireCells {
+                let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
+                cg.fillEllipse(in: rect.insetBy(dx: dotInset, dy: dotInset))
             }
 
             let boothColor = UIColor(red: 0.15, green: 0.45, blue: 0.85, alpha: 1)
@@ -5198,7 +5923,7 @@ enum HallwayScene {
             UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1).setFill()
             for coord in missionDestinationCells {
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
-                cg.fillEllipse(in: rect.insetBy(dx: cellPx * 0.08, dy: cellPx * 0.08))
+                cg.fillEllipse(in: rect.insetBy(dx: dotInset, dy: dotInset))
             }
 
             // A LIVE dot for wherever you actually are right now, as
@@ -5765,9 +6490,17 @@ enum HallwayScene {
 
         let bodyMaterial = SCNMaterial()
         bodyMaterial.lightingModel = .physicallyBased
-        bodyMaterial.diffuse.contents = UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
-        bodyMaterial.metalness.contents = 0.55
-        bodyMaterial.roughness.contents = 0.55
+        // Sept 26 (material-only experiment, Eddie): the can was
+        // reading as near-black even in well-lit hallways and as a
+        // flat silhouette in the darker chute. Same near-neutral-gray
+        // color pattern as before, just moved from near-black to a
+        // medium-light cool silver, with higher metalness and
+        // moderate (not mirror-flat) roughness -- a believable
+        // brushed-steel office-wastebasket look rather than chrome or
+        // plastic. Geometry, size, and placement are untouched.
+        bodyMaterial.diffuse.contents = UIColor(red: 0.58, green: 0.59, blue: 0.61, alpha: 1)
+        bodyMaterial.metalness.contents = 0.78
+        bodyMaterial.roughness.contents = 0.42
         bodyMaterial.emission.contents = UIColor.black
 
         let body = SCNCone(topRadius: trashCanTopRadius, bottomRadius: trashCanBottomRadius, height: trashCanHeight)
@@ -5777,9 +6510,14 @@ enum HallwayScene {
 
         let rimMaterial = SCNMaterial()
         rimMaterial.lightingModel = .physicallyBased
-        rimMaterial.diffuse.contents = UIColor(red: 0.16, green: 0.16, blue: 0.17, alpha: 1)
-        rimMaterial.metalness.contents = 0.6
-        rimMaterial.roughness.contents = 0.45
+        // Sept 26 (material-only experiment, Eddie): same treatment as
+        // bodyMaterial just above, kept a touch lighter and a touch
+        // less rough than the body -- a rolled-metal lip catching a
+        // bit more highlight than the flat cone body, same coherent
+        // silver-gray family, still not chrome/mirror-like.
+        rimMaterial.diffuse.contents = UIColor(red: 0.68, green: 0.69, blue: 0.71, alpha: 1)
+        rimMaterial.metalness.contents = 0.82
+        rimMaterial.roughness.contents = 0.32
         rimMaterial.emission.contents = UIColor.black
 
         let rimThickness: CGFloat = 0.012
@@ -6052,8 +6790,20 @@ enum HallwayScene {
         // Deep red backing panel, itself faintly lit (controlled
         // emission) so the whole sign reads as an illuminated fixture;
         // the bright red legend below carries the actual glow.
+        //
+        // Sept 28 (brightness pass): illumination here is emission-only
+        // -- there is no SCNLight anywhere on this fixture, ceiling-
+        // mounted or otherwise, and Eddie's request was specifically
+        // NOT to add one just because one might be expected. Both this
+        // panel's and the legend's emission below are raised ~50% from
+        // their Sept 24 values (old faceMaterial 0.34/0.02/0.015, old
+        // textMaterial 0.45/0.03/0.02) as a first physical-test value,
+        // same ratio between the two so the "faintly-lit backing panel
+        // vs. bright glowing legend" relationship Sept 24 established is
+        // preserved, not just one brightened in isolation. Both stay
+        // under 1.0, same "readable, not blown out" ceiling as before.
         faceMaterial.diffuse.contents = UIColor(red: 0.45, green: 0.02, blue: 0.02, alpha: 1)
-        faceMaterial.emission.contents = UIColor(red: 0.34, green: 0.02, blue: 0.015, alpha: 1)
+        faceMaterial.emission.contents = UIColor(red: 0.51, green: 0.03, blue: 0.0225, alpha: 1)
         faceMaterial.lightingModel = .physicallyBased
         faceMaterial.metalness.contents = 0.0
         faceMaterial.roughness.contents = 0.5
@@ -6067,7 +6817,7 @@ enum HallwayScene {
         // applies there too.
         let textMaterial = SCNMaterial()
         textMaterial.diffuse.contents = UIColor(red: 0.96, green: 0.12, blue: 0.10, alpha: 1)
-        textMaterial.emission.contents = UIColor(red: 0.45, green: 0.03, blue: 0.02, alpha: 1)
+        textMaterial.emission.contents = UIColor(red: 0.675, green: 0.045, blue: 0.03, alpha: 1)
         textMaterial.lightingModel = .physicallyBased
 
         // Suspension rods -- ceiling down to the two housing corners.

@@ -128,21 +128,32 @@ final class PhotoRollProvider {
         }
     }
 
-    func randomImages(count: Int, caller: String, onImage: @escaping (Int, UIImage?) -> Void) {
+    /// Sept 26 ("Keep This Picture"): `onImage`'s 2nd parameter is the
+    /// picked asset's PHAsset.localIdentifier -- nil only when no image
+    /// could be delivered at all (denied access, empty library, or a
+    /// request that failed). Previously this only handed back the
+    /// UIImage, discarding the identifier navLog already knew right
+    /// below -- every caller of this method builds a build-time RANDOM
+    /// picture with no persisted identity of its own, so a picture
+    /// showing one of these had no way to be promoted into a specific,
+    /// persistent selection later. This is the smallest change that
+    /// fixes that: callers that don't care (window-room glass) just
+    /// ignore the new parameter.
+    func randomImages(count: Int, caller: String, onImage: @escaping (Int, String?, UIImage?) -> Void) {
         guard count > 0 else { return }
         let requestID = UUID().uuidString
         PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
             DispatchQueue.main.async {
                 navLog("PHOTODIAG request=\(requestID) caller=\(caller) auth=\(Self.describeAuthStatus(status))")
                 guard status == .authorized || status == .limited else {
-                    for i in 0..<count { onImage(i, nil) }
+                    for i in 0..<count { onImage(i, nil, nil) }
                     return
                 }
                 let assets = PHAsset.fetchAssets(with: .image, options: nil)
                 let total = assets.count
                 navLog("PHOTODIAG request=\(requestID) caller=\(caller) totalAccessibleCount=\(total)")
                 guard total > 0 else {
-                    for i in 0..<count { onImage(i, nil) }
+                    for i in 0..<count { onImage(i, nil, nil) }
                     return
                 }
                 // Leave at least one eligible asset even in a very small library.
@@ -170,7 +181,7 @@ final class PhotoRollProvider {
                             guard !delivered else { return }
                             delivered = true
                             navLog("PHOTODIAG result request=\(requestID) caller=\(caller)[\(surface)] id=\(asset.localIdentifier) image=\(image != nil) cloud=\(String(describing: info?[PHImageResultIsInCloudKey])) error=\(String(describing: info?[PHImageErrorKey])) cancelled=\(String(describing: info?[PHImageCancelledKey]))")
-                            onImage(surface, image)
+                            onImage(surface, image != nil ? asset.localIdentifier : nil, image)
                         }
                     }
                 }

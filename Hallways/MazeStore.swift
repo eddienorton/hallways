@@ -95,6 +95,9 @@ enum PhotoBoothExpression: String, Codable, Hashable {
 /// than a half-built case here.
 enum PictureSize: String, Codable, Hashable, CaseIterable {
     case small, standard, poster, fullLength
+    // Compatibility size for the original lobby frames; not a new catalog choice.
+    case lobbyOriginal
+    static let allCases: [PictureSize] = [.small, .standard, .poster, .fullLength]
 
     /// Multiplies HallwayScene.addPictureNode's existing `scale`
     /// parameter -- already used, at 1.4, for the 3 hardcoded Floor-1
@@ -118,6 +121,7 @@ enum PictureSize: String, Codable, Hashable, CaseIterable {
         case .standard: return 1.0
         case .poster: return 1.8
         case .fullLength: return 2.6
+        case .lobbyOriginal: return 1.4
         }
     }
 
@@ -127,6 +131,7 @@ enum PictureSize: String, Codable, Hashable, CaseIterable {
         case .standard: return "Standard"
         case .poster: return "Poster"
         case .fullLength: return "Full Length"
+        case .lobbyOriginal: return "Original Lobby"
         }
     }
 }
@@ -443,6 +448,8 @@ enum PictureImageSelection: Codable, Equatable {
     /// One specific photo from the user's camera roll, by its
     /// PHAsset.localIdentifier.
     case cameraRoll(String)
+    // Original lobby resource, retained until the user chooses normal picture content.
+    case lobbyDefault(String)
 }
 
 private struct PictureSelectionPlacement: Codable {
@@ -522,6 +529,8 @@ private struct MazeRecord {
     /// explicitly changed since -- decodeIfPresent-or-empty, same as
     /// every other field added after pictures/mirrors first shipped.
     var pictureImageSelections: [PictureSelectionPlacement] = []
+    // Written with Floor 1 so a deliberately deleted default is never seeded again.
+    var lobbyPicturesIntegrated = false
     var mirrors: [PicturePlacement] = []
     /// Which of this floor's cells hold a manually-placed "Wall Top
     /// Light" (Suzanimator lighting pass, Sept 19) -- the project's
@@ -532,6 +541,7 @@ private struct MazeRecord {
     /// which wall it mounts on. Same decodeIfPresent-or-empty
     /// treatment, no legacy on-disk shape to migrate.
     var fluorescentLights: [FluorescentPlacement] = []
+    var hiddenNavigationArrows: [GridCoordinate] = []
     var pictureLights: [PicturePlacement] = []
     var wallLights: [PicturePlacement] = []
     var lightBrightness: [LightBrightness] = []
@@ -551,6 +561,17 @@ private struct MazeRecord {
     /// through "an ordinary door," reusing the bathroom door's proven
     /// interaction model exactly.
     var windowRooms: [WindowRoomPlacement] = []
+    /// Sept 27 (first generic-room-door authoring pass): a fully
+    /// operable, ordinary interior room door between two ALREADY-OPEN
+    /// cells -- same coord+direction shape as bathroomDoors/mirrors
+    /// (nothing per-instance to store beyond which cell/wall), and the
+    /// SAME swinging-door interaction model (TapNavigationController
+    /// gates movement through it), reusing bathroomDoors/windowRooms'
+    /// proven machinery exactly. Deliberately its own type/name, never
+    /// to be confused with RoomDoorPlacement (the existing office/mail
+    /// door, which stays decorative and requires a SOLID wall behind
+    /// it -- unrelated and unchanged by this).
+    var roomEntranceDoors: [RoomEntranceDoorPlacement] = []
     /// Floor 7's aptitude-test terminal (and any future floor's) --
     /// same coord+direction shape as mirrors/pictures, reused rather
     /// than a dedicated placement type since there's nothing else
@@ -639,7 +660,7 @@ private struct MazeRecord {
 
 extension MazeRecord: Codable {
     enum CodingKeys: String, CodingKey {
-        case fluorescentLights, pictureLights, lightBrightness, pictureImageSelections, mirrors, wallLights, bathroomDoors, windowRooms, fires, extinguishers, photoBooths, ticTacToeTerminals, shellGameStations, rockPaperScissorsTerminals, higherLowerTerminals, fiveCardDrawTerminals, simonTerminals, hangmanTerminals, connectFourTerminals, checkersTerminals, woidleTerminals, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, ceilingVisibleFixture, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, wallTexture, floorTexture, ceilingTexture, roomDoors, itemRooms, mailAddresses
+        case lobbyPicturesIntegrated, fluorescentLights, hiddenNavigationArrows, pictureLights, lightBrightness, pictureImageSelections, mirrors, wallLights, bathroomDoors, windowRooms, roomEntranceDoors, fires, extinguishers, photoBooths, ticTacToeTerminals, shellGameStations, rockPaperScissorsTerminals, higherLowerTerminals, fiveCardDrawTerminals, simonTerminals, hangmanTerminals, connectFourTerminals, checkersTerminals, woidleTerminals, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, ceilingVisibleFixture, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, wallTexture, floorTexture, ceilingTexture, roomDoors, itemRooms, mailAddresses
     }
 
     // Hand-written so older mazes.json shapes still load cleanly
@@ -676,11 +697,13 @@ extension MazeRecord: Codable {
         mirrors = try container.decodeIfPresent([PicturePlacement].self, forKey: .mirrors) ?? []
         lightBrightness = try container.decodeIfPresent([LightBrightness].self, forKey: .lightBrightness) ?? []
         fluorescentLights = try container.decodeIfPresent([FluorescentPlacement].self, forKey: .fluorescentLights) ?? []
+        hiddenNavigationArrows = try container.decodeIfPresent([GridCoordinate].self, forKey: .hiddenNavigationArrows) ?? []
         pictureLights = try container.decodeIfPresent([PicturePlacement].self, forKey: .pictureLights) ?? []
         wallLights = try container.decodeIfPresent([PicturePlacement].self, forKey: .wallLights) ?? []
         pictureImageSelections = try container.decodeIfPresent([PictureSelectionPlacement].self, forKey: .pictureImageSelections) ?? []
         bathroomDoors = try container.decodeIfPresent([PicturePlacement].self, forKey: .bathroomDoors) ?? []
         windowRooms = try container.decodeIfPresent([WindowRoomPlacement].self, forKey: .windowRooms) ?? []
+        roomEntranceDoors = try container.decodeIfPresent([RoomEntranceDoorPlacement].self, forKey: .roomEntranceDoors) ?? []
         ticTacToeTerminals = try container.decodeIfPresent([PicturePlacement].self, forKey: .ticTacToeTerminals) ?? []
         shellGameStations = try container.decodeIfPresent([PicturePlacement].self, forKey: .shellGameStations) ?? []
         rockPaperScissorsTerminals = try container.decodeIfPresent([PicturePlacement].self, forKey: .rockPaperScissorsTerminals) ?? []
@@ -705,6 +728,50 @@ extension MazeRecord: Codable {
         wallTexture = try container.decodeIfPresent(String.self, forKey: .wallTexture)
         floorTexture = try container.decodeIfPresent(String.self, forKey: .floorTexture)
         ceilingTexture = try container.decodeIfPresent(String.self, forKey: .ceilingTexture)
+        lobbyPicturesIntegrated = try container.decodeIfPresent(Bool.self, forKey: .lobbyPicturesIntegrated) ?? false
+        integrateLegacyLobbyPictures()
+    }
+
+    /// Runs on each independently decoded legacy record, including local overrides.
+    /// Existing authored wall content wins; only the three formerly hardcoded defaults
+    /// are seeded, and the marker survives even when all three pictures are deleted.
+    private mutating func integrateLegacyLobbyPictures() {
+        guard id == 1, !lobbyPicturesIntegrated else { return }
+        lobbyPicturesIntegrated = true
+        // Resolve older cell-only choices against their ORIGINAL pictures before adding
+        // a second face at (13,7), otherwise that choice could migrate to the new face.
+        for index in pictureImageSelections.indices where pictureImageSelections[index].direction == nil {
+            let coord = pictureImageSelections[index].coord
+            pictureImageSelections[index].direction = pictures.last(where: { $0.coord == coord })?.direction
+        }
+        let defaults: [(GridCoordinate, Direction, String)] = [
+            (.init(row: 13, col: 7), .west, "lobby-outside"),
+            (.init(row: 11, col: 7), .west, "lobby-front-desk"),
+            (.init(row: 13, col: 7), .east, "lobby-plaque")
+        ]
+        let wallFixtures = mirrors + wallLights + bathroomDoors
+        let terminals = ticTacToeTerminals + shellGameStations + rockPaperScissorsTerminals
+            + higherLowerTerminals + fiveCardDrawTerminals + simonTerminals
+            + hangmanTerminals + connectFourTerminals + checkersTerminals + woidleTerminals
+        for (coord, direction, resource) in defaults {
+            let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+            guard cells.contains(coord), !cells.contains(neighbor),
+                  !pictures.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !wallFixtures.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !terminals.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !extinguishers.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !windowRooms.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !roomEntranceDoors.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !floorMaps.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !missionSigns.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !roomDoors.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !photoBooths.contains(where: { $0.coord == coord && $0.direction == direction }),
+                  !destinations.contains(where: { $0.coord == coord }) else { continue }
+            pictures.append(PictureSizePlacement(coord: coord, direction: direction, size: .lobbyOriginal))
+            if !pictureImageSelections.contains(where: { $0.coord == coord && ($0.direction == nil || $0.direction == direction) }) {
+                pictureImageSelections.append(PictureSelectionPlacement(coord: coord, selection: .lobbyDefault(resource), direction: direction))
+            }
+        }
     }
 
     // Writing this by hand too: CodingKeys carries an extra
@@ -719,6 +786,7 @@ extension MazeRecord: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        if id == 1 { try container.encode(lobbyPicturesIntegrated, forKey: .lobbyPicturesIntegrated) }
         try container.encode(cells, forKey: .cells)
         try container.encodeIfPresent(nextMazeID, forKey: .nextMazeID)
         try container.encode(objects, forKey: .objects)
@@ -730,12 +798,16 @@ extension MazeRecord: Codable {
         try container.encode(missionSigns, forKey: .missionSigns)
         try container.encode(mirrors, forKey: .mirrors)
         try container.encode(fluorescentLights, forKey: .fluorescentLights)
+        if !hiddenNavigationArrows.isEmpty {
+            try container.encode(hiddenNavigationArrows, forKey: .hiddenNavigationArrows)
+        }
         try container.encode(pictureLights, forKey: .pictureLights)
         try container.encode(wallLights, forKey: .wallLights)
         try container.encode(pictureImageSelections, forKey: .pictureImageSelections)
         try container.encode(lightBrightness, forKey: .lightBrightness)
         try container.encode(bathroomDoors, forKey: .bathroomDoors)
         try container.encode(windowRooms, forKey: .windowRooms)
+        try container.encode(roomEntranceDoors, forKey: .roomEntranceDoors)
         try container.encode(ticTacToeTerminals, forKey: .ticTacToeTerminals)
         try container.encode(shellGameStations, forKey: .shellGameStations)
         try container.encode(rockPaperScissorsTerminals, forKey: .rockPaperScissorsTerminals)
@@ -826,6 +898,16 @@ private enum MazeLibrary {
 
     static func clearSaved(_ id: Int) {
         setSavedOverrideIDs(savedOverrideIDs().subtracting([id]))
+    }
+
+    /// Sept 27 (Settings "Reset All Floors to Defaults"): the whole-
+    /// library counterpart to clearSaved(_:) just above -- drops EVERY
+    /// floor's override eligibility in a single UserDefaults write,
+    /// rather than looping clearSaved() per id (same end result; this
+    /// just makes the "reset everything" intent explicit at the call
+    /// site and touches storage once).
+    static func clearAllSaved() {
+        setSavedOverrideIDs([])
     }
 
     /// Bundled floors, with any explicitly-SAVEd floor's entry replaced
@@ -1032,6 +1114,15 @@ final class MazeStore: ObservableObject {
     /// ceiling light/fire.
     @Published private(set) var lightBrightness: [LightBrightness] = []
     @Published private(set) var fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:]
+    /// Sept 27 (Auto Lights preserve-manual fix): which coords in
+    /// fluorescentLights above were placed BY Auto Lights, not by hand
+    /// -- read by DecoratorState.autoLightsCurrentFloor's reset step so
+    /// regenerating only clears fixtures it created itself, and never a
+    /// manually authored one. Populated from FluorescentPlacement.
+    /// isAutoGenerated on every load, written back out on every save,
+    /// cleared everywhere fluorescentLights itself is cleared, and
+    /// carried by the same undo stack -- never a parallel save file.
+    @Published private(set) var autoGeneratedFluorescentCoords: Set<GridCoordinate> = []
     /// Sept 23 (ceiling light coexistence): which fixture renders its
     /// geometry at a coordinate that has BOTH a spotlight and a
     /// fluorescent authored -- see CeilingVisibleFixturePlacement's own
@@ -1048,6 +1139,8 @@ final class MazeStore: ObservableObject {
     /// wall it's on), which silently capped a cell at one lit display
     /// ever. A Set<WallFace> lets each wall face carry its own
     /// independent light. See canPlacePictureLight's own doc comment.
+    /// Absence preserves the existing intersection-arrow rules.
+    @Published private(set) var hiddenNavigationArrows: Set<GridCoordinate> = []
     @Published private(set) var pictureLights: Set<WallFace> = []
     @Published private(set) var wallLights: [GridCoordinate: Direction] = [:]
     /// This floor's bathroom door(s) -- coord is the hallway-side
@@ -1063,6 +1156,13 @@ final class MazeStore: ObservableObject {
     /// exterior window wall and which view asset it shows. See
     /// WindowRoomPlacement's own doc comment.
     @Published private(set) var windowRooms: [GridCoordinate: WindowRoomPlacement] = [:]
+    /// This floor's generic Room Entrance door(s) -- coord is the
+    /// hallway-side cell the door is mounted in (same key convention
+    /// as bathroomDoors/windowRooms), direction is which wall.
+    /// TapNavigationController reads this (constructor-injected, same
+    /// as bathroomDoors) to decide which cell boundaries start closed.
+    /// See placeRoomEntranceDoor's own doc comment for the full story.
+    @Published private(set) var roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:]
     /// Floor 7's aptitude-test terminal (and any future floor's) --
     /// same coord+direction shape as mirrors, see MazeRecord's own doc
     /// comment. At most one per floor for now.
@@ -1228,6 +1328,91 @@ final class MazeStore: ObservableObject {
         decoration.save(to: cabDecorationDefaults)
     }
 
+    /// Sept 26 (Decorate-mode elevator pictures): the elevator-poster
+    /// counterpart to setPictureImageSelection above, for the cab's 3
+    /// built-in posters -- same "just update the persisted selection,
+    /// no live material write of its own" shape. Two separate methods
+    /// (rather than one taking a "which surface" enum) deliberately
+    /// keeps this file from taking on a dependency on any
+    /// DecoratorMode/TapNavigationController type -- MazeStore.swift
+    /// has never referenced either file's types and this preserves
+    /// that. ContentView's updateUIView diffs elevatorCabDecoration.
+    /// backArtwork/sideArtwork the same way it already diffs
+    /// pictureImageSelections, applying the live SceneKit material
+    /// swap there via TapNavigationController.applyElevatorPosterImage.
+    func setElevatorBackArtwork(_ selection: PictureImageSelection?) {
+        var decoration = elevatorCabDecoration
+        decoration.backArtwork = selection
+        setElevatorCabDecoration(decoration)
+    }
+
+    func setElevatorSideArtwork(_ selection: PictureImageSelection?) {
+        var decoration = elevatorCabDecoration
+        decoration.sideArtwork = selection
+        setElevatorCabDecoration(decoration)
+    }
+
+    /// Sept 26 (third elevator poster, right wall): same shape as
+    /// setElevatorBackArtwork/setElevatorSideArtwork above -- a third
+    /// method rather than folding all 3 into one "which surface" enum
+    /// taker, for the exact same reason those two are separate: keeps
+    /// this file free of any dependency on TapNavigationController's
+    /// or DecoratorMode's own poster-surface types.
+    func setElevatorSideRightArtwork(_ selection: PictureImageSelection?) {
+        var decoration = elevatorCabDecoration
+        decoration.sideRightArtwork = selection
+        setElevatorCabDecoration(decoration)
+    }
+
+    // Sept 26 ("Keep This Picture"): NOT part of MazeRecord / floor
+    // save/reset, and NOT part of ElevatorCabDecoration's own
+    // UserDefaults persistence -- purely an in-memory record of which
+    // PictureImageSelection identity is CURRENTLY resolved onto each
+    // frame's live material right now, refreshed on every scene/floor
+    // build (HallwayScene.build's new reportPictureIdentity/
+    // reportElevatorBackIdentity/reportElevatorSideIdentity closures,
+    // wired up in ContentView) or live Decorator ADD (DecoratorState.
+    // addPicture). This is scratch state, safe to overwrite on every
+    // rebuild, never itself saved -- it is what lets "Keep This
+    // Picture" promote a random pick into the real persisted selection
+    // (setPictureImageSelection/setElevatorBackArtwork/
+    // setElevatorSideArtwork) without re-deriving or re-fetching
+    // anything. Lives here (not on TapNavigationController or
+    // ContentView's Coordinator) because it must be reachable from
+    // BOTH Play mode (PictureChangeMenuHost/ElevatorPictureChangeMenuHost,
+    // which already hold a MazeStore) and Decorate mode (DecoratorState/
+    // DecoratorOverlay, which already hold the SAME MazeStore instance)
+    // with no new cross-file bridge. Two separate elevator properties
+    // (not one dict keyed by a "which poster" enum) for the same reason
+    // setElevatorBackArtwork/setElevatorSideArtwork above are two
+    // methods rather than one: keeps this file from taking on a
+    // dependency on any DecoratorMode type.
+    @Published private(set) var currentPictureIdentity: [WallFace: PictureImageSelection] = [:]
+    @Published private(set) var currentElevatorBackIdentity: PictureImageSelection?
+    @Published private(set) var currentElevatorSideIdentity: PictureImageSelection?
+    /// Sept 26 (third elevator poster, right wall): same scratch,
+    /// non-persisted "what's currently resolved onto this poster's
+    /// live material" bookkeeping as currentElevatorBackIdentity/
+    /// currentElevatorSideIdentity above -- see their shared doc
+    /// comment just above this property group.
+    @Published private(set) var currentElevatorSideRightIdentity: PictureImageSelection?
+
+    func reportCurrentPictureIdentity(_ selection: PictureImageSelection, at face: WallFace) {
+        currentPictureIdentity[face] = selection
+    }
+
+    func reportCurrentElevatorBackIdentity(_ selection: PictureImageSelection) {
+        currentElevatorBackIdentity = selection
+    }
+
+    func reportCurrentElevatorSideIdentity(_ selection: PictureImageSelection) {
+        currentElevatorSideIdentity = selection
+    }
+
+    func reportCurrentElevatorSideRightIdentity(_ selection: PictureImageSelection) {
+        currentElevatorSideRightIdentity = selection
+    }
+
     init(cabDecorationDefaults: UserDefaults = .standard) {
         self.cabDecorationDefaults = cabDecorationDefaults
         self.elevatorCabDecoration = ElevatorCabDecoration.load(from: cabDecorationDefaults)
@@ -1261,11 +1446,14 @@ final class MazeStore: ObservableObject {
             missionSigns = Dictionary(uniqueKeysWithValues: (loaded[startID]?.missionSigns ?? []).map { ($0.coord, $0.direction) })
             mirrors = Dictionary(uniqueKeysWithValues: (loaded[startID]?.mirrors ?? []).map { ($0.coord, $0.direction) })
             fluorescentLights = Dictionary(uniqueKeysWithValues: (loaded[startID]?.fluorescentLights ?? []).map { ($0.coord, $0.orientation) })
+            autoGeneratedFluorescentCoords = Set((loaded[startID]?.fluorescentLights ?? []).filter { $0.isAutoGenerated == true }.map(\.coord))
             ceilingVisibleFixture = Dictionary(uniqueKeysWithValues: (loaded[startID]?.ceilingVisibleFixture ?? []).map { ($0.coord, $0.kind) })
+            hiddenNavigationArrows = Set(loaded[startID]?.hiddenNavigationArrows ?? []).intersection(loaded[startID]?.cells ?? [])
             pictureLights = Set((loaded[startID]?.pictureLights ?? []).map { WallFace(coord: $0.coord, direction: $0.direction) })
             wallLights = Dictionary(uniqueKeysWithValues: (loaded[startID]?.wallLights ?? []).map { ($0.coord, $0.direction) })
             bathroomDoors = Dictionary(uniqueKeysWithValues: (loaded[startID]?.bathroomDoors ?? []).map { ($0.coord, $0.direction) })
             windowRooms = Dictionary(uniqueKeysWithValues: (loaded[startID]?.windowRooms ?? []).map { ($0.coord, $0) })
+            roomEntranceDoors = Dictionary(uniqueKeysWithValues: (loaded[startID]?.roomEntranceDoors ?? []).map { ($0.coord, $0) })
             ticTacToeTerminals = Dictionary(uniqueKeysWithValues: (loaded[startID]?.ticTacToeTerminals ?? []).map { ($0.coord, $0.direction) })
             shellGameStations = Dictionary(uniqueKeysWithValues: (loaded[startID]?.shellGameStations ?? []).map { ($0.coord, $0.direction) })
             rockPaperScissorsTerminals = Dictionary(uniqueKeysWithValues: (loaded[startID]?.rockPaperScissorsTerminals ?? []).map { ($0.coord, $0.direction) })
@@ -1277,6 +1465,10 @@ final class MazeStore: ObservableObject {
             checkersTerminals = Dictionary(uniqueKeysWithValues: (loaded[startID]?.checkersTerminals ?? []).map { ($0.coord, $0.direction) })
             woidleTerminals = Dictionary(uniqueKeysWithValues: (loaded[startID]?.woidleTerminals ?? []).map { ($0.coord, $0.direction) })
             pictures = Dictionary(uniqueKeysWithValues: (loaded[startID]?.pictures ?? []).map { (WallFace(coord: $0.coord, direction: $0.direction), $0.size ?? .standard) })
+            // Floor 1 now has persisted picture content at cold launch, not only on floor switches.
+            if startID == 1, let record = loaded[startID] {
+                pictureImageSelections = Self.wallFacedPictureImageSelections(record.pictureImageSelections, pictures: record.pictures)
+            }
             fires = Set((loaded[startID]?.fires ?? []).map(\.coord))
             extinguishers = Dictionary(uniqueKeysWithValues: (loaded[startID]?.extinguishers ?? []).map { ($0.coord, $0.direction) })
             photoBooths = Dictionary(uniqueKeysWithValues: (loaded[startID]?.photoBooths ?? []).map { ($0.coord, ($0.direction, $0.expression)) })
@@ -1306,7 +1498,9 @@ final class MazeStore: ObservableObject {
             floorMaps = [:]
             spotlights = []
         fluorescentLights = [:]
+        autoGeneratedFluorescentCoords = []
         ceilingVisibleFixture = [:]
+        hiddenNavigationArrows = []
         pictureLights = []
         lightBrightness = []
             missionSigns = [Self.missionCoordinate: .south]
@@ -1315,6 +1509,7 @@ final class MazeStore: ObservableObject {
             mirrors = [:]
             wallLights = [:]
             windowRooms = [:]
+            roomEntranceDoors = [:]
             ticTacToeTerminals = [:]
             shellGameStations = [:]
             rockPaperScissorsTerminals = [:]
@@ -1525,13 +1720,7 @@ final class MazeStore: ObservableObject {
     /// picks it up the same way a wall edit does, no separate sync
     /// path needed.
     func placeObject(_ kind: ObjectKind, at coord: GridCoordinate) {
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 20, object-placement trace) -- remove after root cause is found.
-        NSLog("%@", "[PLACEDIAG] MazeStore.placeObject(\(kind), at: \(coord)) called; cells.contains(coord)=\(cells.contains(coord)); versionBefore=\(version)")
-        guard cells.contains(coord) else {
-            NSLog("%@", "[PLACEDIAG] MazeStore.placeObject: coord \(coord) NOT in cells -- REJECTED, nothing mutated")
-            return
-        }
-        NSLog("%@", "[PLACEDIAG] OBJECTS BEFORE=\(objects)")
+        guard cells.contains(coord) else { return }
         objects[coord] = kind
         if kind == .envelope || kind == .key {
             assignUnassignedRoomItems()
@@ -1539,7 +1728,6 @@ final class MazeStore: ObservableObject {
             itemRooms[coord] = nil
         }
         version += 1
-        NSLog("%@", "[PLACEDIAG] MazeStore.placeObject: DONE -- objects[\(coord)]=\(String(describing: objects[coord])) versionAfter=\(version)")
     }
 
     func removeObject(at coord: GridCoordinate) {
@@ -1658,7 +1846,8 @@ final class MazeStore: ObservableObject {
               // Sept 22 (wall-face authoring expansion): face-specific --
               // a map/picture/mirror on a DIFFERENT wall of this cell no
               // longer blocks a door on this one.
-              floorMaps[coord] != direction, !hasPicture(direction, at: coord), mirrors[coord] != direction, destinations[coord] == nil else { return }
+              floorMaps[coord] != direction, !hasPicture(direction, at: coord), mirrors[coord] != direction, destinations[coord] == nil,
+              roomEntranceDoors[coord]?.direction != direction else { return }
         let number = roomDoors[coord]?.roomNumber ?? (max(roomNumbers.max() ?? (currentMazeID * 100), itemRooms.values.max() ?? (currentMazeID * 100)) + 1)
         roomDoors[coord] = RoomDoorPlacement(coord: coord, direction: direction, roomNumber: number, cashReward: decorative ? nil : (roomDoors[coord]?.cashReward ?? (missionObjectKind == .key ? 100 : nil)), isDecorative: decorative)
         // Decorative doors are never mail targets, so they never consume
@@ -1676,14 +1865,67 @@ final class MazeStore: ObservableObject {
     /// placeRoomDoor above deliberately keeps its own looser,
     /// unchanged guard; this new check exists for the Decorator ADD
     /// path only.
+    /// Sept 26 (elevator-face-specific Decorator eligibility): the
+    /// wall-mounted authored kinds below used to blanket-exclude the
+    /// ENTIRE elevator/end cell -- canPlacePicture/canPlaceRoomDoor via
+    /// `coord != endCoordinate` (floor-aware, but still whole-cell),
+    /// canPlaceMirror/canPlaceWallLight/canPlacePhotoBooth/
+    /// canPlaceExtinguisher via `coord != Self.elevatorCoordinate` (a
+    /// FIXED Floor-1-only constant -- silently never true on floors 2+,
+    /// since those floors' elevator actually sits at
+    /// floor2ElevatorCoordinate, so this exclusion was already dead on
+    /// every floor but Floor 1, physically confirmed as the Floor-3
+    /// (10,6) North repro: Picture/Door wrongly disabled by the
+    /// whole-cell endCoordinate check, Mirror/Extinguisher/Photo Booth
+    /// wrongly ALLOWED -- including directly on the real elevator-door
+    /// face -- by the stale constant never matching). Both were
+    /// whole-CELL checks; only the wall the doors actually mount on
+    /// needs to stay off-limits (Eddie's "protect the elevator FACE,
+    /// not the elevator CELL" principle) -- every other genuine empty
+    /// face of that same cell is an ordinary wall like any other.
+    ///
+    /// This derives that one true face from pure grid data, NOT a
+    /// hardcoded compass direction: same dead-end-cap-preferred,
+    /// first-solid-wall-otherwise formula HallwayScene.build's own
+    /// elevatorMountDirection closure uses when it actually builds the
+    /// elevator doors, so this can never drift from what the 3D scene
+    /// puts there. Every canPlaceXXX below now asks this face-specific
+    /// question instead of excluding the whole cell.
+    private func hasWall(_ direction: Direction, at coord: GridCoordinate) -> Bool {
+        let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+        return !cells.contains(neighbor)
+    }
+
+    /// nil only when the floor has no cells at all (matches
+    /// endCoordinate's own nil case) -- the building's one elevator is
+    /// always exactly at endCoordinate (Eddie, Sept 5's one-elevator-
+    /// for-the-building design), so no coordinate parameter is needed.
+    var elevatorMountDirection: Direction? {
+        guard let coord = endCoordinate else { return nil }
+        let solidDirections = Direction.allCases.filter { hasWall($0, at: coord) }
+        let openDirections = Direction.allCases.filter { !hasWall($0, at: coord) }
+        let capSide: Direction? = openDirections.count == 1 ? openDirections[0].opposite : nil
+        return capSide ?? solidDirections.first
+    }
+
+    /// True only for the ONE wall face the elevator doors actually
+    /// mount on -- false for every other face of the elevator cell,
+    /// and false at any other coordinate entirely.
+    func isElevatorDoorFace(_ direction: Direction, at coord: GridCoordinate) -> Bool {
+        guard coord == endCoordinate else { return false }
+        return direction == elevatorMountDirection
+    }
+
     func canPlaceRoomDoor(_ direction: Direction, at coord: GridCoordinate) -> Bool {
         let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
         return cells.contains(coord) && !cells.contains(neighbor) &&
             roomDoors[coord] == nil &&
-            // Floor-aware elevator-cell exclusion, same as the Sept 24
-            // canPlacePicture fix (floors 2+ host the elevator at
-            // endCoordinate, not the legacy floor-1 elevatorCoordinate).
-            coord != endCoordinate && coord != Self.missionCoordinate &&
+            // Sept 26: face-specific elevator-door exclusion (see
+            // isElevatorDoorFace's own doc comment) -- narrowed from a
+            // whole-cell endCoordinate exclusion, which wrongly
+            // disabled Door on every OTHER genuinely empty face of the
+            // elevator cell too.
+            !isElevatorDoorFace(direction, at: coord) && coord != Self.missionCoordinate &&
             // Face-specific claims -- a fixture on a DIFFERENT wall of
             // this cell never blocks a door on this one.
             floorMaps[coord] != direction && !hasPicture(direction, at: coord) && mirrors[coord] != direction &&
@@ -1735,6 +1977,7 @@ final class MazeStore: ObservableObject {
               // same reasoning as placeRoomDoor's own guard just above.
               bathroomDoors[coord] != direction, roomDoors[coord]?.direction != direction, mirrors[coord] != direction,
               floorMaps[coord] != direction, !hasPicture(direction, at: coord), destinations[coord] == nil,
+              roomEntranceDoors[coord]?.direction != direction,
               let windowDirection = windowExteriorDirection(for: neighbor) else { return }
         windowRooms[coord] = WindowRoomPlacement(coord: coord, direction: direction, windowDirection: windowDirection, viewAssetID: windowRooms[coord]?.viewAssetID ?? "nycPlaceholder")
         version += 1
@@ -1742,6 +1985,78 @@ final class MazeStore: ObservableObject {
 
     func removeWindowRoom(at coord: GridCoordinate) {
         guard windowRooms.removeValue(forKey: coord) != nil else { return }
+        version += 1
+    }
+
+    /// Sept 27 (first generic-room-door authoring pass): places a
+    /// fully operable Room Entrance door at `coord`, opening
+    /// `direction` into `neighbor` -- reusing the EXACT swinging-door
+    /// machinery bathroomDoors/windowRooms already proved out
+    /// (TapNavigationController gates movement through it the same
+    /// way; HallwayScene reuses makeBathroomDoorPanel with no sign and
+    /// no window). Unlike placeWindowRoom, this has NO perimeter/
+    /// exterior-window requirement -- both `coord` (the hallway side)
+    /// and `neighbor` (the room side) need only already be ordinary
+    /// open cells, since Eddie is authoring the room himself, cell by
+    /// cell, in this first pass ("ROOMS ARE JUST ORDINARY GROUPS OF
+    /// GRID CELLS. A DOOR IS THE OPERABLE BOUNDARY BETWEEN THEM.").
+    /// If `neighbor` isn't already open, this is a clean rejection --
+    /// returns, writes nothing -- never a fake door with solid rock
+    /// behind it. Face-exclusivity guards mirror placeWindowRoom's own
+    /// (plus a reciprocal roomEntranceDoors check on THOSE placers, so
+    /// two different door kinds can never silently claim the same
+    /// wall face). Deliberately its own type -- NOT RoomDoorPlacement
+    /// (the office/mail door: decorative, requires a solid wall behind
+    /// it, keeps its existing mail/knock behavior completely
+    /// untouched by this).
+    /// Sept 27 (Decorator Room Entrance authoring): the boolean half of
+    /// placeRoomEntranceDoor's own guard, split out the same way
+    /// canPlaceMirror/placeMirror already are just above -- so BOTH
+    /// authoring routes (this 2D Grid Editor placer AND
+    /// DecoratorState.canAddRoomEntranceDoorAtCurrentCell, the new "+"
+    /// -> Door Entry menu item's enable check) read the exact same
+    /// condition list instead of two copies that could silently drift
+    /// apart.
+    func canPlaceRoomEntranceDoor(_ direction: Direction, at coord: GridCoordinate) -> Bool {
+        let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+        return cells.contains(coord) && cells.contains(neighbor) &&
+            coord != Self.elevatorCoordinate && coord != Self.missionCoordinate &&
+            bathroomDoors[coord] != direction && windowRooms[coord]?.direction != direction &&
+            roomDoors[coord]?.direction != direction && mirrors[coord] != direction &&
+            floorMaps[coord] != direction && !hasPicture(direction, at: coord) && destinations[coord] == nil
+    }
+
+    func placeRoomEntranceDoor(_ direction: Direction, at coord: GridCoordinate) {
+        guard canPlaceRoomEntranceDoor(direction, at: coord) else { return }
+        roomEntranceDoors[coord] = RoomEntranceDoorPlacement(coord: coord, direction: direction, style: roomEntranceDoors[coord]?.style ?? .plain, textureName: roomEntranceDoors[coord]?.textureName)
+        version += 1
+    }
+
+    func removeRoomEntranceDoor(at coord: GridCoordinate) {
+        guard roomEntranceDoors.removeValue(forKey: coord) != nil else { return }
+        version += 1
+    }
+
+    /// Sept 27 (door cosmetics pass): change an EXISTING Room
+    /// Entrance's style/texture in place, keeping its coord+direction
+    /// exactly as they were -- these are the only two mutators the new
+    /// Decorator "Texture"/"Style" controls call, never
+    /// placeRoomEntranceDoor (which is placement, not cosmetics, and
+    /// would require re-deriving direction from the player's current
+    /// facing). No-op if the door doesn't exist or is already set to
+    /// the requested value, matching every other setter's own
+    /// no-redundant-version-bump convention in this file.
+    func setRoomEntranceDoorStyle(_ style: RoomEntranceDoorStyle, at coord: GridCoordinate) {
+        guard var placement = roomEntranceDoors[coord], placement.style != style else { return }
+        placement.style = style
+        roomEntranceDoors[coord] = placement
+        version += 1
+    }
+
+    func setRoomEntranceDoorTexture(_ textureName: String?, at coord: GridCoordinate) {
+        guard var placement = roomEntranceDoors[coord], placement.textureName != textureName else { return }
+        placement.textureName = textureName
+        roomEntranceDoors[coord] = placement
         version += 1
     }
 
@@ -1782,7 +2097,14 @@ final class MazeStore: ObservableObject {
     func canPlaceMirror(_ direction: Direction, at coord: GridCoordinate) -> Bool {
         let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
         return cells.contains(coord) && !cells.contains(neighbor) &&
-            coord != Self.elevatorCoordinate && roomDoors[coord]?.direction != direction &&
+            // Sept 26: face-specific elevator-door exclusion (see
+            // isElevatorDoorFace's own doc comment) -- was `coord !=
+            // Self.elevatorCoordinate`, a FIXED Floor-1-only constant
+            // that silently never matched floors 2+'s real elevator
+            // cell, so this exclusion was already dead everywhere but
+            // Floor 1 (and there, wrongly whole-cell instead of
+            // face-specific).
+            !isElevatorDoorFace(direction, at: coord) && roomDoors[coord]?.direction != direction &&
             // Sept 22 (wall-face authoring expansion): face-specific -- an object on a DIFFERENT wall of this cell no longer blocks this one.
             !hasPicture(direction, at: coord) && floorMaps[coord] != direction && destinations[coord] == nil &&
             missionSigns[coord] != direction
@@ -1821,7 +2143,9 @@ final class MazeStore: ObservableObject {
     func canPlaceWallLight(_ direction: Direction, at coord: GridCoordinate) -> Bool {
         let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
         return cells.contains(coord) && !cells.contains(neighbor) &&
-            coord != Self.elevatorCoordinate && roomDoors[coord]?.direction != direction &&
+            // Sept 26: same face-specific elevator-door fix as
+            // canPlaceMirror just above -- see isElevatorDoorFace.
+            !isElevatorDoorFace(direction, at: coord) && roomDoors[coord]?.direction != direction &&
             // Sept 22 (wall-face authoring expansion): face-specific -- an object on a DIFFERENT wall of this cell no longer blocks this one.
             !hasPicture(direction, at: coord) && floorMaps[coord] != direction && destinations[coord] == nil &&
             mirrors[coord] != direction && missionSigns[coord] != direction && wallLights[coord] == nil
@@ -1845,7 +2169,9 @@ final class MazeStore: ObservableObject {
     func canPlacePhotoBooth(_ direction: Direction, at coord: GridCoordinate) -> Bool {
         let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
         return cells.contains(coord) && !cells.contains(neighbor) &&
-            coord != Self.elevatorCoordinate && roomDoors[coord]?.direction != direction &&
+            // Sept 26: same face-specific elevator-door fix as
+            // canPlaceMirror above -- see isElevatorDoorFace.
+            !isElevatorDoorFace(direction, at: coord) && roomDoors[coord]?.direction != direction &&
             // Sept 22 (wall-face authoring expansion): face-specific -- an object on a DIFFERENT wall of this cell no longer blocks this one.
             !hasPicture(direction, at: coord) && floorMaps[coord] != direction && destinations[coord] == nil &&
             mirrors[coord] != direction && wallLights[coord] != direction && missionSigns[coord] != direction &&
@@ -1873,7 +2199,9 @@ final class MazeStore: ObservableObject {
     func canPlaceExtinguisher(_ direction: Direction, at coord: GridCoordinate) -> Bool {
         let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
         return cells.contains(coord) && !cells.contains(neighbor) &&
-            coord != Self.elevatorCoordinate && roomDoors[coord]?.direction != direction &&
+            // Sept 26: same face-specific elevator-door fix as
+            // canPlaceMirror above -- see isElevatorDoorFace.
+            !isElevatorDoorFace(direction, at: coord) && roomDoors[coord]?.direction != direction &&
             !hasPicture(direction, at: coord) && floorMaps[coord] != direction && destinations[coord] == nil &&
             mirrors[coord] != direction && wallLights[coord] != direction && missionSigns[coord] != direction &&
             photoBooths[coord]?.direction != direction && extinguishers[coord] == nil
@@ -1911,12 +2239,20 @@ final class MazeStore: ObservableObject {
         // empty, reachable ordinary wall -- showing an "Empty Wall" dialog
         // with Add Picture wrongly disabled (the exact Floor 2 repro),
         // while the TRUE floor-2 elevator cell (10,6) got no exclusion at
-        // all. endCoordinate already answers the floor-aware question
-        // (Floor 1 (10,7), floors 2+ (10,6)); nil only when the floor has
-        // no cells at all, which the cells.contains(coord) check above
-        // rejects regardless.
+        // all.
+        //
+        // Sept 26 (elevator-face-specific Decorator eligibility): fixed
+        // the Floor-2 case above, but was STILL a whole-CELL exclusion --
+        // physically confirmed on Floor 3 (10,6) North (a genuine empty
+        // face on the elevator cell, but not the actual door face)
+        // wrongly disabled. Narrowed to isElevatorDoorFace, which asks
+        // the same "is this THE elevator cell" question but additionally
+        // requires `direction` to be the one face the doors actually
+        // mount on (derived from grid data, matching HallwayScene.build's
+        // own elevatorMountDirection closure) -- every other face of the
+        // elevator cell is eligible like any ordinary wall.
         return cells.contains(coord) && !cells.contains(neighbor) &&
-            coord != endCoordinate && roomDoors[coord]?.direction != direction &&
+            !isElevatorDoorFace(direction, at: coord) && roomDoors[coord]?.direction != direction &&
             // Sept 22 (wall-face authoring expansion, Objective 3): every
             // check here is now face-specific -- a Picture, Map, Mirror,
             // Wall Light or Photo Booth on a DIFFERENT wall of this same
@@ -1936,7 +2272,6 @@ final class MazeStore: ObservableObject {
     /// unchanged with the 2-argument form.
     func placePicture(_ direction: Direction, at coord: GridCoordinate, size: PictureSize? = nil) {
         let face = WallFace(coord: coord, direction: direction)
-        NSLog("%@", "[PLACEDIAG] STORE PICTURE ENTER coord=\(coord) direction=\(direction) open=\(cells.contains(coord)) door=\(String(describing: roomDoors[coord])) mirror=\(String(describing: mirrors[coord])) before=\(String(describing: pictures[face])) version=\(version)")
         // Sept 22 (wall-face authoring expansion): face-specific, same as
         // canPlacePicture's own guard -- a door/mirror on a DIFFERENT wall
         // of this cell no longer blocks a Picture on THIS wall.
@@ -1944,7 +2279,6 @@ final class MazeStore: ObservableObject {
         let resolvedSize = size ?? pictures[face] ?? .standard
         pictures[face] = resolvedSize
         version += 1
-        NSLog("%@", "[PLACEDIAG] STORE PICTURE AFTER=\(String(describing: pictures[face])) version=\(version)")
     }
 
     /// Sept 22 (wall-face authoring expansion): now face-specific --
@@ -2055,6 +2389,14 @@ final class MazeStore: ObservableObject {
         fires.contains(coord)
     }
 
+    /// Visual authoring only; no movement/topology state is changed.
+    func setNavigationArrowsEnabled(_ enabled: Bool, at coord: GridCoordinate) {
+        guard cells.contains(coord), hiddenNavigationArrows.contains(coord) == enabled else { return }
+        if enabled { hiddenNavigationArrows.remove(coord) }
+        else { hiddenNavigationArrows.insert(coord) }
+        version += 1
+    }
+
     func setOpen(_ coord: GridCoordinate) {
         guard !cells.contains(coord) else { return }
         cells.insert(coord)
@@ -2063,6 +2405,7 @@ final class MazeStore: ObservableObject {
 
     func setClosed(_ coord: GridCoordinate) {
         guard cells.contains(coord) else { return }
+        hiddenNavigationArrows.remove(coord)
         cells.remove(coord)
         lightBrightness.removeAll { $0.coord == coord }
         objects.removeValue(forKey: coord) // a wall can't hold an object
@@ -2085,6 +2428,7 @@ final class MazeStore: ObservableObject {
         roomDoors.removeValue(forKey: coord)
         itemRooms.removeValue(forKey: coord)
         windowRooms.removeValue(forKey: coord)
+        roomEntranceDoors.removeValue(forKey: coord)
         version += 1
     }
 
@@ -2165,33 +2509,44 @@ final class MazeStore: ObservableObject {
     /// the grid editor closes, and internally by switchTo() before it
     /// loads a different floor in, so nothing painted is ever lost
     /// mid-session.
-    /// Set immediately before a `version` bump that comes from LOADING
-    /// floor content rather than editing it (switchTo(id:) finishing a
-    /// floor switch, resetCurrentFloorToDefault() restoring the
-    /// bundled default) -- consumed by the very next autosave via
-    /// autosaveAfterVersionChange(), regardless of how much later
-    /// SwiftUI's onChange(of: version) actually fires relative to the
-    /// synchronous function that set it. Every other version bump (an
-    /// editor mutation, undo(), clear()) leaves this false, so the
-    /// ordinary case still marks the edited floor as a persistent
-    /// local override -- the same effect the old manual SAVE button
-    /// used to require a separate tap for (Sept 20 autosave pass).
-    private(set) var versionChangeIsFloorLoad = false
+    /// Set to the exact post-increment `version` value produced by a
+    /// bump that comes from LOADING floor content rather than editing
+    /// it (switchTo(id:) finishing a floor switch,
+    /// resetCurrentFloorToDefault() restoring the bundled default).
+    /// Sept 27 (Floor 5 persistence-regression fix): this used to be a
+    /// plain Bool (versionChangeIsFloorLoad), set true and consumed by
+    /// the very next autosaveAfterVersionChange() call -- but that
+    /// "next call" is GridEditorView's own `.onChange(of: version)`,
+    /// which only exists/observes while the Grid Editor is actually on
+    /// screen. A floor switch during ordinary 3D play (the Grid Editor
+    /// closed) left that Bool stuck true indefinitely; the next time
+    /// the Grid Editor was opened and ANY genuine edit bumped version
+    /// again, autosaveAfterVersionChange() saw the stale true value and
+    /// wrongly treated that real edit as "just a load," flushing it to
+    /// mazes.json but never marking the floor as a saved override --
+    /// exactly the bug that made Floor 5's real, newly-authored edits
+    /// silently fail to survive a restart. Storing the exact version
+    /// number instead of a sticky flag closes that gap: the check below
+    /// asks "is `version` STILL EXACTLY the number a load bump
+    /// produced," which is automatically false the moment ANY later
+    /// bump (a real edit) moves version past it, no matter how much
+    /// later GridEditorView happens to next observe it.
+    private(set) var floorLoadVersion: Int?
 
     /// Sept 20 (autosave pass): the single place that decides what a
     /// `version` change means for persistence, called from
     /// GridEditorView's `.onChange(of: mazeStore.version)`. A floor
-    /// switch or a RESET already flagged their own version bump via
-    /// versionChangeIsFloorLoad above -- for those, just flush to disk
-    /// exactly as save() always has, and leave override status alone.
-    /// Anything else reaching here is a real, completed edit (a paint
-    /// stroke, an object placement/removal, undo, clear, a mission-text
-    /// change, etc.) and gets the same treatment the old manual SAVE
-    /// button gave: flush to disk AND mark this floor as a local
-    /// override, so it's the copy that loads back on the next launch.
+    /// switch or a RESET already recorded their own version bump via
+    /// floorLoadVersion above -- for those, just flush to disk exactly
+    /// as save() always has, and leave override status alone. Anything
+    /// else reaching here is a real, completed edit (a paint stroke, an
+    /// object placement/removal, undo, clear, a mission-text change,
+    /// etc.) and gets the same treatment the old manual SAVE button
+    /// gave: flush to disk AND mark this floor as a local override, so
+    /// it's the copy that loads back on the next launch.
     func autosaveAfterVersionChange() {
-        if versionChangeIsFloorLoad {
-            versionChangeIsFloorLoad = false
+        if floorLoadVersion == version {
+            floorLoadVersion = nil
             save()
         } else {
             saveCurrentFloorAsOverride()
@@ -2244,6 +2599,7 @@ final class MazeStore: ObservableObject {
         // contributing to the type-checker's failure, independent of
         // sheer expression size. See report for detail.
         let windowRoomPlacements = Array(windowRooms.values)
+        let roomEntranceDoorPlacements = Array(roomEntranceDoors.values)
         let ticTacToeTerminalPlacements = ticTacToeTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
         let shellGameStationPlacements = shellGameStations.map { PicturePlacement(coord: $0.key, direction: $0.value) }
         let rockPaperScissorsTerminalPlacements = rockPaperScissorsTerminals.map { PicturePlacement(coord: $0.key, direction: $0.value) }
@@ -2259,9 +2615,11 @@ final class MazeStore: ObservableObject {
         let photoBoothPlacements = photoBooths.map { PhotoBoothPlacement(coord: $0.key, direction: $0.value.direction, expression: $0.value.expression) }
         let roomDoorPlacements = Array(roomDoors.values)
         let itemRoomPlacements = itemRooms.map { RoomAssignment(coord: $0.key, roomNumber: $0.value) }
-        var record = MazeRecord(id: currentMazeID, cells: cellsArray, nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: spotlightsArray, missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrorPlacements, wallLights: wallLightPlacements, bathroomDoors: bathroomDoorPlacements, windowRooms: windowRoomPlacements, ticTacToeTerminals: ticTacToeTerminalPlacements, shellGameStations: shellGameStationPlacements, rockPaperScissorsTerminals: rockPaperScissorsTerminalPlacements, higherLowerTerminals: higherLowerTerminalPlacements, fiveCardDrawTerminals: fiveCardDrawTerminalPlacements, simonTerminals: simonTerminalPlacements, hangmanTerminals: hangmanTerminalPlacements, connectFourTerminals: connectFourTerminalPlacements, checkersTerminals: checkersTerminalPlacements, woidleTerminals: woidleTerminalPlacements, fires: firePlacements, extinguishers: extinguisherPlacements, photoBooths: photoBoothPlacements, roomDoors: roomDoorPlacements, itemRooms: itemRoomPlacements, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind, wallTexture: wallTexture, floorTexture: floorTexture, ceilingTexture: ceilingTexture)
-        record.fluorescentLights = fluorescentLights.map { FluorescentPlacement(coord: $0.key, orientation: $0.value) }
+        var record = MazeRecord(id: currentMazeID, cells: cellsArray, nextMazeID: nextMazeID, objects: placements, destinations: destinationPlacements, exitSigns: exitSignPlacements, floorMaps: floorMapPlacements, spotlights: spotlightsArray, missionSigns: missionSignPlacements, pictures: picturePlacements, mirrors: mirrorPlacements, wallLights: wallLightPlacements, bathroomDoors: bathroomDoorPlacements, windowRooms: windowRoomPlacements, roomEntranceDoors: roomEntranceDoorPlacements, ticTacToeTerminals: ticTacToeTerminalPlacements, shellGameStations: shellGameStationPlacements, rockPaperScissorsTerminals: rockPaperScissorsTerminalPlacements, higherLowerTerminals: higherLowerTerminalPlacements, fiveCardDrawTerminals: fiveCardDrawTerminalPlacements, simonTerminals: simonTerminalPlacements, hangmanTerminals: hangmanTerminalPlacements, connectFourTerminals: connectFourTerminalPlacements, checkersTerminals: checkersTerminalPlacements, woidleTerminals: woidleTerminalPlacements, fires: firePlacements, extinguishers: extinguisherPlacements, photoBooths: photoBoothPlacements, roomDoors: roomDoorPlacements, itemRooms: itemRoomPlacements, picturesUseCameraRoll: picturesUseCameraRoll, missionHeading: missionHeading, missionBody: missionBody, missionObjectKind: missionObjectKind, wallTexture: wallTexture, floorTexture: floorTexture, ceilingTexture: ceilingTexture)
+        record.lobbyPicturesIntegrated = currentMazeID == 1
+        record.fluorescentLights = fluorescentLights.map { FluorescentPlacement(coord: $0.key, orientation: $0.value, isAutoGenerated: autoGeneratedFluorescentCoords.contains($0.key)) }
         record.ceilingVisibleFixture = ceilingVisibleFixture.map { CeilingVisibleFixturePlacement(coord: $0.key, kind: $0.value) }
+        record.hiddenNavigationArrows = hiddenNavigationArrows.intersection(cells).sorted { ($0.row, $0.col) < ($1.row, $1.col) }
         record.pictureLights = pictureLights.map { PicturePlacement(coord: $0.coord, direction: $0.direction) }
         record.lightBrightness = lightBrightness
         record.pictureImageSelections = pictureImageSelections.map { PictureSelectionPlacement(coord: $0.key.coord, selection: $0.value, direction: $0.key.direction) }
@@ -2312,11 +2670,14 @@ final class MazeStore: ObservableObject {
         missionSigns = Dictionary(uniqueKeysWithValues: record.missionSigns.map { ($0.coord, $0.direction) })
         mirrors = Dictionary(uniqueKeysWithValues: record.mirrors.map { ($0.coord, $0.direction) })
             fluorescentLights = Dictionary(uniqueKeysWithValues: record.fluorescentLights.map { ($0.coord, $0.orientation) })
+            autoGeneratedFluorescentCoords = Set(record.fluorescentLights.filter { $0.isAutoGenerated == true }.map(\.coord))
             ceilingVisibleFixture = Dictionary(uniqueKeysWithValues: record.ceilingVisibleFixture.map { ($0.coord, $0.kind) })
+            hiddenNavigationArrows = Set(record.hiddenNavigationArrows).intersection(cells)
             pictureLights = Set(record.pictureLights.map { WallFace(coord: $0.coord, direction: $0.direction) })
             wallLights = Dictionary(uniqueKeysWithValues: record.wallLights.map { ($0.coord, $0.direction) })
         bathroomDoors = Dictionary(uniqueKeysWithValues: record.bathroomDoors.map { ($0.coord, $0.direction) })
         windowRooms = Dictionary(uniqueKeysWithValues: record.windowRooms.map { ($0.coord, $0) })
+        roomEntranceDoors = Dictionary(uniqueKeysWithValues: record.roomEntranceDoors.map { ($0.coord, $0) })
         ticTacToeTerminals = Dictionary(uniqueKeysWithValues: record.ticTacToeTerminals.map { ($0.coord, $0.direction) })
         shellGameStations = Dictionary(uniqueKeysWithValues: record.shellGameStations.map { ($0.coord, $0.direction) })
         rockPaperScissorsTerminals = Dictionary(uniqueKeysWithValues: record.rockPaperScissorsTerminals.map { ($0.coord, $0.direction) })
@@ -2342,16 +2703,54 @@ final class MazeStore: ObservableObject {
         floorTexture = record.floorTexture
         ceilingTexture = record.ceilingTexture
         // This version bump is RESET loading the bundled default back
-        // in, not a user edit -- see versionChangeIsFloorLoad's own
-        // comment. Without this, GridEditorView's autosave hook would
+        // in, not a user edit -- see floorLoadVersion's own comment.
+        // Without recording it, GridEditorView's autosave hook would
         // see the version change a moment later and immediately
         // re-mark this floor as having a local override again, right
         // after the clearSaved() below just removed that override --
         // silently undoing RESET the instant it finished.
-        versionChangeIsFloorLoad = true
         version += 1
+        floorLoadVersion = version
         MazeLibrary.clearSaved(currentMazeID)
         save() // re-derives the record from the now-reset live properties and writes it to mazes.json; harmless since this id is no longer in the override set, so loadAll() ignores it on next launch regardless
+    }
+
+    /// Settings' "Reset All Floors to Defaults" (Sept 27) -- the
+    /// whole-building counterpart to resetCurrentFloorToDefault()
+    /// just above, for the case Eddie described: DefaultMazes.json was
+    /// updated on one device, and another device (or the same one)
+    /// still has local overrides on some floors from before that
+    /// update, so every one of THOSE floors needs to stop overriding
+    /// the bundle in one operation instead of visiting each floor and
+    /// pressing RESET individually.
+    ///
+    /// Does NOT reinvent what "default" means: every non-current
+    /// overridden floor gets its in-memory library[] entry replaced
+    /// straight from MazeLibrary.loadBundledRecord(id:) -- the exact
+    /// same bundled-record source RESET already trusts -- so switching
+    /// to one of them later THIS SESSION shows the latest bundle
+    /// immediately, with no relaunch required (library[] is only
+    /// populated once at init from MazeLibrary.loadAll(), so merely
+    /// clearing the override-id list in UserDefaults would leave this
+    /// session's already-loaded copies stale until a restart). The
+    /// CURRENT floor is handled by calling resetCurrentFloorToDefault()
+    /// itself afterward -- not a second copy of its ~40-line field-by-
+    /// field assignment -- which also covers bumping version/
+    /// floorLoadVersion (so the reload can't immediately re-mark
+    /// itself as an override the instant GridEditorView's autosave
+    /// hook next sees the version change) and the final save() that
+    /// flushes everything to mazes.json. Running it unconditionally,
+    /// even if the current floor happened to have no override, is
+    /// harmless -- it's already what would be showing.
+    func resetAllFloorsToDefaults() {
+        let overriddenIDs = MazeLibrary.savedOverrideIDs()
+        for id in overriddenIDs where id != currentMazeID {
+            if let bundled = MazeLibrary.loadBundledRecord(id: id) {
+                library[id] = bundled
+            }
+        }
+        MazeLibrary.clearAllSaved()
+        resetCurrentFloorToDefault()
     }
 
     /// Eddie, Sept 8: "the output from that map save button should be
@@ -2387,13 +2786,7 @@ final class MazeStore: ObservableObject {
     /// way, just triggered from two different places.
     func switchTo(id: Int) {
         guard id != currentMazeID else { return }
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16): save() is a
-        // synchronous disk write -- timed here in case it's adding
-        // real latency between arrival and the scene actually
-        // swapping.
-        let arrivalDiagSaveStart = Date().timeIntervalSince1970
         save()
-        navLog("[ARRIVALDIAG] switchTo(id:) save() took \(String(format: "%.4f", Date().timeIntervalSince1970 - arrivalDiagSaveStart))s")
         currentMazeID = id
         #if DEBUG
         // Sept 22 (Start-on-Last-Dev-Floor, root-caused for real this
@@ -2430,11 +2823,14 @@ final class MazeStore: ObservableObject {
             missionSigns = Dictionary(uniqueKeysWithValues: record.missionSigns.map { ($0.coord, $0.direction) })
             mirrors = Dictionary(uniqueKeysWithValues: record.mirrors.map { ($0.coord, $0.direction) })
             fluorescentLights = Dictionary(uniqueKeysWithValues: record.fluorescentLights.map { ($0.coord, $0.orientation) })
+            autoGeneratedFluorescentCoords = Set(record.fluorescentLights.filter { $0.isAutoGenerated == true }.map(\.coord))
             ceilingVisibleFixture = Dictionary(uniqueKeysWithValues: record.ceilingVisibleFixture.map { ($0.coord, $0.kind) })
+            hiddenNavigationArrows = Set(record.hiddenNavigationArrows).intersection(cells)
             pictureLights = Set(record.pictureLights.map { WallFace(coord: $0.coord, direction: $0.direction) })
             wallLights = Dictionary(uniqueKeysWithValues: record.wallLights.map { ($0.coord, $0.direction) })
             bathroomDoors = Dictionary(uniqueKeysWithValues: record.bathroomDoors.map { ($0.coord, $0.direction) })
             windowRooms = Dictionary(uniqueKeysWithValues: record.windowRooms.map { ($0.coord, $0) })
+            roomEntranceDoors = Dictionary(uniqueKeysWithValues: record.roomEntranceDoors.map { ($0.coord, $0) })
             ticTacToeTerminals = Dictionary(uniqueKeysWithValues: record.ticTacToeTerminals.map { ($0.coord, $0.direction) })
             shellGameStations = Dictionary(uniqueKeysWithValues: record.shellGameStations.map { ($0.coord, $0.direction) })
             rockPaperScissorsTerminals = Dictionary(uniqueKeysWithValues: record.rockPaperScissorsTerminals.map { ($0.coord, $0.direction) })
@@ -2471,7 +2867,9 @@ final class MazeStore: ObservableObject {
             floorMaps = [:]
             spotlights = []
         fluorescentLights = [:]
+        autoGeneratedFluorescentCoords = []
         ceilingVisibleFixture = [:]
+        hiddenNavigationArrows = []
         pictureLights = []
         lightBrightness = []
             missionSigns = [Self.missionCoordinate: .south]
@@ -2480,6 +2878,7 @@ final class MazeStore: ObservableObject {
             mirrors = [:]
             wallLights = [:]
             windowRooms = [:]
+            roomEntranceDoors = [:]
             ticTacToeTerminals = [:]
             shellGameStations = [:]
             rockPaperScissorsTerminals = [:]
@@ -2504,15 +2903,15 @@ final class MazeStore: ObservableObject {
             ceilingTexture = nil
         }
         undoStack = [] // undo history is per-floor, doesn't carry across a switch
-        // Same "this is a load, not an edit" flag resetCurrentFloorToDefault()
-        // sets -- switching floors bumps version too (so the 3D scene
-        // and any open editor UI both know to refresh), but merely
-        // looking at a floor must never mark it as having a local
-        // override. Actual edits made to the floor you're LEAVING were
-        // already marked individually, in real time, as each one
-        // happened -- see autosaveAfterVersionChange().
-        versionChangeIsFloorLoad = true
+        // Same "this is a load, not an edit" bookkeeping
+        // resetCurrentFloorToDefault() does -- switching floors bumps
+        // version too (so the 3D scene and any open editor UI both know
+        // to refresh), but merely looking at a floor must never mark it
+        // as having a local override. Actual edits made to the floor
+        // you're LEAVING were already marked individually, in real
+        // time, as each one happened -- see autosaveAfterVersionChange().
         version += 1
+        floorLoadVersion = version
     }
 
     #if DEBUG
@@ -2539,19 +2938,13 @@ final class MazeStore: ObservableObject {
     /// floor authored without a next-floor link just quietly stays on
     /// the existing "You made it!" screen instead of going anywhere.
     func advanceToNextMaze() {
-        // TEMPORARY DIAGNOSTIC (Eddie, Sept 16 -- elevator arrival
-        // visual-transition audit). Remove alongside every other
-        // [ARRIVALDIAG]-tagged line in ContentView.swift and
-        // TapNavigationController.swift once diagnosed.
-        navLog("[ARRIVALDIAG] advanceToNextMaze() START t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(currentMazeID) nextMazeID=\(String(describing: nextMazeID))")
         guard let next = nextMazeID else { return }
         switchTo(id: next)
-        navLog("[ARRIVALDIAG] advanceToNextMaze() END t=\(String(format: "%.4f", Date().timeIntervalSince1970)) currentMazeID=\(currentMazeID)")
     }
 
     // MARK: - Undo / Clear
 
-    private var undoStack: [(elevatorCabDecoration: ElevatorCabDecoration, fluorescentLights: [GridCoordinate: FluorescentOrientation], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind], pictureLights: Set<WallFace>, additionalContent: EditorAdditionalUndoState, lightBrightness: [LightBrightness], cells: Set<GridCoordinate>, objects: [GridCoordinate: ObjectKind], destinations: [GridCoordinate: ObjectKind], exitSigns: [GridCoordinate: Direction], floorMaps: [GridCoordinate: Direction], spotlights: Set<GridCoordinate>, missionSigns: [GridCoordinate: Direction], pictures: [WallFace: PictureSize], mirrors: [GridCoordinate: Direction], wallLights: [GridCoordinate: Direction], picturesUseCameraRoll: Bool, roomDoors: [GridCoordinate: RoomDoorPlacement], itemRooms: [GridCoordinate: Int], windowRooms: [GridCoordinate: WindowRoomPlacement], fires: Set<GridCoordinate>, pictureImageSelections: [WallFace: PictureImageSelection])] = []
+    private var undoStack: [(hiddenNavigationArrows: Set<GridCoordinate>, elevatorCabDecoration: ElevatorCabDecoration, fluorescentLights: [GridCoordinate: FluorescentOrientation], autoGeneratedFluorescentCoords: Set<GridCoordinate>, ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind], pictureLights: Set<WallFace>, additionalContent: EditorAdditionalUndoState, lightBrightness: [LightBrightness], cells: Set<GridCoordinate>, objects: [GridCoordinate: ObjectKind], destinations: [GridCoordinate: ObjectKind], exitSigns: [GridCoordinate: Direction], floorMaps: [GridCoordinate: Direction], spotlights: Set<GridCoordinate>, missionSigns: [GridCoordinate: Direction], pictures: [WallFace: PictureSize], mirrors: [GridCoordinate: Direction], wallLights: [GridCoordinate: Direction], picturesUseCameraRoll: Bool, roomDoors: [GridCoordinate: RoomDoorPlacement], itemRooms: [GridCoordinate: Int], windowRooms: [GridCoordinate: WindowRoomPlacement], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement], fires: Set<GridCoordinate>, pictureImageSelections: [WallFace: PictureImageSelection])] = []
     private let maxUndoDepth = 30
 
     /// Snapshots the current maze so a later undo() can restore it.
@@ -2561,7 +2954,7 @@ final class MazeStore: ObservableObject {
     /// together so undo works correctly no matter which mode (wall
     /// painting or object placing) the stroke was in.
     func snapshotForUndo() {
-        undoStack.append((elevatorCabDecoration: elevatorCabDecoration, fluorescentLights: fluorescentLights, ceilingVisibleFixture: ceilingVisibleFixture, pictureLights: pictureLights, additionalContent: EditorAdditionalUndoState(bathroomDoors: bathroomDoors, extinguishers: extinguishers, ticTacToeTerminals: ticTacToeTerminals, shellGameStations: shellGameStations, rockPaperScissorsTerminals: rockPaperScissorsTerminals, higherLowerTerminals: higherLowerTerminals, fiveCardDrawTerminals: fiveCardDrawTerminals, simonTerminals: simonTerminals, hangmanTerminals: hangmanTerminals, connectFourTerminals: connectFourTerminals, checkersTerminals: checkersTerminals, woidleTerminals: woidleTerminals, photoBooths: photoBooths), lightBrightness: lightBrightness, cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, mirrors: mirrors, wallLights: wallLights, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms, windowRooms: windowRooms, fires: fires, pictureImageSelections: pictureImageSelections))
+        undoStack.append((hiddenNavigationArrows: hiddenNavigationArrows, elevatorCabDecoration: elevatorCabDecoration, fluorescentLights: fluorescentLights, autoGeneratedFluorescentCoords: autoGeneratedFluorescentCoords, ceilingVisibleFixture: ceilingVisibleFixture, pictureLights: pictureLights, additionalContent: EditorAdditionalUndoState(bathroomDoors: bathroomDoors, extinguishers: extinguishers, ticTacToeTerminals: ticTacToeTerminals, shellGameStations: shellGameStations, rockPaperScissorsTerminals: rockPaperScissorsTerminals, higherLowerTerminals: higherLowerTerminals, fiveCardDrawTerminals: fiveCardDrawTerminals, simonTerminals: simonTerminals, hangmanTerminals: hangmanTerminals, connectFourTerminals: connectFourTerminals, checkersTerminals: checkersTerminals, woidleTerminals: woidleTerminals, photoBooths: photoBooths), lightBrightness: lightBrightness, cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, mirrors: mirrors, wallLights: wallLights, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms, windowRooms: windowRooms, roomEntranceDoors: roomEntranceDoors, fires: fires, pictureImageSelections: pictureImageSelections))
         if undoStack.count > maxUndoDepth {
             undoStack.removeFirst()
         }
@@ -2597,11 +2990,14 @@ final class MazeStore: ObservableObject {
         pictureImageSelections = previous.pictureImageSelections
         mirrors = previous.mirrors
         fluorescentLights = previous.fluorescentLights
+        autoGeneratedFluorescentCoords = previous.autoGeneratedFluorescentCoords
         ceilingVisibleFixture = previous.ceilingVisibleFixture
+        hiddenNavigationArrows = previous.hiddenNavigationArrows
         pictureLights = previous.pictureLights
         wallLights = previous.wallLights
         roomDoors = previous.roomDoors
         windowRooms = previous.windowRooms
+        roomEntranceDoors = previous.roomEntranceDoors
         itemRooms = previous.itemRooms
         fires = previous.fires
         picturesUseCameraRoll = previous.picturesUseCameraRoll
@@ -2630,7 +3026,9 @@ final class MazeStore: ObservableObject {
         floorMaps = [:]
         spotlights = []
         fluorescentLights = [:]
+        autoGeneratedFluorescentCoords = []
         ceilingVisibleFixture = [:]
+        hiddenNavigationArrows = []
         pictureLights = []
         lightBrightness = []
         missionSigns = [Self.missionCoordinate: .south]
@@ -2638,6 +3036,7 @@ final class MazeStore: ObservableObject {
         pictureImageSelections = [:]
         mirrors = [:]
         windowRooms = [:]
+        roomEntranceDoors = [:]
         ticTacToeTerminals = [:]
         shellGameStations = [:]
         rockPaperScissorsTerminals = [:]
@@ -2685,6 +3084,7 @@ enum EditorContentKind: String, Hashable {
     case fires
     case roomDoors
     case windowRooms
+    case roomEntranceDoors
     case photoBooths
 }
 
@@ -2752,6 +3152,7 @@ extension MazeStore {
         if fires.contains(coord) { add(.fires, "Fire") }
         if let door = roomDoors[coord] { add(.roomDoors, wall("Room Door \(door.roomNumber)", door.direction)) }
         if let room = windowRooms[coord] { add(.windowRooms, wall("Window Room", room.direction)) }
+        if let placement = roomEntranceDoors[coord] { add(.roomEntranceDoors, wall("Room Entrance Door", placement.direction)) }
         if let booth = photoBooths[coord] { add(.photoBooths, wall("Photo Booth", booth.direction)) }
         return result
     }
@@ -2795,6 +3196,7 @@ extension MazeStore {
             case .fires: removeFire(at: coord)
             case .roomDoors: removeRoomDoor(at: coord)
             case .windowRooms: removeWindowRoom(at: coord)
+            case .roomEntranceDoors: removeRoomEntranceDoor(at: coord)
             case .missionSigns: missionSigns.removeValue(forKey: coord)
             case .bathroomDoors: bathroomDoors.removeValue(forKey: coord)
             case .extinguishers: extinguishers.removeValue(forKey: coord)
@@ -2892,7 +3294,7 @@ extension MazeStore {
         return nil
     }
 
-    func placeFluorescent(_ orientation: FluorescentOrientation, at coord: GridCoordinate, brightness: Int = 3) {
+    func placeFluorescent(_ orientation: FluorescentOrientation, at coord: GridCoordinate, brightness: Int = 3, isAutoGenerated: Bool = false) {
         guard cells.contains(coord) else { return }
         // Sept 23 (ceiling light coexistence): mirror image of
         // placeSpotlight's own comment above -- if a spotlight is
@@ -2903,6 +3305,19 @@ extension MazeStore {
         }
         fluorescentLights[coord] = orientation
         setLightBrightness(brightness, kind: .fluorescent, at: coord)
+        // Sept 27 (Auto Lights preserve-manual fix): every call site
+        // except autoLightsCurrentFloor's own regenerate loop omits
+        // this, so a manual placement (here or through the Grid
+        // Editor's paint tool) always clears any stale auto tag a
+        // PREVIOUS Auto Lights run might have left at this exact coord
+        // -- once a person has manually placed/repainted a fixture
+        // here, it is manual, full stop, and must survive the next
+        // Auto Lights regeneration.
+        if isAutoGenerated {
+            autoGeneratedFluorescentCoords.insert(coord)
+        } else {
+            autoGeneratedFluorescentCoords.remove(coord)
+        }
         version += 1
     }
 
@@ -2910,6 +3325,7 @@ extension MazeStore {
         guard fluorescentLights.removeValue(forKey: coord) != nil else { return }
         lightBrightness.removeAll { $0.coord == coord && $0.kind == .fluorescent }
         ceilingVisibleFixture.removeValue(forKey: coord)
+        autoGeneratedFluorescentCoords.remove(coord)
         version += 1
     }
 }

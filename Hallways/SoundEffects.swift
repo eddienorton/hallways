@@ -27,7 +27,8 @@ enum SoundEffects {
             { cashPickupPlayer }, { intersectionLockPlayer }, { alarmPlayer },
             { trashPickup1Player }, { trashPickup2Player }, { trashChuteOpenPlayer }, { trashChuteClosePlayer },
             { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer }, { extinguisherGrabPlayer },
-            { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer },
+            { roomEntranceDoorOpenPlayer }, { roomEntranceDoorClosePlayer },
+            { cameraClickPlayer }, { hitWallPlayer }, { warningBuzzPlayer }, { paintSplatPlayer }, { noPlayer }, { ouchPlayer },
             { ticTacToeXPlayer }, { ticTacToeOPlayer }, { ticTacToeWinPlayer }, { ticTacToeLosePlayer },
             { streetAudioPlayer }, { knockSoftPlayer }, { knockMediumPlayer }, { knockHardPlayer }
         ]
@@ -68,10 +69,26 @@ enum SoundEffects {
     private static let hitWallPlayer = loadPlayer("hit-wall.mp3")
     private static let warningBuzzPlayer = loadPlayer("warning-buzz.mp3")
     private static let paintSplatPlayer = loadPlayer("paint-splat.mp3")
+    // Sept 27 (Floor 5 active-fire movement blocker): Eddie's own "no,
+    // you can't go that way" response -- same loadPlayer/rewind-then-
+    // play shape as hitWallPlayer just above, nothing new invented.
+    // Per Eddie: wire the exact filename now even though the asset may
+    // not be dropped into Hallways-Assets/audio yet -- loadPlayer
+    // already logs and returns nil rather than crashing if it's
+    // missing, so playNo() below is safe to call either way.
+    private static let noPlayer = loadPlayer("no.mp3")
+    // Sept 27 (Floor 5 active-fire bare-tap response): Eddie's own
+    // "OUCH" -- tapping an active fire without the extinguisher.
+    // Same loadPlayer/rewind-then-play shape as noPlayer/hitWallPlayer
+    // just above; distinct from no.mp3, which owns attempted
+    // MOVEMENT into an active fire, not a deliberate tap/touch.
+    private static let ouchPlayer = loadPlayer("ouch.mp3")
 
     static func playHitWall() { hitWallPlayer?.currentTime = 0; hitWallPlayer?.play() }
     static func playWarningBuzz() { warningBuzzPlayer?.currentTime = 0; warningBuzzPlayer?.play() }
     static func playPaintSplat() { paintSplatPlayer?.currentTime = 0; paintSplatPlayer?.play() }
+    static func playNo() { noPlayer?.currentTime = 0; noPlayer?.play() }
+    static func playOuch() { ouchPlayer?.currentTime = 0; ouchPlayer?.play() }
 
     private(set) static var walkingRate: Float = 1
     static func setWalkingPace(_ pace: Float) {
@@ -288,6 +305,28 @@ enum SoundEffects {
 
     @discardableResult
     static func playMailDelivery() -> Bool { playMailSound(mailDeliveryPlayer) }
+
+    /// Sept 27 (Room Entrance open/close sounds). Same preloaded-
+    /// AVAudioPlayer/session-activate-then-rewind-then-play shape as
+    /// playTrashChuteOpen/Close just above (playChuteSound), reused
+    /// as-is rather than inventing a new helper. One pair of sounds
+    /// for every Room Entrance style/texture -- no per-material
+    /// variants, matching Eddie's own "same sounds for every style"
+    /// instruction. Wired from TapNavigationController's
+    /// openRoomEntranceDoor/closeRoomEntranceDoor, which are each the
+    /// single authoritative place that door's open/closed state
+    /// actually flips (both already guard against firing when the
+    /// door is already in that state), so playback is naturally
+    /// tied to the real state transition, never a bare tap, and never
+    /// duplicated.
+    private static let roomEntranceDoorOpenPlayer = loadPlayer("door_open.mp3")
+    private static let roomEntranceDoorClosePlayer = loadPlayer("door_close.mp3")
+
+    @discardableResult
+    static func playRoomEntranceDoorOpen() -> Bool { playChuteSound(roomEntranceDoorOpenPlayer) }
+
+    @discardableResult
+    static func playRoomEntranceDoorClose() -> Bool { playChuteSound(roomEntranceDoorClosePlayer) }
 
     private static let extinguisherSprayPlayer = loadPlayer("fire_extinguisher.mp3")
     private static let fireExtinguishedPlayer = loadPlayer("fire-extinguished.mp3")

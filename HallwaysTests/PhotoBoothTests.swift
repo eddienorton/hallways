@@ -5,6 +5,52 @@ import UIKit
 
 @MainActor
 struct PhotoBoothTests {
+    @Test func decoratorBlocksBoothActivationAndPlayStillActivates() {
+        let cell = GridCoordinate(row: 0, col: 0)
+        let controller = TapNavigationController(cameraNode: SCNNode(), scene: SCNScene(),
+            cells: [cell], cellSize: 3.2, startCell: cell, startFacing: .north, endCell: cell,
+            photoBooths: [cell: (direction: .north, expression: .smile)])
+        controller.decorateModeEnabled = true
+        controller.activatePhotoBooth(at: cell)
+        #expect(controller.activePhotoBooth == nil)
+        #expect(controller.photoBoothCameraState == nil)
+        #expect(controller.canRotate) // Decorator's existing selection gate stays open.
+        controller.decorateModeEnabled = false
+        controller.activatePhotoBooth(at: cell)
+        #expect(controller.activePhotoBooth == cell)
+        #expect(controller.photoBoothCameraState == "starting")
+    }
+
+    @Test func enteringDecoratorCancelsExistingBoothSession() async {
+        let cell = GridCoordinate(row: 0, col: 0)
+        let controller = TapNavigationController(cameraNode: SCNNode(), scene: SCNScene(),
+            cells: [cell], cellSize: 3.2, startCell: cell, startFacing: .north, endCell: cell,
+            photoBooths: [cell: (direction: .north, expression: .smile)])
+        controller.activatePhotoBooth(at: cell)
+        controller.decorateModeEnabled = true
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        #expect(controller.activePhotoBooth == nil)
+        #expect(controller.photoBoothCameraState == nil)
+        #expect(controller.canRotate)
+        #expect(!controller.isMissionComplete)
+    }
+
+    @Test func decoratorTurnTowardBoothDoesNotStartCamera() async {
+        let cell = GridCoordinate(row: 2, col: 1)
+        let controller = TapNavigationController(cameraNode: SCNNode(), scene: SCNScene(),
+            cells: [cell], cellSize: 3.2, startCell: cell, startFacing: .north, endCell: cell,
+            photoBooths: [cell: (direction: .west, expression: .smile)])
+        controller.decorateModeEnabled = true
+        controller.beginDragRotate()
+        controller.endDragRotate(fraction: 1)
+        await finishNavigation(controller)
+        #expect(controller.facing == .west)
+        #expect(controller.activePhotoBooth == nil)
+        #expect(controller.canRotate)
+    }
+
     private func finishNavigation(_ controller: TapNavigationController) async {
         let renderer = SCNRenderer(device: nil, options: nil)
         for tick in 1...400 {

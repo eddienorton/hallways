@@ -35,9 +35,29 @@ struct DecoratorTarget: Equatable {
     /// it gets its own small set of methods (floorPosition/
     /// changeFloorPosition/floorObjectOrientation/changeFloorOrientation)
     /// further down in this file.
-    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth }
+    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth, roomEntranceDoor }
     let floor: Int
-    enum Location: Equatable { case grid(GridCoordinate), elevatorCeiling }
+    /// Sept 26 (Decorate-mode elevator pictures): identifies WHICH of
+    /// the elevator cab's 3 built-in posters a target refers to -- back
+    /// wall or side wall, the same 2 surfaces
+    /// TapNavigationController.ElevatorPosterTarget already names for
+    /// Play mode's own Change Picture routing. Deliberately its OWN
+    /// small type here rather than reusing that one directly: this
+    /// file has no dependency on TapNavigationController (every other
+    /// live-scene reach-through here is a closure, e.g. registerMirror/
+    /// canEditCab), and this keeps that decoupling intact. ContentView's
+    /// Coordinator (which already holds both) is the one place that
+    /// converts between the two.
+    enum ElevatorPosterSurface: Equatable {
+        case back
+        case side
+        // Sept 26 (third elevator poster, right wall): .side above is
+        // the ORIGINAL single side poster (physically the LEFT wall) --
+        // kept as-is, unrenamed, so every existing switch over this
+        // enum stays untouched. This is the new, second lateral wall.
+        case sideRight
+    }
+    enum Location: Equatable { case grid(GridCoordinate), elevatorCeiling, elevatorPoster(ElevatorPosterSurface) }
     let location: Location
     let kind: Kind
     /// Which wall face this target refers to. nil for ceiling/
@@ -69,12 +89,43 @@ struct DecoratorTarget: Equatable {
         if case .grid(let coord) = location { return coord }
         return nil
     }
-    var isCab: Bool { location == .elevatorCeiling }
+    /// Sept 26 (Decorate-mode elevator pictures): which built-in
+    /// poster this target refers to -- nil for every other kind/
+    /// location, same "nil unless this specific case" shape as coord
+    /// above. Drives DecoratorOverlay's elevator-poster Image section
+    /// (which surface to write store.setElevatorBackArtwork/
+    /// setElevatorSideArtwork to) and its two picker sheets.
+    var elevatorPosterSurface: ElevatorPosterSurface? {
+        if case .elevatorPoster(let surface) = location { return surface }
+        return nil
+    }
+    var isCab: Bool {
+        switch location {
+        case .elevatorCeiling, .elevatorPoster: return true
+        case .grid: return false
+        }
+    }
     var locationLabel: String {
-        guard let coord else { return "Elevator cab · Center ceiling" }
-        let base = "Floor \(floor) · Row \(coord.row), Column \(coord.col)"
-        guard let direction else { return base }
-        return base + " · \(direction.rawValue.capitalized) wall"
+        switch location {
+        case .grid(let coord):
+            let base = "Floor \(floor) · Row \(coord.row), Column \(coord.col)"
+            guard let direction else { return base }
+            return base + " · \(direction.rawValue.capitalized) wall"
+        case .elevatorCeiling:
+            return "Elevator cab · Center ceiling"
+        case .elevatorPoster(let surface):
+            let surfaceLabel: String
+            switch surface {
+            case .back: surfaceLabel = "Back"
+            // Sept 26 (third elevator poster, right wall): relabeled
+            // from the old bare "Side" to "Left" now that a "Right"
+            // exists too -- label text only, the .side CASE NAME is
+            // unchanged.
+            case .side: surfaceLabel = "Left"
+            case .sideRight: surfaceLabel = "Right"
+            }
+            return "Elevator cab · \(surfaceLabel) wall"
+        }
     }
 
     var supportsPictureLight: Bool { kind == .picture || kind == .missionSign || kind == .floorMap }
@@ -121,6 +172,13 @@ struct DecoratorTarget: Equatable {
         // mission fixture (MazeStore.photoBooths), now authorable on
         // any unclaimed solid wall (Wall chooser).
         case .photoBooth: return "Photo Booth"
+        // Sept 27 (Decorator Room Entrance authoring): the generic
+        // cell-to-cell swinging door authored via "+" -> Door Entry
+        // (or the 2D Grid Editor's own Room Entrance tool) -- MazeStore.
+        // roomEntranceDoors, sharing the exact bathroomDoors/windowRooms
+        // swinging-door machinery, just with no sign and no window/
+        // perimeter requirement.
+        case .roomEntranceDoor: return "Room Entrance"
         }
     }
 
@@ -196,6 +254,22 @@ final class DecoratorState: ObservableObject {
     /// navigation controller" step registerAddedPicture does for a
     /// live Picture, just for objects instead. Wired up in ContentView.
     var registerFloorObject: (_ kind: ObjectKind, _ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _, _ in }
+    /// Sept 27 (Decorator delete-staleness fix): the reverse of
+    /// registerFloorObject above -- deleteFloorObject below calls this
+    /// so TapNavigationController.objectKinds/objectNodes (and the live
+    /// floor map / mission progress they drive) drop the deleted object
+    /// immediately, matching what registerFloorObject already does on
+    /// the add side.
+    var unregisterFloorObject: (_ coord: GridCoordinate) -> Void = { _ in }
+    /// Keep the navigation controller’s map data in sync with live additions.
+    var registerRoomDoor: (_ door: RoomDoorPlacement) -> Void = { _ in }
+    /// Sept 27 (Decorator delete-staleness fix): deleteRoomDoor below
+    /// calls this so TapNavigationController.roomDoors -- read directly
+    /// by the live floor map texture and by every walk-stop/knock/
+    /// deliverMail gate -- drops the deleted door immediately, instead
+    /// of continuing to block walks and draw on the map until the floor
+    /// is fully rebuilt.
+    var unregisterRoomDoor: (_ coord: GridCoordinate) -> Void = { _ in }
     /// Sept 21 (current-cell Ceiling/Wall authoring): the player's
     /// current facing -- same shape/reason as currentPlayerCell above,
     /// wired up in ContentView. selectWallAtCurrentCell below reads
@@ -212,8 +286,8 @@ final class DecoratorState: ObservableObject {
     /// ContentView like registerAddedPicture above.
     var registerMirrorSurface: (_ material: SCNMaterial, _ aspect: CGFloat) -> Void = { _, _ in }
     var unregisterMirrorSurface: (_ material: SCNMaterial) -> Void = { _ in }
-    var registerMirror: (_ coord: GridCoordinate) -> Void = { _ in }
-    var unregisterMirror: (_ coord: GridCoordinate) -> Void = { _ in }
+    var registerMirror: (_ coord: GridCoordinate, _ direction: Direction) -> Void = { _, _ in }
+    var unregisterMirror: (_ coord: GridCoordinate, _ direction: Direction) -> Void = { _, _ in }
     /// Sept 25 (Designer authoring, live mission-object ADD): the
     /// navigation-state registration closures for the three mission
     /// objects the Floor/Wall catalogs can now author live -- fire,
@@ -228,6 +302,57 @@ final class DecoratorState: ObservableObject {
     var unregisterLiveExtinguisher: (_ coord: GridCoordinate) -> Void = { _ in }
     var registerLivePhotoBooth: (_ direction: Direction, _ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _, _ in }
     var unregisterLivePhotoBooth: (_ coord: GridCoordinate) -> Void = { _ in }
+    /// Sept 27 (Decorator Room Entrance authoring): same shape as the
+    /// mirror/fire/extinguisher/photo-booth register/unregister
+    /// closures just above -- addRoomEntranceDoorAtCurrentCell/
+    /// deleteRoomEntranceDoor below call these instead of holding a
+    /// reference to TapNavigationController directly. Wired up in
+    /// ContentView to registerRoomEntranceDoor/unregisterRoomEntranceDoor.
+    var registerLiveRoomEntranceDoor: (_ direction: Direction, _ coord: GridCoordinate) -> Void = { _, _ in }
+    var unregisterLiveRoomEntranceDoor: (_ coord: GridCoordinate) -> Void = { _ in }
+
+    /// Sept 28 (EXIT sign map markers): same register/unregister
+    /// routing as registerLiveRoomEntranceDoor/
+    /// unregisterLiveRoomEntranceDoor just above -- addExitSignAtCurrentCell/
+    /// changeExitSignDirection/deleteExitSign below call these instead
+    /// of holding a reference to TapNavigationController directly, so
+    /// the popup map's new EXIT arrow stays correct across a live add,
+    /// re-point, or delete without a full floor rebuild. Wired up in
+    /// ContentView to registerExitSign/unregisterExitSign.
+    var registerLiveExitSign: (_ direction: Direction, _ coord: GridCoordinate) -> Void = { _, _ in }
+    var unregisterLiveExitSign: (_ coord: GridCoordinate) -> Void = { _ in }
+
+    /// Sept 28 (picture content moved to Decorator): Decorator's
+    /// Picture panel "Content..." button calls this instead of holding
+    /// a reference to TapNavigationController directly -- same
+    /// "closure crosses the boundary" shape as every registerLiveX
+    /// pair above. Wired up in ContentView to set
+    /// navigationController.activePictureMenu, which is exactly the
+    /// @Published property PictureChangeMenuHost (PictureChangeMenu.
+    /// swift) already observes to present the existing Change Picture
+    /// confirmationDialog -- so Decorator opens the SAME menu Play
+    /// mode used to open on a picture tap, with no second
+    /// implementation of picture-changing logic.
+    var presentPictureChangeMenu: (_ face: WallFace) -> Void = { _ in }
+
+    var navigationArrowsEnabledAtCurrentCell: Bool {
+        guard let coord = currentPlayerCell(), let store else { return true }
+        return !store.hiddenNavigationArrows.contains(coord)
+    }
+
+    var canEditNavigationArrowsAtCurrentCell: Bool {
+        guard enabled, let coord = currentPlayerCell(), let store else { return false }
+        return store.cells.contains(coord)
+    }
+
+    func setNavigationArrowsEnabledAtCurrentCell(_ enabled: Bool) {
+        guard canEditNavigationArrowsAtCurrentCell, let coord = currentPlayerCell(),
+              let store, let scene, navigationArrowsEnabledAtCurrentCell != enabled else { return }
+        store.snapshotForUndo()
+        store.setNavigationArrowsEnabled(enabled, at: coord)
+        HallwayScene.setNavigationArrowsHidden(!enabled, at: coord, in: scene)
+        store.saveCurrentFloorAsOverride()
+    }
 
     func attach(scene: SCNScene?, store: MazeStore) {
         self.scene = scene
@@ -267,7 +392,16 @@ final class DecoratorState: ObservableObject {
             case .ceilingSurface: return true
             case .ceiling: return store.elevatorCabDecoration.ceilingFixture?.kind == .ceiling
             case .fluorescent: return store.elevatorCabDecoration.ceilingFixture?.kind == .fluorescent
-            case .picture, .missionSign, .floorMap: return false
+            // Sept 26 (Decorate-mode elevator pictures): a target with
+            // isCab true and kind .picture is, by construction, always
+            // an elevatorPoster location (see HallwayScene's tagging of
+            // the 2 poster nodes) -- never elevatorCeiling. Both built-
+            // in posters are permanent geometry (addElevatorDoor always
+            // builds both, unconditionally), so unlike the ceiling
+            // fixture there is no ADD/DELETE state to check here: a
+            // poster target always exists.
+            case .picture: return true
+            case .missionSign, .floorMap: return false
             case .wallSurface: return false
             case .floorObject: return false // no Floor Objects in the elevator cab
             case .exitSign: return false // no Exit Sign in the elevator cab
@@ -276,6 +410,7 @@ final class DecoratorState: ObservableObject {
             case .mirror: return false // no Mirror in the elevator cab
             case .extinguisher: return false // no Fire Extinguisher in the elevator cab
             case .photoBooth: return false // no Photo Booth in the elevator cab
+            case .roomEntranceDoor: return false // no Room Entrance door in the elevator cab
             }
         }
         guard let coord = target.coord else { return false }
@@ -292,13 +427,10 @@ final class DecoratorState: ObservableObject {
         case .missionSign: return store.missionSigns[coord] != nil
         case .floorMap: return store.floorMaps[coord] != nil
         case .wallSurface: return store.cells.contains(coord)
-        // Sept 23 (Decorator Floor expansion): any of the current
-        // Floor-catalog pickup kinds counts as "this floorObject target
-        // exists" -- see FloorObjectCatalogItem below, the single place
-        // that list is defined.
+        // Floor objects and Hanging Money share the authored-object selection/delete path.
         case .floorObject:
             guard let kind = store.objects[coord] else { return false }
-            return kind == .trashCan || kind == .envelope || kind == .paintBucket
+            return kind == .trashCan || kind == .envelope || kind == .paintBucket || kind == .cash100
         // Sept 23 (Decorator Ceiling expansion): Exit Sign reads straight
         // off MazeStore.exitSigns, its own independent authored dictionary.
         case .exitSign: return store.hasExitSign(coord)
@@ -324,6 +456,13 @@ final class DecoratorState: ObservableObject {
         case .photoBooth:
             guard let direction = target.direction else { return false }
             return store.photoBooths[coord]?.direction == direction
+        // Sept 27 (Decorator Room Entrance authoring): reads straight
+        // off MazeStore.roomEntranceDoors, its own independent authored
+        // dictionary (same face-keyed shape as mirror/extinguisher/
+        // photoBooth just above).
+        case .roomEntranceDoor:
+            guard let direction = target.direction else { return false }
+            return store.roomEntranceDoors[coord]?.direction == direction
         }
     }
 
@@ -358,9 +497,15 @@ final class DecoratorState: ObservableObject {
 
     private func place(_ target: DecoratorTarget, level: Int, orientation: FluorescentOrientation) {
         if target.isCab {
-            store?.setElevatorCabDecoration(ElevatorCabDecoration(ceilingFixture: .init(
+            // Mutate a copy of the CURRENT cab decoration -- constructing
+            // a fresh ElevatorCabDecoration(...) here would silently wipe
+            // any persisted elevator-poster artwork (backArtwork/
+            // sideArtwork) every time the ceiling fixture is placed.
+            var decoration = store?.elevatorCabDecoration ?? ElevatorCabDecoration()
+            decoration.ceilingFixture = .init(
                 kind: target.kind == .fluorescent ? .fluorescent : .ceiling,
-                brightness: level, orientation: orientation)))
+                brightness: level, orientation: orientation)
+            store?.setElevatorCabDecoration(decoration)
             return
         }
         guard let coord = target.coord else { return }
@@ -373,7 +518,11 @@ final class DecoratorState: ObservableObject {
 
     private func remove(_ target: DecoratorTarget) {
         if target.isCab {
-            store?.setElevatorCabDecoration(ElevatorCabDecoration())
+            // Same rationale as place(...) above: preserve any persisted
+            // elevator-poster artwork, only clear the ceiling fixture.
+            var decoration = store?.elevatorCabDecoration ?? ElevatorCabDecoration()
+            decoration.ceilingFixture = nil
+            store?.setElevatorCabDecoration(decoration)
             return
         }
         guard let coord = target.coord else { return }
@@ -689,6 +838,10 @@ final class DecoratorState: ObservableObject {
             if PictureBackfillTarget.read(node) == backfillTarget { oldBackfillNodes.append(node) }
         }
         for node in oldBackfillNodes { node.removeFromParentNode() }
+        if currentSize == .lobbyOriginal {
+            let wall = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
+            for node in nodes(for: wall) { node.removeFromParentNode() }
+        }
 
         if newPanelWidth > 0, newPanelHeight > 0 {
             let half = store.cellSize / 2
@@ -842,7 +995,9 @@ final class DecoratorState: ObservableObject {
             let fixture = ElevatorCabDecoration.Fixture(kind: kind == .fluorescent ? .fluorescent : .ceiling)
             let node = HallwayScene.makeElevatorCabFixture(fixture, cellSize: store.cellSize, floorNumber: floor)
             store.snapshotForUndo()
-            store.setElevatorCabDecoration(ElevatorCabDecoration(ceilingFixture: fixture))
+            var decoration = store.elevatorCabDecoration
+            decoration.ceilingFixture = fixture
+            store.setElevatorCabDecoration(decoration)
             mount.addChildNode(node)
             selection = DecoratorTarget.read(node)
             return
@@ -909,28 +1064,41 @@ final class DecoratorState: ObservableObject {
     /// snapshotForUndo() up front, matching Clear/
     /// resetCurrentFloorToDefault's own "batch of edits, one undo"
     /// convention) and ONE save at the end, not one per fixture.
-    func autoLightsCurrentFloor() {
+    func autoLightsCurrentFloor(spacing: Int = 4, brightness: Int = 10) {
         guard enabled, let store, let scene, store.currentMazeID == floor else { return }
         store.snapshotForUndo()
 
-        // STEP 1 -- reset every existing fluorescent on this floor.
-        for coord in Array(store.fluorescentLights.keys) {
+        // STEP 1 -- reset only the PREVIOUSLY AUTO-GENERATED fluorescents
+        // on this floor (Sept 27: preserve-manual-lights fix). Iterating
+        // autoGeneratedFluorescentCoords instead of every key in
+        // fluorescentLights means a manually placed/customized fixture
+        // (never tagged auto -- see placeFluorescent's own doc comment)
+        // is left completely untouched by a regeneration.
+        for coord in Array(store.autoGeneratedFluorescentCoords) {
+            guard store.fluorescentLights[coord] != nil else { continue }
             let target = DecoratorTarget(floor: floor, coord: coord, kind: .fluorescent)
             for node in nodes(for: target) { node.removeFromParentNode() }
             store.removeFluorescent(at: coord)
             syncCeilingFixtureVisibility(at: coord)
         }
 
-        // STEP 2 -- regenerate: walk the floor, light every 4th cell.
+        // STEP 2 -- regenerate: walk the floor, light every `spacing`th
+        // cell (index % spacing == 0 in hallwayWalkOrder's own stable
+        // order -- unchanged semantics, spacing is just what used to be
+        // the hardcoded 4). A walk position a manual fixture already
+        // occupies (STEP 1 never removes those) is skipped rather than
+        // overwritten, so a manual light can never be silently
+        // reclassified as auto-generated.
         let walk = Self.hallwayWalkOrder(cells: store.cells)
-        for (index, coord) in walk.enumerated() where index % 4 == 0 {
+        for (index, coord) in walk.enumerated() where index % spacing == 0 {
+            guard store.fluorescentLights[coord] == nil else { continue }
             let orientation = store.autoFluorescentOrientation(at: coord) ?? .northSouth
             let node = HallwayScene.makeFluorescentLight(orientation: orientation, level: 3, cellSize: store.cellSize)
             node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight),
                                       Float(coord.row) * Float(store.cellSize))
             let added = DecoratorTarget(floor: floor, coord: coord, kind: .fluorescent)
             added.tag(node)
-            store.placeFluorescent(orientation, at: coord, brightness: 10)
+            store.placeFluorescent(orientation, at: coord, brightness: brightness, isAutoGenerated: true)
             scene.rootNode.addChildNode(node)
             syncCeilingFixtureVisibility(at: coord)
         }
@@ -1005,12 +1173,20 @@ final class DecoratorState: ObservableObject {
         guard !wallNodes.isEmpty else { return }
 
         let baseTexture: UIImage
+        // Sept 26 ("Keep This Picture"): a live-added Picture with no
+        // explicit selection starts out just as randomly-sourced as a
+        // freshly built floor's own unselected pictures -- reports its
+        // identity into store.currentPictureIdentity the same way, so
+        // Keep works on it immediately, without waiting for a rebuild.
         if store.picturesUseCameraRoll {
             // Same "Loading photo…" placeholder build(fromMaze:...) shows
             // every camera-roll picture until PhotoRollProvider resolves.
             baseTexture = HallwayScene.mirrorPlaceholder("Loading photo…")
+        } else if let picked = HallwayScene.randomPictureImageWithName(caller: "decorator live add floor \(floor) coord \(coord) wall \(direction)") {
+            baseTexture = picked.image
+            store.reportCurrentPictureIdentity(.builtIn(picked.name), at: WallFace(coord: coord, direction: direction))
         } else {
-            baseTexture = HallwayScene.randomPictureImage(caller: "decorator live add floor \(floor) coord \(coord) wall \(direction)") ?? HallwayScene.mirrorPlaceholder("Photo unavailable")
+            baseTexture = HallwayScene.mirrorPlaceholder("Photo unavailable")
         }
         let texture = HallwayScene.framedPhoto(baseTexture)
 
@@ -1036,9 +1212,10 @@ final class DecoratorState: ObservableObject {
         registerAddedPicture(coord, direction, material, newWallMaterials)
 
         if store.picturesUseCameraRoll {
-            PhotoRollProvider.shared.randomImages(count: 1, caller: "decorator live add floor \(floor) coord \(coord) wall \(direction)") { [weak material] _, image in
+            PhotoRollProvider.shared.randomImages(count: 1, caller: "decorator live add floor \(floor) coord \(coord) wall \(direction)") { [weak material, weak store] _, identifier, image in
                 guard let material else { return }
                 material.diffuse.contents = image.map { HallwayScene.framedPhoto($0) } ?? HallwayScene.mirrorPlaceholder("Photo unavailable")
+                if let identifier { store?.reportCurrentPictureIdentity(.cameraRoll(identifier), at: WallFace(coord: coord, direction: direction)) }
             }
         }
 
@@ -1084,6 +1261,7 @@ final class DecoratorState: ObservableObject {
         let doorNode = HallwayScene.makeRoomDoorNode(door, cellSize: store.cellSize)
         hallwayRoot.addChildNode(doorNode)
         DecoratorTarget(floor: floor, coord: coord, kind: .roomDoor, direction: direction).tag(doorNode)
+        registerRoomDoor(door)
         selection = DecoratorTarget(floor: floor, coord: coord, kind: .roomDoor, direction: direction)
         save(target)
     }
@@ -1103,6 +1281,7 @@ final class DecoratorState: ObservableObject {
         let liveNodes = nodes(for: target)
         store.snapshotForUndo()
         store.removeRoomDoor(at: coord)
+        unregisterRoomDoor(coord)
         for node in liveNodes { node.removeFromParentNode() }
         selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
         save(target)
@@ -1145,7 +1324,7 @@ final class DecoratorState: ObservableObject {
         let mirrorNode = HallwayScene.makeMirrorNode(at: coord, direction: direction, cellSize: store.cellSize)
         scene.rootNode.addChildNode(mirrorNode)
         DecoratorTarget(floor: floor, coord: coord, kind: .mirror, direction: direction).tag(mirrorNode)
-        registerMirror(coord)
+        registerMirror(coord, direction)
         if let surface = mirrorNode.childNode(withName: "mirrorSurface", recursively: true),
            let material = surface.geometry?.firstMaterial {
             registerMirrorSurface(material, HallwayScene.mirrorSurfaceAspect(of: surface))
@@ -1173,7 +1352,7 @@ final class DecoratorState: ObservableObject {
         }
         store.snapshotForUndo()
         store.removeMirror(at: coord)
-        unregisterMirror(coord)
+        unregisterMirror(coord, direction)
         if let material = surfaceMaterial { unregisterMirrorSurface(material) }
         for node in liveNodes { node.removeFromParentNode() }
         selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
@@ -1427,9 +1606,242 @@ final class DecoratorState: ObservableObject {
         guard !liveNodes.isEmpty else { return }
         store.snapshotForUndo()
         store.removeObject(at: coord)
+        unregisterFloorObject(coord)
         for node in liveNodes { node.removeFromParentNode() }
         selection = nil
         save(target)
+    }
+
+    /// Sept 27 (Decorator Room Entrance authoring): whether "+" -> Door
+    /// Entry would succeed right now -- unlike every other "+" menu
+    /// item, Room Entrance has NO catalog/direction picker in Decorator:
+    /// the player's current cell and current facing ALREADY determine
+    /// the exact wall face (current cell -> facing direction ->
+    /// boundary -> neighbor cell), so this reads both live-navigation
+    /// closures instead of a target/selection. Backed by MazeStore.
+    /// canPlaceRoomEntranceDoor -- the SAME validation the 2D Grid
+    /// Editor's own Room Entrance tool placer uses -- so a face already
+    /// claimed by another fixture, a missing/solid cell behind it, or
+    /// the elevator/mission cell all refuse identically in both
+    /// authoring routes, never a fake door.
+    func canAddRoomEntranceDoorAtCurrentCell() -> Bool {
+        guard enabled, let store, let coord = currentPlayerCell(), let direction = currentPlayerFacing() else { return false }
+        return store.canPlaceRoomEntranceDoor(direction, at: coord)
+    }
+
+    /// Sept 27 (Decorator Room Entrance authoring): the "+" -> Door
+    /// Entry entrance. Reuses MazeStore.placeRoomEntranceDoor (the SAME
+    /// store mutation the 2D Grid Editor's own Room Entrance tool
+    /// calls -- one persisted dictionary, two authoring routes) and the
+    /// EXACT rendering HallwayScene.build's own roomEntranceDoors loop
+    /// uses for a build-time door: HallwayScene.buildDoorFrame (the 4
+    /// frame strips around the opening) plus HallwayScene.
+    /// makeBathroomDoorPanel(hingeNamePrefix: "roomEntranceDoor",
+    /// includeSign: false) (the hinge + swinging panel) -- same door
+    /// size constants (doorWidth/doorHeight/doorCenterY) as that loop,
+    /// so a Decorator-placed door is pixel-identical to a build-time
+    /// one. The hinge node's name ("roomEntranceDoor_<row>_<col>") is
+    /// exactly what Play mode's EXISTING roomEntranceDoorCoordinate(for:)/
+    /// openRoomEntranceDoor tap handling already looks for by name --
+    /// zero new Play-mode wiring needed; tapping this live-added door
+    /// in Play swings it open exactly like a build-time one.
+    ///
+    /// Both the frame strips (tagged via buildDoorFrame's own `tag:`
+    /// closure, the same mechanism buildPictureBackfill already uses)
+    /// and the hinge node are tagged with the SAME DecoratorTarget, so
+    /// tapping either one in Decorate selects the whole door assembly,
+    /// never an internal panel/frame child on its own -- see nodes(for:)
+    /// above, which collects every node carrying that identical tag.
+    ///
+    /// No wall panel exists to remove or restore here (unlike addDoor/
+    /// addMirror/addPicture, which all operate on an existing solid
+    /// `.wallSurface`): both cells are already ordinary open cells, so
+    /// the build-time render loop never draws a wall at this boundary
+    /// in the first place -- the frame is purely decorative dressing
+    /// around the opening, same as it is at build time.
+    func addRoomEntranceDoorAtCurrentCell() {
+        guard canAddRoomEntranceDoorAtCurrentCell(), let store, let scene,
+              let coord = currentPlayerCell(), let direction = currentPlayerFacing() else { return }
+        guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        store.snapshotForUndo()
+        store.placeRoomEntranceDoor(direction, at: coord)
+
+        let target = DecoratorTarget(floor: floor, coord: coord, kind: .roomEntranceDoor, direction: direction)
+
+        // Sept 27 (live-delete leak fix): one owning "assembly" node
+        // for the whole thing this function creates -- frame strips
+        // AND hinge both become its children instead of siblings added
+        // separately to hallwayRoot. Named the same predictable way
+        // the hinge itself already is (mirrors "roomEntranceDoor_<row>_
+        // <col>") so deleteRoomEntranceDoor can also find and remove
+        // this exact node by name as a deterministic safety net,
+        // completely independent of tag-based lookup.
+        let assembly = SCNNode()
+        assembly.name = "roomEntranceDoorAssembly_\(coord.row)_\(coord.col)"
+        target.tag(assembly)
+        hallwayRoot.addChildNode(assembly)
+
+        let half = store.cellSize / 2
+        let doorX = CGFloat(coord.col) * store.cellSize
+        let doorZ = CGFloat(coord.row) * store.cellSize
+        let wx: CGFloat
+        let wz: CGFloat
+        switch direction {
+        case .north: (wx, wz) = (doorX, doorZ - half)
+        case .south: (wx, wz) = (doorX, doorZ + half)
+        case .east: (wx, wz) = (doorX + half, doorZ)
+        case .west: (wx, wz) = (doorX - half, doorZ)
+        }
+        // Same fixed door size as HallwayScene.build's own
+        // roomEntranceDoors render loop (roomEntranceDoorWidth/Height/
+        // CenterY there) -- kept in sync by hand since neither is
+        // exposed as a shared constant; both call sites are small and
+        // unlikely to drift, and extracting one wasn't necessary for
+        // this pass.
+        let doorWidth: CGFloat = 1.0
+        let doorHeight: CGFloat = 2.2
+        let doorCenterY = doorHeight / 2
+
+        var newWallMaterials: [SCNMaterial] = []
+        _ = HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), root: assembly, wallMaterials: &newWallMaterials, tag: { target.tag($0) })
+        let hinge = HallwayScene.makeBathroomDoorPanel(at: coord, direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, hingeNamePrefix: "roomEntranceDoor", includeSign: false)
+        target.tag(hinge)
+        assembly.addChildNode(hinge)
+        appendWallMaterials(newWallMaterials)
+        registerLiveRoomEntranceDoor(direction, coord)
+        selection = target
+        save(target)
+    }
+
+    /// Sept 27 (Decorator Room Entrance authoring): removal -- same
+    /// overall shape as deleteFire()/deleteRoomDoor() above. Unlike
+    /// those two (which restore an ordinary wall panel, or reveal an
+    /// already-intact Empty Wall), a Room Entrance has NO wall panel
+    /// underneath it at all: both cells were already ordinary open
+    /// cells before the door existed, so removing every tagged node
+    /// (frame strips + hinge) simply leaves the boundary between them
+    /// open again, with no floor reload needed -- exactly Eddie's own
+    /// "CELL | DOOR | CELL" -> "CELL     CELL" requirement.
+    /// unregisterLiveRoomEntranceDoor drops TapNavigationController's
+    /// own copy immediately, so movement gating, the tap-to-open
+    /// lookup, and the map's red door-face indicator all update without
+    /// a rebuild.
+    func deleteRoomEntranceDoor() {
+        guard enabled, let target = selection, target.kind == .roomEntranceDoor,
+              exists(target), let store, let coord = target.coord else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.removeRoomEntranceDoor(at: coord)
+        unregisterLiveRoomEntranceDoor(coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        // Sept 27 (live-delete leak fix): the frame strips and hinge
+        // both live inside one owning "roomEntranceDoorAssembly_<row>_
+        // <col>" node now (see addRoomEntranceDoorAtCurrentCell and
+        // HallwayScene.build's own roomEntranceDoors loop, both of
+        // which create it) -- removing that ONE node by its stable
+        // name is a deterministic guarantee the whole architectural
+        // assembly is gone, independent of the tag-based nodes(for:)
+        // lookup just above (which stays, as a harmless first pass --
+        // removeFromParentNode() on an already-detached node is a
+        // no-op).
+        scene?.rootNode.childNode(withName: "roomEntranceDoorAssembly_\(coord.row)_\(coord.col)", recursively: true)?.removeFromParentNode()
+        selection = nil
+        save(target)
+    }
+
+    /// Sept 27 (door cosmetics pass): read-only lookups the selected-
+    /// object panel's Texture/Style controls use to show the door's
+    /// CURRENT choice (checkmark in the texture grid, checkmark in the
+    /// Style menu) -- both nil/.plain-safe if nothing is selected, no
+    /// Room Entrance is selected, or the coordinate's door was deleted
+    /// out from under an open sheet.
+    func currentRoomEntranceDoorStyle() -> RoomEntranceDoorStyle? {
+        guard let target = selection, target.kind == .roomEntranceDoor, let store, let coord = target.coord else { return nil }
+        return store.roomEntranceDoors[coord]?.style
+    }
+
+    func currentRoomEntranceDoorTexture() -> String? {
+        guard let target = selection, target.kind == .roomEntranceDoor, let store, let coord = target.coord else { return nil }
+        return store.roomEntranceDoors[coord]?.textureName
+    }
+
+    /// Sept 27 (door cosmetics pass): the Texture/Style controls' own
+    /// mutators -- persist via the new MazeStore setters (which keep
+    /// coord/direction untouched, only style/textureName change) and
+    /// immediately rebuild JUST this one door's swinging leaf in the
+    /// live scene (rebuildLiveRoomEntranceDoorVisual below), same
+    /// "player stays exactly where he is" contract as every other live
+    /// Decorator edit in this file.
+    func setRoomEntranceDoorStyle(_ style: RoomEntranceDoorStyle) {
+        guard let target = selection, target.kind == .roomEntranceDoor, let store, let coord = target.coord else { return }
+        store.setRoomEntranceDoorStyle(style, at: coord)
+        rebuildLiveRoomEntranceDoorVisual(at: coord)
+        save(target)
+    }
+
+    func setRoomEntranceDoorTexture(_ textureName: String?) {
+        guard let target = selection, target.kind == .roomEntranceDoor, let store, let coord = target.coord else { return }
+        store.setRoomEntranceDoorTexture(textureName, at: coord)
+        rebuildLiveRoomEntranceDoorVisual(at: coord)
+        save(target)
+    }
+
+    /// Sept 27 (door cosmetics live update): swaps out ONLY this door's
+    /// swinging leaf node -- never the doorway's own frame strips
+    /// (those are ordinary wall material, untouched by a door's own
+    /// style/texture) and never the whole floor. Finds the CURRENT
+    /// hinge purely by its stable name (roomEntranceDoor_<row>_<col>,
+    /// unaffected by style/texture changes -- the exact name
+    /// TapNavigationController's swing/gating logic also looks up by),
+    /// removes it, and rebuilds it fresh via the same
+    /// makeRoomEntranceDoorPanel construction HallwayScene.build's own
+    /// render loop and addRoomEntranceDoorAtCurrentCell both use, so a
+    /// Decorator-edited door stays pixel-identical to a build-time one.
+    /// Re-tags the fresh hinge with the SAME DecoratorTarget identity so
+    /// it stays selectable/deletable afterward without needing to
+    /// re-tap it. Swing rotation is deliberately not preserved across
+    /// this swap -- Decorate mode never shows a Room Entrance open, so
+    /// there is never a non-zero rotation to carry over.
+    func rebuildLiveRoomEntranceDoorVisual(at coord: GridCoordinate) {
+        guard let store, let scene, let placement = store.roomEntranceDoors[coord] else { return }
+        guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        let hingeName = "roomEntranceDoor_\(coord.row)_\(coord.col)"
+        hallwayRoot.childNode(withName: hingeName, recursively: true)?.removeFromParentNode()
+        // Sept 27 (live-delete leak fix): the fresh hinge belongs back
+        // inside this door's own owning assembly node (found by its
+        // stable name), not loose under hallwayRoot -- otherwise a
+        // Style/Texture change would silently pull the hinge back OUT
+        // of the assembly deleteRoomEntranceDoor removes by name,
+        // reintroducing exactly the leak this pass fixes. Falls back
+        // to hallwayRoot only for the unreachable case of a door whose
+        // assembly node somehow doesn't exist.
+        let assemblyName = "roomEntranceDoorAssembly_\(coord.row)_\(coord.col)"
+        let assemblyParent = hallwayRoot.childNode(withName: assemblyName, recursively: true) ?? hallwayRoot
+
+        let direction = placement.direction
+        let half = store.cellSize / 2
+        let doorX = CGFloat(coord.col) * store.cellSize
+        let doorZ = CGFloat(coord.row) * store.cellSize
+        let wx: CGFloat
+        let wz: CGFloat
+        switch direction {
+        case .north: (wx, wz) = (doorX, doorZ - half)
+        case .south: (wx, wz) = (doorX, doorZ + half)
+        case .east: (wx, wz) = (doorX + half, doorZ)
+        case .west: (wx, wz) = (doorX - half, doorZ)
+        }
+        let doorWidth: CGFloat = 1.0
+        let doorHeight: CGFloat = 2.2
+        let doorCenterY = doorHeight / 2
+        let hinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, style: placement.style, textureName: placement.textureName)
+        // Sept 27 (tap-routing fix): tag with a FRESH target built
+        // straight from this door's own coord/direction/floor -- not
+        // conditionally reused from `selection` -- so a rebuilt door
+        // stays Decorator-selectable exactly like the build-time and
+        // live-add paths, with nothing left to fall out of sync.
+        DecoratorTarget(floor: floor, coord: coord, kind: .roomEntranceDoor, direction: direction).tag(hinge)
+        assemblyParent.addChildNode(hinge)
     }
 
     /// Hanging is a catalog category; each item retains its own gameplay behavior.
@@ -1577,6 +1989,7 @@ final class DecoratorState: ObservableObject {
         guard canAddExitSignAtCurrentCell(), let store, let coord = currentPlayerCell(), let scene else { return }
         store.snapshotForUndo()
         store.placeExitSign(.north, at: coord)
+        registerLiveExitSign(.north, coord)
         let node = HallwayScene.makeExitSignNode(pointing: .north, cellSize: store.cellSize)
         node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight), Float(coord.row) * Float(store.cellSize))
         let target = DecoratorTarget(floor: floor, coord: coord, kind: .exitSign)
@@ -1615,6 +2028,7 @@ final class DecoratorState: ObservableObject {
         guard !liveNodes.isEmpty else { return }
         store.snapshotForUndo()
         store.placeExitSign(direction, at: coord)
+        registerLiveExitSign(direction, coord)
         for node in liveNodes { node.removeFromParentNode() }
         let node = HallwayScene.makeExitSignNode(pointing: direction, cellSize: store.cellSize)
         node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight), Float(coord.row) * Float(store.cellSize))
@@ -1635,6 +2049,7 @@ final class DecoratorState: ObservableObject {
         guard !liveNodes.isEmpty else { return }
         store.snapshotForUndo()
         store.removeExitSign(at: coord)
+        unregisterLiveExitSign(coord)
         for node in liveNodes { node.removeFromParentNode() }
         selection = nil
         save(target)
@@ -1822,8 +2237,11 @@ final class DecoratorState: ObservableObject {
         for node in backfillNodes { node.removeFromParentNode() }
 
         var newWallMaterials: [SCNMaterial] = []
-        HallwayScene.buildWallPanel(coord: coord, direction: direction, width: panelWidth, length: panelLength, x: wx, z: wz, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), floorNumber: floor, root: hallwayRoot, wallMaterials: &newWallMaterials)
-        appendWallMaterials(newWallMaterials)
+        let wall = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
+        if nodes(for: wall).isEmpty {
+            HallwayScene.buildWallPanel(coord: coord, direction: direction, width: panelWidth, length: panelLength, x: wx, z: wz, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), floorNumber: floor, root: hallwayRoot, wallMaterials: &newWallMaterials)
+            appendWallMaterials(newWallMaterials)
+        }
         unregisterPicture(coord, direction)
 
         selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
@@ -1843,8 +2261,24 @@ struct DecoratorOverlay: View {
     /// state.selection still being the same target by the time the
     /// person finishes picking.
     @State private var pictureSheetTarget: WallFace?
+    /// Sept 26 (Decorate-mode elevator pictures): the elevator-poster
+    /// counterpart to pictureSheetTarget above, for the same two
+    /// picker sheets -- an ordinary wall Picture sets pictureSheetTarget,
+    /// an elevator poster sets this one instead; each sheet's
+    /// completion handler checks whichever is non-nil.
+    @State private var elevatorPosterSheetTarget: DecoratorTarget.ElevatorPosterSurface?
     @State private var showSystemPhotoPicker = false
     @State private var showHallwaysArtPicker = false
+    /// Sept 27 (Decorator Surfaces + Auto Lights config): the "+" menu's
+    /// two new entries each open a small config sheet instead of acting
+    /// immediately -- same @State-flag-backed .sheet(isPresented:) shape
+    /// showSystemPhotoPicker/showHallwaysArtPicker above already use.
+    @State private var showSurfacesSheet = false
+    @State private var showAutoLightsSheet = false
+    /// Sept 27 (door cosmetics pass): the selected Room Entrance's
+    /// "Texture" control opens this visual thumbnail picker -- same
+    /// @State-flag-backed .sheet(isPresented:) shape as the two above.
+    @State private var showRoomEntranceDoorTextureSheet = false
 
     /// Sept 23 (Decorator Floor expansion): DecoratorTarget.Kind.
     /// floorObject now covers Trash Can/Envelope/Paint Bucket (see its
@@ -1930,6 +2364,95 @@ struct DecoratorOverlay: View {
                             Button("Add Fluorescent") { state.add(.fluorescent) }
                                 .disabled(!state.canAdd(target, kind: .fluorescent))
                         }
+                    } else if target.kind == .picture, let surface = target.elevatorPosterSurface {
+                        // Sept 26 (Decorate-mode elevator pictures):
+                        // the cab's 3 built-in posters ARE Pictures
+                        // (kind == .picture) once tagged via
+                        // HallwayScene's DecoratorTarget(...,
+                        // location: .elevatorPoster(...), kind:
+                        // .picture) -- this reuses the ordinary
+                        // Picture inspector's Image section UI below
+                        // almost verbatim (same 4 buttons, same
+                        // picker sheets), but Image ONLY: a poster is
+                        // permanent cab geometry (see exists(_:)'s
+                        // isCab branch) with no wall-face-relative
+                        // Size, no independent Picture Light of its
+                        // own, and nothing to Delete -- so those three
+                        // controls are deliberately left off, per
+                        // Eddie's "only genuinely sensible picture
+                        // operations" instruction. Store writes go
+                        // through setElevatorBackArtwork/
+                        // setElevatorSideArtwork (MazeStore.swift)
+                        // rather than setPictureImageSelection/
+                        // saveCurrentFloorAsOverride -- building-wide
+                        // persistence, no floor to save (see save(_:)
+                        // above's own "Cab mutations persist
+                        // immediately" comment).
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Image").font(.caption).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Button("Hallways Collection — Select") {
+                                    elevatorPosterSheetTarget = surface
+                                    showHallwaysArtPicker = true
+                                }
+                                Button("Hallways Collection — Random") {
+                                    guard let name = HallwayScene.pictureAssetNames.randomElement() else { return }
+                                    switch surface {
+                                    case .back: store.setElevatorBackArtwork(.builtIn(name))
+                                    case .side: store.setElevatorSideArtwork(.builtIn(name))
+                                    case .sideRight: store.setElevatorSideRightArtwork(.builtIn(name))
+                                    }
+                                }
+                                Button("Camera Roll — Select") {
+                                    elevatorPosterSheetTarget = surface
+                                    showSystemPhotoPicker = true
+                                }
+                                Button("Camera Roll — Random") {
+                                    PhotoRollProvider.shared.randomImageWithIdentifier(caller: "Decorator: Elevator Camera Roll — Random") { identifier, _ in
+                                        guard let identifier else { return }
+                                        switch surface {
+                                        case .back: store.setElevatorBackArtwork(.cameraRoll(identifier))
+                                        case .side: store.setElevatorSideArtwork(.cameraRoll(identifier))
+                                        case .sideRight: store.setElevatorSideRightArtwork(.cameraRoll(identifier))
+                                        }
+                                    }
+                                }
+                                // Sept 26 ("Keep This Picture"): promotes
+                                // whatever's currently showing on this
+                                // poster into the same authored,
+                                // building-wide persistence the 4
+                                // buttons above already use -- see
+                                // MazeStore.currentElevatorBackIdentity/
+                                // currentElevatorSideIdentity's own doc
+                                // comment. Only shown when there's no
+                                // authored choice yet AND a known
+                                // current identity to promote (already
+                                // selected -> nothing to Keep; unknown
+                                // identity -> nothing safe to persist).
+                                let elevatorKeepIdentity: PictureImageSelection? = {
+                                    switch surface {
+                                    case .back:
+                                        guard store.elevatorCabDecoration.backArtwork == nil else { return nil }
+                                        return store.currentElevatorBackIdentity
+                                    case .side:
+                                        guard store.elevatorCabDecoration.sideArtwork == nil else { return nil }
+                                        return store.currentElevatorSideIdentity
+                                    case .sideRight:
+                                        guard store.elevatorCabDecoration.sideRightArtwork == nil else { return nil }
+                                        return store.currentElevatorSideRightIdentity
+                                    }
+                                }()
+                                if let identity = elevatorKeepIdentity {
+                                    Button("Keep This Picture") {
+                                        switch surface {
+                                        case .back: store.setElevatorBackArtwork(identity)
+                                        case .side: store.setElevatorSideArtwork(identity)
+                                        case .sideRight: store.setElevatorSideRightArtwork(identity)
+                                        }
+                                    }
+                                }
+                            }.font(.caption)
+                        }
                     } else if target.kind == .picture {
                         // Sept 21 (Picture Decorator complete pass):
                         // Image, Size, Picture Light, and Delete --
@@ -1952,33 +2475,24 @@ struct DecoratorOverlay: View {
                         // setPictureLightOn/changePictureLightBrightness)
                         // -- see those methods' own doc comments.
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Image").font(.caption).foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Button("Hallways Collection — Select") {
-                                    if let coord = target.coord, let direction = target.direction {
-                                        pictureSheetTarget = WallFace(coord: coord, direction: direction)
-                                    }
-                                    showHallwaysArtPicker = true
-                                }
-                                Button("Hallways Collection — Random") {
-                                    guard let coord = target.coord, let direction = target.direction, let name = HallwayScene.pictureAssetNames.randomElement() else { return }
-                                    store.setPictureImageSelection(.builtIn(name), direction: direction, at: coord)
-                                    store.saveCurrentFloorAsOverride()
-                                }
-                                Button("Camera Roll — Select") {
-                                    if let coord = target.coord, let direction = target.direction {
-                                        pictureSheetTarget = WallFace(coord: coord, direction: direction)
-                                    }
-                                    showSystemPhotoPicker = true
-                                }
-                                Button("Camera Roll — Random") {
-                                    guard let coord = target.coord, let direction = target.direction else { return }
-                                    PhotoRollProvider.shared.randomImageWithIdentifier(caller: "Decorator: Camera Roll — Random") { identifier, _ in
-                                        if let identifier {
-                                            store.setPictureImageSelection(.cameraRoll(identifier), direction: direction, at: coord)
-                                            store.saveCurrentFloorAsOverride()
-                                        }
-                                    }
+                            // Sept 28 (picture content moved to
+                            // Decorator): the five direct image-source
+                            // actions that used to sit here (Hallways
+                            // Collection Select/Random, Camera Roll
+                            // Select/Random, Keep This Picture) now live
+                            // behind this one "Content..." button, which
+                            // opens the EXISTING Play-mode Change Picture
+                            // menu (PictureChangeMenuHost, PictureChange
+                            // Menu.swift) via DecoratorState.
+                            // presentPictureChangeMenu -- no second
+                            // implementation of picture-changing logic;
+                            // all five actions (including Keep This
+                            // Picture) behave exactly as they did when
+                            // this menu opened from a Play-mode tap.
+                            Text("Content").font(.caption).foregroundStyle(.secondary)
+                            Button("Content...") {
+                                if let coord = target.coord, let direction = target.direction {
+                                    state.presentPictureChangeMenu(WallFace(coord: coord, direction: direction))
                                 }
                             }.font(.caption)
 
@@ -2134,6 +2648,33 @@ struct DecoratorOverlay: View {
                         // removal (deregisters the booth bookkeeping and
                         // cancels any in-flight session).
                         Button("Delete Photo Booth", role: .destructive) { state.deletePhotoBooth() }
+                    } else if target.kind == .roomEntranceDoor {
+                        // Sept 27 (Decorator Room Entrance authoring):
+                        // same minimal shape as the .roomDoor branch
+                        // above -- an existing Room Entrance's only
+                        // Decorator authoring affordance is removal.
+                        // Unlike a decorative Room Door, deleting it
+                        // does not "reveal an Empty Wall" -- it simply
+                        // leaves the two already-open cells as an
+                        // ordinary connected boundary (see
+                        // deleteRoomEntranceDoor's own doc comment).
+                        Button("Texture") { showRoomEntranceDoorTextureSheet = true }
+                        Menu {
+                            ForEach(RoomEntranceDoorStyle.allCases, id: \.self) { style in
+                                Button {
+                                    state.setRoomEntranceDoorStyle(style)
+                                } label: {
+                                    if state.currentRoomEntranceDoorStyle() == style {
+                                        Label(style.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(style.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Text("Style")
+                        }
+                        Button("Delete Room Entrance", role: .destructive) { state.deleteRoomEntranceDoor() }
                     } else {
                         // Sept 23 (ceiling light coexistence). Only
                         // ever shown when this coordinate genuinely
@@ -2208,7 +2749,26 @@ struct DecoratorOverlay: View {
                     .foregroundStyle(.white)
                 if state.enabled {
                     Menu {
+                        // Sept 27 (Decorator Room Entrance authoring):
+                        // Door Entry is architectural connectivity
+                        // between two cells, not wall decoration, so it
+                        // sits at this SAME top tier as Floor/Ceiling/
+                        // Hanging/Wall/Surfaces/Auto Lights below --
+                        // deliberately NOT nested inside Wall. No
+                        // catalog/direction picker (unlike those four
+                        // Menu entries): the player's current cell and
+                        // current facing already determine the exact
+                        // wall face, same one-tap-acts-immediately shape
+                        // as Surfaces/Auto Lights just below, except
+                        // scoped to the current cell like Floor/Ceiling/
+                        // Hanging/Wall are.
+                        Button("Door Entry") { state.addRoomEntranceDoorAtCurrentCell() }
+                            .disabled(!state.canAddRoomEntranceDoorAtCurrentCell())
                         Menu("Floor") {
+                            Toggle("Navigation Arrows", isOn: Binding(
+                                get: { state.navigationArrowsEnabledAtCurrentCell },
+                                set: { state.setNavigationArrowsEnabledAtCurrentCell($0) }))
+                                .disabled(!state.canEditNavigationArrowsAtCurrentCell)
                             ForEach(DecoratorState.FloorObjectCatalogItem.allCases, id: \.self) { item in
                                 Button(item.title) { state.addFloorObject(item) }
                                     .disabled(!state.canAddFloorObjectAtCurrentCell(item))
@@ -2232,14 +2792,23 @@ struct DecoratorOverlay: View {
                                     .disabled(!state.canSelectWallAtCurrentCell(side))
                             }
                         }
-                        // Sept 25 (Auto Lights): a direct action, not a
-                        // submenu -- unlike Floor/Ceiling/Hanging/Wall
-                        // above, it has no catalog item to pick and
-                        // isn't scoped to the player's current cell; it
-                        // resets and regenerates the WHOLE current
-                        // floor's fluorescent layout in one tap. See
-                        // autoLightsCurrentFloor()'s own doc comment.
-                        Button("Auto Lights") { state.autoLightsCurrentFloor() }
+                        // Sept 27 (Decorator Surfaces): opens a small
+                        // Walls/Floor/Ceiling picker, then a visual
+                        // texture browser -- see DecoratorSurfacesSheet/
+                        // SurfaceTexturePicker (DecoratorConfigSheets.swift).
+                        // Not scoped to the player's current cell, like
+                        // Auto Lights below -- it's a whole-floor surface
+                        // change, not a per-cell placement.
+                        Button("Surfaces") { showSurfacesSheet = true }
+                        // Sept 25 (Auto Lights), Sept 27 (config sheet):
+                        // opens a small Spacing/Brightness sheet instead
+                        // of acting immediately -- unlike Floor/Ceiling/
+                        // Hanging/Wall above, it has no catalog item to
+                        // pick and isn't scoped to the player's current
+                        // cell; it resets and regenerates the WHOLE
+                        // current floor's fluorescent layout in one tap.
+                        // See autoLightsCurrentFloor()'s own doc comment.
+                        Button("Auto Lights") { showAutoLightsSheet = true }
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 16, weight: .bold))
@@ -2249,6 +2818,20 @@ struct DecoratorOverlay: View {
                     }
                 }
             }
+            // Sept 26 (Eddie: orange Decorate controls covering the
+            // large map's bottom row): this HStack used to rely on the
+            // outer VStack's default .center alignment, landing it
+            // dead-center at the bottom of the screen -- squarely under
+            // the full map card, which is anchored bottom-RIGHT and
+            // grows left (see HandheldMapGeometry.fullRect), so it
+            // spans most of the screen's width. Left-aligning ONLY this
+            // HStack (not the outer VStack, which the selection-editor
+            // panel above still centers as before) moves it clear of
+            // the map's left edge while keeping the exact same vertical
+            // position (still just above the FLOOR N pill, per the
+            // comment above), same Button/Menu content, same size,
+            // same spacing between the two controls.
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.bottom, 12)
         .padding(.horizontal, 12)
@@ -2257,8 +2840,15 @@ struct DecoratorOverlay: View {
                 if let identifier, let face = pictureSheetTarget {
                     store.setPictureImageSelection(.cameraRoll(identifier), direction: face.direction, at: face.coord)
                     store.saveCurrentFloorAsOverride()
+                } else if let identifier, let surface = elevatorPosterSheetTarget {
+                    switch surface {
+                    case .back: store.setElevatorBackArtwork(.cameraRoll(identifier))
+                    case .side: store.setElevatorSideArtwork(.cameraRoll(identifier))
+                    case .sideRight: store.setElevatorSideRightArtwork(.cameraRoll(identifier))
+                    }
                 }
                 pictureSheetTarget = nil
+                elevatorPosterSheetTarget = nil
             }
         }
         .sheet(isPresented: $showHallwaysArtPicker) {
@@ -2266,9 +2856,29 @@ struct DecoratorOverlay: View {
                 if let name, let face = pictureSheetTarget {
                     store.setPictureImageSelection(.builtIn(name), direction: face.direction, at: face.coord)
                     store.saveCurrentFloorAsOverride()
+                } else if let name, let surface = elevatorPosterSheetTarget {
+                    switch surface {
+                    case .back: store.setElevatorBackArtwork(.builtIn(name))
+                    case .side: store.setElevatorSideArtwork(.builtIn(name))
+                    case .sideRight: store.setElevatorSideRightArtwork(.builtIn(name))
+                    }
                 }
                 pictureSheetTarget = nil
+                elevatorPosterSheetTarget = nil
             }
+        }
+        // Sept 27 (Decorator Surfaces + Auto Lights config): both new
+        // sheets live in DecoratorConfigSheets.swift -- split out the
+        // same way SystemPhotoPicker/HallwaysArtPicker were, to keep
+        // this already very large file's own diff small.
+        .sheet(isPresented: $showSurfacesSheet) {
+            DecoratorSurfacesSheet(store: store, isPresented: $showSurfacesSheet)
+        }
+        .sheet(isPresented: $showAutoLightsSheet) {
+            AutoLightsConfigSheet(state: state)
+        }
+        .sheet(isPresented: $showRoomEntranceDoorTextureSheet) {
+            RoomEntranceDoorTexturePicker(state: state, isPresented: $showRoomEntranceDoorTextureSheet)
         }
     }
 }

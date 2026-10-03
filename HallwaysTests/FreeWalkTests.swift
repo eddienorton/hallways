@@ -250,8 +250,8 @@ struct FreeWalkTests {
         #expect(len > 0.3)
         #expect(abs(dx / len - f.x) < 0.01 && abs(dz / len - f.z) < 0.01) // follows LIVE yaw
         #expect(abs(yaw(controller) - steered) < 1e-5) // no cardinal snap
-        #expect(!controller.freeWalkFootstepsOn) // Oct 2: a hold from standing is silent
-        #expect(controller.freeWalkFootstepStarts == 0) // Oct 2: a hold from standing is silent
+        #expect(controller.freeWalkFootstepsOn) // Oct 3: a moving hold has footsteps
+        #expect(controller.freeWalkFootstepStarts == 1) // started once, never restarted while steering
         #expect(!cells.isEmpty) // crossed cells without stopping
         // Release: stop where we are, keep the exact yaw.
         controller.setWalkingHeld(false)
@@ -274,15 +274,13 @@ struct FreeWalkTests {
         await settle(controller, frames: 60)
         let blocked = pos(controller)
         #expect(controller.freeHeldWalkActive) // held intent survives the wall
-        #expect(!controller.freeWalkFootstepsOn) // silent (standing hold)
-        #expect(controller.freeWalkFootstepStarts == 0) // Oct 2: a hold from standing is silent
+        #expect(!controller.freeWalkFootstepsOn) // silent while pressed against the wall
         // Same finger slides left: yaw swings past east, away from the wall.
         controller.updateHeldWalkSteering(fingerX: -160, pointsPerQuarterTurn: ppq)
         await settle(controller, frames: 20)
         #expect(controller.isAnimating)
         #expect(Double(pos(controller).x - blocked.x) > 0.5) // walking again, eastward
-        #expect(!controller.freeWalkFootstepsOn) // Oct 2: a hold from standing is silent
-        #expect(controller.freeWalkFootstepStarts == 0) // Oct 2: a hold from standing is silent
+        #expect(controller.freeWalkFootstepsOn) // Oct 3: footsteps resume with movement
         controller.setWalkingHeld(false)
         await settle(controller, frames: 3)
         #expect(!controller.isAnimating)
@@ -395,7 +393,7 @@ struct FreeWalkTests {
         let side = Double(b.x - a.x) * -f.z + Double(b.z - a.z) * f.x
         #expect(abs(side) < 0.01) // straight back, not along a cardinal
         #expect(abs(yaw(controller) - turned) < 1e-5)
-        #expect(!controller.freeWalkFootstepsOn) // Oct 2: a hold from standing is silent
+        #expect(controller.freeWalkFootstepsOn && controller.freeWalkFootstepsReverse) // Oct 3: backing up = reverse footsteps
         // Release: no post-snap.
         controller.setWalkingHeld(false)
         await settle(controller, frames: 2)
@@ -445,7 +443,7 @@ struct FreeWalkTests {
         await settle(controller, frames: 5)
         let y3 = expectedYaw(yaw0, -80)
         #expect(controller.freeHeldWalkActive) // still the same held session
-        #expect(controller.freeWalkFootstepStarts == 0) // Oct 2: a hold from standing is silent
+        #expect(controller.freeWalkFootstepStarts >= 1) // Oct 3: a moving hold has footsteps
         #expect(!cells.isEmpty) // containing-cell bookkeeping ran
         controller.setWalkingHeld(false)
         await settle(controller, frames: 2)
@@ -700,8 +698,8 @@ struct FreeWalkTests {
         await settle(c, frames: 50)
         #expect(Double(pos(c).z) >= northLimit - 1e-6)
         #expect(Double(pos(c).x) - 6 * cs > 2)        // kept going along the wall
-        #expect(!c.freeWalkFootstepsOn) // Oct 2: a hold from standing is silent
-        #expect(c.freeWalkFootstepStarts == 0) // Oct 2: a hold from standing is silent
+        #expect(c.freeWalkFootstepsOn) // Oct 3: sliding along the wall is still walking
+        #expect(c.freeWalkFootstepStarts == 1) // one continuous loop, never restarted
         #expect(abs(yaw(c) - yaw0) < 1e-6)
         #expect(!cells.isEmpty)                       // slid into the next cell normally
         c.setWalkingHeld(false)

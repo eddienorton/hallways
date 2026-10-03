@@ -7127,9 +7127,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 let moved = Double(hypotf(next.x - position.x, next.z - position.z))
                 cameraNode.position = next
                 if throttle > 0 { heldDistance += moved }
-                // Silent while pressed against a wall; silent altogether unless
-                // this hold took over an auto-walk (manualFootstepsFromAutoWalk).
-                setFreeWalkFootsteps(manualFootstepsFromAutoWalk && moved > 0.0005, reverse: throttle < 0)
+                // Footsteps whenever this hold is actually moving (Oct 3
+                // stabilization: a long-press walk from standing is no longer
+                // silent); silent while stopped or pressed against a wall.
+                setFreeWalkFootsteps(moved > 0.0005, reverse: throttle < 0)
                 freeWalkTrackCell(next)
             } else {
                 // Tap-to-stop: end right here -- this position, this yaw.

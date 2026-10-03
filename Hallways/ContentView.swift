@@ -33,7 +33,15 @@ final class WallThemeStore: ObservableObject {
 /// gap so SwiftUI can still put up the choice buttons once it exists.
 final class NavigationBridge: ObservableObject {
     @Published var scenePrepared = false
-    @Published var controller: TapNavigationController?
+    @Published var controller: TapNavigationController? {
+        didSet {
+            // Oct 2: flight recorder only (DiagnosticRecorder).
+            if (oldValue == nil) != (controller == nil) || oldValue !== controller {
+                diag(controller == nil ? "bridge.controllerCleared" : "bridge.controllerPublished",
+                     ["floor": controller?.currentFloorNumber, "arrivalReadyToOpen": arrivalReadyToOpen])
+            }
+        }
+    }
 
     // Eddie, Sept 8: "it just abruptly flashes and youre in the
     // hallway" -- no curtain, no reopening beat. Root cause: the old
@@ -47,7 +55,9 @@ final class NavigationBridge: ObservableObject {
     // This property lives here instead, on the one object that
     // actually survives the controller swap, so the curtain can watch
     // something that doesn't get pulled out from under it mid-animation.
-    @Published var floorTransitionRequested: TapNavigationController.FloorTransitionEvent?
+    @Published var floorTransitionRequested: TapNavigationController.FloorTransitionEvent? {
+        didSet { diag("bridge.floorTransitionRequested", ["set": floorTransitionRequested != nil]) }
+    }
 
     // Eddie, Sept 8: wants the curtain's closed-door look to be
     // the SAME color/lighting as the real 3D doors, pixel for
@@ -72,7 +82,9 @@ final class NavigationBridge: ObservableObject {
     // the full scene teardown/rebuild a floor change triggers, so it's
     // the only place this kind of one-shot, cross-rebuild handoff can
     // live.
-    @Published var pendingElevatorArrival = false
+    @Published var pendingElevatorArrival = false {
+        didSet { if oldValue != pendingElevatorArrival { diag("bridge.pendingElevatorArrival", ["value": pendingElevatorArrival]) } }
+    }
 
     // Eddie, Sept 16 (tap the inside of the Floor 1 entrance doors to
     // return to the opening screen): set true by Coordinator.handleTap
@@ -101,7 +113,73 @@ final class NavigationBridge: ObservableObject {
     // pendingElevatorArrival), so a stale `true` left over from the
     // PREVIOUS floor's arrival can never let a later curtain skip the
     // wait.
-    @Published var arrivalSceneReady = false
+    @Published var arrivalSceneReady = false {
+        didSet {
+            if oldValue != arrivalSceneReady {
+                diag("bridge.arrivalSceneReady", ["value": arrivalSceneReady, "controllerPresent": controller != nil,
+                                                  "arrivalReadyToOpen": arrivalReadyToOpen])
+            }
+        }
+    }
+
+    /// Oct 2 (beta: Carol, "elevator doors closed, then froze"): the arrival
+    /// curtain may open only once the DESTINATION controller is published as
+    /// well -- for a player-controlled ride it is what opens the real 3D
+    /// doors (playControlledArrivalDoorOpen). makeUIView sets
+    /// arrivalSceneReady synchronously but publishes `controller` one main-
+    /// queue hop later; when the floor build outlasted the curtain's first
+    /// poll, an already-queued poll ran in between, found the scene "ready"
+    /// and `controller` still nil, and the doors were never opened.
+    var arrivalReadyToOpen: Bool { arrivalSceneReady && controller != nil }
+
+    /// Oct 2, second Carol report (PASSIVE ride, music kept playing behind a
+    /// closed curtain): the controller requirement above is only needed by a
+    /// CONTROLLED arrival (its real doors are opened through the controller).
+    /// A passive arrival's doors are already open from
+    /// presentArrivalInsideElevator, so it needs the scene only. Either way
+    /// the curtain never waits longer than `arrivalCurtainTimeout`.
+    enum ArrivalCurtainDecision: Equatable { case wait, open, openAfterTimeout }
+    static let arrivalCurtainTimeout: TimeInterval = 3
+    static func arrivalCurtainDecision(controlled: Bool, sceneReady: Bool, controllerReady: Bool,
+                                       elapsed: TimeInterval) -> ArrivalCurtainDecision {
+        let ready = controlled ? (sceneReady && controllerReady) : sceneReady
+        if ready { return .open }
+        return elapsed >= arrivalCurtainTimeout ? .openAfterTimeout : .wait
+    }
+
+    /// A controlled arrival's door-open request that could not be delivered
+    /// yet (timeout fired before the destination controller was published).
+    /// Plain storage, not @Published: nothing renders from it. Delivered by
+    /// makeUIView the moment it publishes the controller; reset when a new
+    /// ride begins, so it can never leak into a later arrival.
+    var pendingControlledDoorOpen = false
+    /// Oct 2: one compact line of the arrival-relevant bridge state, for
+    /// the flight recorder at dangerous moments. Reads only.
+    func diagSnapshot(_ label: String) {
+        diag("snapshot." + label, [
+            "pendingElevatorArrival": pendingElevatorArrival,
+            "arrivalSceneReady": arrivalSceneReady,
+            "controllerPresent": controller != nil,
+            "controllerFloor": controller?.currentFloorNumber,
+            "arrivalReadyToOpen": arrivalReadyToOpen,
+            "arrivalWasControlled": arrivalWasControlled,
+            "pendingControlledDoorOpen": pendingControlledDoorOpen,
+            "floorTransitionRequested": floorTransitionRequested != nil,
+            "snapshotPresent": doorSnapshot != nil
+        ])
+    }
+
+    func deliverControlledArrivalDoorOpen() {
+        diag("arrival.controlledDoorOpenRequested", ["controllerPresent": controller != nil])
+        guard let controller else {
+            pendingControlledDoorOpen = true
+            elevatorLog("controlled door-open deferred -- destination controller not published yet")
+            return
+        }
+        pendingControlledDoorOpen = false
+        elevatorLog("controlled door-open delivered (floor \(controller.currentFloorNumber))")
+        controller.playControlledArrivalDoorOpen()
+    }
 
     // The camera's exact yaw (radians) at the instant a PLAYER-
     // CONTROLLED ride arrived -- nil for a passive ride, meaning
@@ -208,6 +286,9 @@ struct ContentView: View {
     // place rather than removed -- persisted first-run/resume state
     // is a separate future task, not part of this change.
     @AppStorage("hasCompletedInitialEntrance") private var hasCompletedInitialEntrance = false
+    // Sept 28 (Your Height): observed here only to push a changed height
+    // into the live camera -- see PlayerHeight and the .onChange below.
+    @AppStorage(PlayerHeight.preferenceKey) private var playerHeightInches = PlayerHeight.defaultInches
 
     // The cash "earth-shattering graphic" -- Eddie, Sept 6: grabbing
     // money should ring up with a dazzling animation and a ka-ching
@@ -395,6 +476,12 @@ struct ContentView: View {
                 // button tap. No new opening/exterior state or
                 // transition -- this reuses exactly what's already
                 // there.
+                // Sept 28 (Your Height): a changed height moves the current
+                // camera immediately (no rebuild); new builds read the same
+                // preference when they create their camera.
+                .onChange(of: playerHeightInches) { _, _ in
+                    navBridge.controller?.setEyeHeight(PlayerHeight.currentEyeHeight)
+                }
                 .onChange(of: navBridge.requestReturnToOpening) { _, value in
                     guard value else { return }
                     navBridge.requestReturnToOpening = false
@@ -498,6 +585,11 @@ struct ContentView: View {
                 if !showIntroScreen {
                     DecoratorOverlay(state: decorator, store: mazeStore)
                         .zIndex(36)
+                        // Sept 28: re-render the Decorator's "+" menu
+                        // availability as the player moves -- see
+                        // DecoratorState.observedPlayerCell.
+                        .onReceive(navController.$currentCell) { decorator.playerCellDidChange($0) }
+                        .onReceive(navController.$facing) { decorator.playerFacingDidChange($0) }
                     if mazeStore.currentMazeID != 1 {
                         HandheldMapOverlay(controller: navController)
                             .id(ObjectIdentifier(navController))
@@ -573,16 +665,27 @@ struct ContentView: View {
             }
 
             VStack {
+                // Oct 3 (Build 8): variable-width inventory must never move
+                // the fixed controls. Money + the Reset/Map buttons keep
+                // their natural size at higher layout priority; the
+                // inventory pill gets whatever width is left and scrolls
+                // inside it when it can't fit (see CarriedItemsPill). The
+                // row as a whole can therefore never exceed the screen --
+                // it used to, because the pill was .fixedSize(), and an
+                // overflowing HStack spills off BOTH edges.
                 HStack(spacing: 8) {
                     moneyHUD
+                        .fixedSize()
+                        .layoutPriority(2)
                     // Sept 26 (intro-HUD leak fix): mission-progress
                     // pills (e.g. "Painted 0/51") must not render on the
                     // intro screen either -- same gate as DecoratorOverlay/
                     // HandheldMapOverlay above.
                     if let controller = navBridge.controller, !showIntroScreen {
                         CarriedItemsPill(controller: controller)
+                            .layoutPriority(1)
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                     HStack(spacing: 8) {
                         Button {
                             navLog("[LIGHTBUILD] rebuild trigger: Reset/\"Start From Beginning\" button pressed -- leaving floor \(mazeStore.currentMazeID), switching to floor 1")
@@ -614,6 +717,8 @@ struct ContentView: View {
                                 .background(.ultraThinMaterial, in: Circle())
                         }
                     }
+                    .fixedSize()
+                    .layoutPriority(2)
                 }
                 Spacer()
             }
@@ -668,6 +773,7 @@ struct ContentView: View {
         // fullScreenCover the player can't see anyway, so there's
         // nothing to hide.
         .onChange(of: mazeStore.currentMazeID) { _ in
+            diag("scene.rebuildTrigger", ["floor": mazeStore.currentMazeID, "sceneVersion": sceneVersion, "newVersion": mazeStore.version])
             navLog("[LIGHTBUILD] rebuild trigger: mazeStore.currentMazeID changed -> \(mazeStore.currentMazeID) (elevator arrival or grid-editor floor nav) -- sceneVersion \(sceneVersion)->\(mazeStore.version) -- this bump forces HallwaySceneView's .id() to change, which discards the current TouchTrackingSCNView + Coordinator and calls makeUIView fresh")
             sceneVersion = mazeStore.version
         }
@@ -814,7 +920,7 @@ private struct NavigationOverlay: View {
         // which is untouched.
 //        .ignoresSafeArea(edges: .bottom)
         .padding(.bottom, HandheldMapGeometry.hudPillToSafeGap)
-        .offset(y: 30)
+        .offset(y: HandheldMapGeometry.floorPillOffsetY)
       
         .animation(.easeInOut(duration: 0.2), value: controller.transientMessage)
     }
@@ -851,38 +957,52 @@ private struct CarriedItemsPill: View {
 
     var body: some View {
         if !controller.collectedObjects.isEmpty || !controller.carriedMail.isEmpty || controller.paintProgress != nil || controller.carryingExtinguisher {
-            HStack(spacing: 8) {
-                ForEach(Array(controller.collectedObjects.enumerated()), id: \.offset) { _, kind in
-                    Text(kind.displayEmoji).font(.system(size: 22))
-                }
-                if let progress = controller.paintProgress {
-                    Text(progress).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
-                }
-                if controller.carryingExtinguisher {
-                    Label("Extinguisher", systemImage: "fire.extinguisher")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.red.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
-                }
-                ForEach(controller.carriedMail) { letter in
-                    // Sept 26 (Eddie: carried-mail pills overflow with
-                    // 3+ items): drop the "Rm " prefix, room number
-                    // only -- icon/styling/spacing/logic all unchanged.
-                    Label("\(letter.roomNumber)", systemImage: "envelope.fill")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.brown.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
-                }
+            // Oct 3 (Build 8): natural width when it fits the space the top
+            // row leaves it; otherwise the same chips scroll horizontally
+            // inside the same capsule. Never wider than that space, so the
+            // fixed Reset/Map controls stay put however much is carried.
+            ViewThatFits(in: .horizontal) {
+                chips
+                ScrollView(.horizontal, showsIndicators: false) { chips }
+                    .fixedSize(horizontal: false, vertical: true) // never grow taller than the chips
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(Color.black.opacity(0.7), in: Capsule())
-            .fixedSize()
+            .clipShape(Capsule())
         }
+    }
+
+    private var chips: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(controller.collectedObjects.enumerated()), id: \.offset) { _, kind in
+                Text(kind.displayEmoji).font(.system(size: 22))
+            }
+            if let progress = controller.paintProgress {
+                Text(progress).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+            }
+            if controller.carryingExtinguisher {
+                // Oct 3 (Build 8): emoji only -- no "Extinguisher" label.
+                Text("🧯")
+                    .font(.system(size: 17, weight: .bold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.red.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityLabel("Fire extinguisher")
+            }
+            ForEach(controller.carriedMail) { letter in
+                // Sept 26: room number only. Oct 3 (Build 8): envelope icon
+                // removed too -- the brown chip already says "mail".
+                Text("\(letter.roomNumber)")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.brown.opacity(0.65), in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityLabel("Mail for room \(letter.roomNumber)")
+            }
+        }
+        .fixedSize()
     }
 }
 
@@ -1025,6 +1145,7 @@ private struct ElevatorCurtainOverlay: View {
             guard event != nil else { return }
             openFraction = 0
             visible = true
+            diag("curtain.shown", ["controlled": navBridge.arrivalWasControlled, "snapshotPresent": navBridge.doorSnapshot != nil])
             // A brief beat so mazeStore.advanceToNextMaze() (called by
             // the controller right alongside this same event) actually
             // swaps in and settles behind this fully-closed curtain
@@ -1032,6 +1153,7 @@ private struct ElevatorCurtainOverlay: View {
             // animation would start revealing a stale frame of the OLD
             // floor for an instant.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                diag("curtain.arrivalDing")
                 SoundEffects.playElevatorArrival()
                 DispatchQueue.main.asyncAfter(deadline: .now() + SoundEffects.elevatorDoorOpeningDelay) {
                     // Eddie, Sept 16 (atomic arrival presentation):
@@ -1061,12 +1183,39 @@ private struct ElevatorCurtainOverlay: View {
                     // otherwise. The curtain stays fully closed for
                     // however much longer that takes -- nothing behind
                     // it is visible either way.
+                    let waitStarted = Date()
+                    let controlled = navBridge.arrivalWasControlled
+                    elevatorLog("arrival curtain waiting -- \(controlled ? "controlled" : "passive") arrival")
+                    navBridge.diagSnapshot("curtainWaitBegin")
+                    // Flight recorder only: a poll line on any state change
+                    // or every ~0.5 s of waiting -- never every 30 ms poll.
+                    var lastPollLog = Date.distantPast
+                    var lastPollState = ""
                     func openWhenSceneReady() {
-                        guard navBridge.arrivalSceneReady else {
+                        let decision = NavigationBridge.arrivalCurtainDecision(
+                            controlled: controlled,
+                            sceneReady: navBridge.arrivalSceneReady,
+                            controllerReady: navBridge.controller != nil,
+                            elapsed: Date().timeIntervalSince(waitStarted))
+                        let pollState = "\(navBridge.arrivalSceneReady)/\(navBridge.controller != nil)/\(decision)"
+                        if pollState != lastPollState || Date().timeIntervalSince(lastPollLog) >= 0.5 {
+                            lastPollLog = Date()
+                            lastPollState = pollState
+                            diag("curtain.poll", ["elapsed": Date().timeIntervalSince(waitStarted), "decision": "\(decision)",
+                                                  "sceneReady": navBridge.arrivalSceneReady,
+                                                  "controllerPresent": navBridge.controller != nil, "controlled": controlled])
+                        }
+                        if decision == .wait {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
                                 openWhenSceneReady()
                             }
                             return
+                        }
+                        if decision == .openAfterTimeout {
+                            // Fail OPEN: never leave the player behind the curtain.
+                            elevatorLog("arrival curtain TIMEOUT after \(NavigationBridge.arrivalCurtainTimeout)s -- opening anyway (controlled=\(controlled), sceneReady=\(navBridge.arrivalSceneReady), controller=\(navBridge.controller != nil))")
+                        } else {
+                            elevatorLog("arrival curtain released normally after \(String(format: "%.2f", Date().timeIntervalSince(waitStarted)))s (controlled=\(controlled), controller=\(navBridge.controller != nil))")
                         }
                         // Sept 14 (Eddie): "keep the elevator music playing
                         // continuously while the doors remain closed... stop
@@ -1076,8 +1225,9 @@ private struct ElevatorCurtainOverlay: View {
                         // this is the exact instant the doors begin sliding
                         // apart, right after the existing arrival ding-dong
                         // above; that ding-dong's own timing is untouched.
+                        navBridge.diagSnapshot("curtainRelease")
                         SoundEffects.stopElevatorMusic()
-                        navBridge.controller?.playArrivalLightWash(openingDuration: navBridge.arrivalWasControlled ? 1.6 : 1.0)
+                        navBridge.controller?.playArrivalLightWash(openingDuration: controlled ? 1.6 : 1.0)
                         // Eddie, Sept 16 (spatially-truthful controlled
                         // arrival): the instant this fade starts
                         // revealing a controlled arrival, tell the
@@ -1087,14 +1237,19 @@ private struct ElevatorCurtainOverlay: View {
                         // own comment. No-op for a passive arrival,
                         // whose doors were already opened, instantly,
                         // back in presentArrivalInsideElevator.
-                        if navBridge.arrivalWasControlled {
-                            navBridge.controller?.playControlledArrivalDoorOpen()
+                        // Oct 2: delivered now if the controller exists (always,
+                        // on the normal path), otherwise deferred to the moment
+                        // makeUIView publishes it -- never silently dropped.
+                        if controlled {
+                            navBridge.deliverControlledArrivalDoorOpen()
                         }
                         withAnimation(.easeInOut(duration: 1.0)) {
                             openFraction = 1
                         }
+                        diag("curtain.openingStarted")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
                             visible = false
+                            diag("curtain.hidden", ["note": "arrival complete"])
                         }
                     }
                     openWhenSceneReady()
@@ -1517,6 +1672,11 @@ struct HallwaySceneView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> TouchTrackingSCNView {
         let view = TouchTrackingSCNView()
+        // Oct 2: flight recorder (logging only).
+        DiagnosticRecorder.shared.floor = mazeStore.currentMazeID
+        let diagBuildStarted = Date()
+        diag("scene.makeUIView.begin", ["floor": mazeStore.currentMazeID, "pendingElevatorArrival": navBridge.pendingElevatorArrival,
+                                        "cellsEmpty": mazeStore.cells.isEmpty])
 
         // Sept 22 (Eddie: in-process rebuild-lifecycle investigation).
         // Minted ONCE, right at the top of makeUIView, so every
@@ -1574,11 +1734,14 @@ struct HallwaySceneView: UIViewRepresentable {
             // already-known type to destructure in a SEPARATE, trivial second
             // statement, instead of solving both at once. No behavior change --
             // same call, same arguments, same resulting bindings below.
-            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
+            let hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: mazeStore.missionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, tables: mazeStore.tables, desks: mazeStore.desks, waterCoolers: mazeStore.waterCoolers, officeChairs: mazeStore.officeChairs, floorLamps: mazeStore.floorLamps, aquariums: mazeStore.aquariums, filingCabinets: mazeStore.filingCabinets, cellSurfaces: mazeStore.cellSurfaces, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
             navBridge.pendingElevatorArtwork = [:]
             let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, _, floorMapPlaneNodes, pictureMaterials) = hallwaySceneBuildResult
             view.scene = scene
             view.pointOfView = cameraNode
+            // Oct 3 EXPERIMENT 1: this floor's authored floor-glow sequences
+            // (none on most floors -- then this installs nothing).
+            HallwayScene.installFloorGlowSequences(mazeStore.floorGlowSequences, cells: mazeStore.cells, root: scene.rootNode)
             #if DEBUG
             // Sept 22 (Eddie): lighting-determinism instrumentation
             // (see LightingDeterminismCheck.swift) -- the scene is now
@@ -1660,10 +1823,17 @@ struct HallwaySceneView: UIViewRepresentable {
                 let shaftNodes: [Any] = [elevatorDoors.left, elevatorDoors.right, elevatorDoors.shaft]
                 DispatchQueue.global(qos: .utility).async { [weak view] in
                     guard let view else { return }
+                    diag("scene.shaftPrepare.begin")
                     _ = view.prepare(shaftNodes)
+                    diag("scene.shaftPrepare.end")
                 }
             }
             let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: mazeStore.cells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: mazeStore.missionSigns, exitSigns: mazeStore.exitSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors.mapValues { $0.direction }, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            // Sept 29 FREE-WALK EXPERIMENT: player-controlled taps/holds walk
+            // along the camera's actual yaw and stop at any X/Z. Flip
+            // TapNavigationController.freeWalkExperimentOn to false to get the
+            // grid-centered navigation back exactly.
+            navController.freeWalkEnabled = TapNavigationController.freeWalkExperimentOn
             #if DEBUG
             // Sept 22 (Eddie: presentation-vs-model investigation).
             // Hands this rebuild's LIGHTBUILD number (nil unless this
@@ -1688,7 +1858,10 @@ struct HallwaySceneView: UIViewRepresentable {
                 let preservedYaw = navBridge.pendingArrivalYaw
                 navBridge.pendingElevatorArrival = false
                 navBridge.pendingArrivalYaw = nil
+                diag("arrival.presentInsideElevator.begin", ["controlled": preservedYaw != nil])
                 navController.presentArrivalInsideElevator(preservedYaw: preservedYaw)
+                diag("arrival.presentInsideElevator.end")
+                elevatorLog("destination scene ready -- floor \(mazeStore.currentMazeID), \(preservedYaw == nil ? "passive" : "controlled")")
                 // Eddie, Sept 16 (atomic arrival presentation): only
                 // set once presentArrivalInsideElevator has fully run,
                 // synchronously, right above -- by the time this line
@@ -1753,7 +1926,11 @@ struct HallwaySceneView: UIViewRepresentable {
                 // Eddie, Sept 16 (spatially-truthful controlled
                 // arrival): a passive arrival -- see NavigationBridge.arrivalWasControlled.
                 navBridge.arrivalWasControlled = false
+                navBridge.pendingControlledDoorOpen = false
+                elevatorLog("ride complete (passive) -- leaving floor \(mazeStore.currentMazeID) for \(mazeStore.nextMazeID ?? -1)")
+                navBridge.diagSnapshot("handoffBeforeAdvance")
                 mazeStore.advanceToNextMaze()
+                diag("elevator.advanceToNextMaze.returned", ["nowFloor": mazeStore.currentMazeID])
             }
             // Controlled arrival keeps a full-frame snapshot (never split into doors)
             // while the destination is constructed with the same displayed artwork.
@@ -1771,7 +1948,11 @@ struct HallwaySceneView: UIViewRepresentable {
                 // arrival): a controlled arrival -- see
                 // NavigationBridge.arrivalWasControlled.
                 navBridge.arrivalWasControlled = true
+                navBridge.pendingControlledDoorOpen = false
+                elevatorLog("ride complete (controlled) -- leaving floor \(mazeStore.currentMazeID) for \(mazeStore.nextMazeID ?? -1)")
+                navBridge.diagSnapshot("handoffBeforeAdvance")
                 mazeStore.advanceToNextMaze()
+                diag("elevator.advanceToNextMaze.returned", ["nowFloor": mazeStore.currentMazeID])
             }
             view.delegate = navController
             context.coordinator.navigationController = navController
@@ -1798,6 +1979,9 @@ struct HallwaySceneView: UIViewRepresentable {
             // discrete flick = turn around, same as the D-pad's back button.
             let panRotate = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePanRotate))
             panRotate.maximumNumberOfTouches = 1
+            // Oct 2 (auto-walk -> hold handoff): while a tap-to-point walk is
+            // running, this pan does not free-look -- a finger that drags is
+            // the hold taking over (see handlePanRotate / beginHold).
             view.addGestureRecognizer(panRotate)
 
             let swipeDown = UISwipeGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleSwipeDown))
@@ -1826,9 +2010,19 @@ struct HallwaySceneView: UIViewRepresentable {
             // @StateObject updates need to land on the next runloop tick,
             // not synchronously inside makeUIView.
             DispatchQueue.main.async {
+                diag("scene.publishControllerHop", ["floor": navController.currentFloorNumber])
                 navBridge.controller = navController
+                if navBridge.arrivalSceneReady || navBridge.pendingControlledDoorOpen {
+                    elevatorLog("destination controller published -- floor \(navController.currentFloorNumber)")
+                }
+                // Oct 2: a controlled door-open the curtain could not deliver
+                // (timeout before this publish) is delivered right here.
+                if navBridge.pendingControlledDoorOpen {
+                    navBridge.deliverControlledArrivalDoorOpen()
+                }
                 navBridge.scenePrepared = false
                 view.prepare([scene]) { _ in
+                    diag("scene.prepareFinished")
                     DispatchQueue.main.async {
                         guard navBridge.controller === navController else { return }
                         navBridge.scenePrepared = true
@@ -1870,10 +2064,14 @@ struct HallwaySceneView: UIViewRepresentable {
         context.coordinator.lastWallTexture = mazeStore.wallTexture
         context.coordinator.lastFloorTexture = mazeStore.floorTexture
         context.coordinator.lastCeilingTexture = mazeStore.ceilingTexture
+        context.coordinator.lastCellSurfaces = mazeStore.cellSurfaces
         context.coordinator.decorator = decorator
         decorator.attach(scene: view.scene, store: mazeStore)
         decorator.canEditCab = { [weak coordinator = context.coordinator] in
             coordinator?.navigationController?.canRotate == true
+        }
+        decorator.isPlayerInElevatorCab = { [weak coordinator = context.coordinator] in
+            coordinator?.navigationController?.elevatorAwaitingEntryDirection != nil
         }
         decorator.stopWalking = { [weak coordinator = context.coordinator] in
             coordinator?.cancelHeldWalkForMap()
@@ -2018,6 +2216,13 @@ struct HallwaySceneView: UIViewRepresentable {
         decorator.unregisterLivePhotoBooth = { [weak coordinator = context.coordinator] coord in
             coordinator?.navigationController?.unregisterPhotoBooth(at: coord)
         }
+        // Oct 1 (Decorator Games): same routing for the ten game fixtures.
+        decorator.registerLiveGame = { [weak coordinator = context.coordinator] kind, direction, coord, node in
+            coordinator?.navigationController?.registerGame(kind, direction: direction, node: node, at: coord)
+        }
+        decorator.unregisterLiveGame = { [weak coordinator = context.coordinator] kind, coord in
+            coordinator?.navigationController?.unregisterGame(kind, at: coord)
+        }
         // Sept 27 (Decorator Room Entrance authoring): same
         // register/unregister routing as the mirror/fire/extinguisher/
         // photo-booth pairs just above -- DecoratorState.
@@ -2103,6 +2308,8 @@ struct HallwaySceneView: UIViewRepresentable {
         }
         #endif
 
+        diag("scene.makeUIView.end", ["floor": mazeStore.currentMazeID, "seconds": Date().timeIntervalSince(diagBuildStarted),
+                                      "arrivalSceneReady": navBridge.arrivalSceneReady])
         return view
     }
 
@@ -2154,12 +2361,14 @@ struct HallwaySceneView: UIViewRepresentable {
         if context.coordinator.lastTheme != themeStore.current
             || context.coordinator.lastWallTexture != mazeStore.wallTexture
             || context.coordinator.lastFloorTexture != mazeStore.floorTexture
-            || context.coordinator.lastCeilingTexture != mazeStore.ceilingTexture {
+            || context.coordinator.lastCeilingTexture != mazeStore.ceilingTexture
+            || context.coordinator.lastCellSurfaces != mazeStore.cellSurfaces {
             context.coordinator.lastTheme = themeStore.current
             context.coordinator.lastWallTexture = mazeStore.wallTexture
             context.coordinator.lastFloorTexture = mazeStore.floorTexture
             context.coordinator.lastCeilingTexture = mazeStore.ceilingTexture
-            context.coordinator.applyTheme(themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture)
+            context.coordinator.lastCellSurfaces = mazeStore.cellSurfaces
+            context.coordinator.applyTheme(themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, cellSurfaces: mazeStore.cellSurfaces, root: uiView.scene?.rootNode)
         }
 
         // Sept 20 (picture-teleport fix): the in-gameplay Change
@@ -2303,6 +2512,8 @@ struct HallwaySceneView: UIViewRepresentable {
         var lastWallTexture: String? = nil
         var lastFloorTexture: String? = nil
         var lastCeilingTexture: String? = nil
+        /// Oct 1 (cell-surface overrides): diffed like the three above.
+        var lastCellSurfaces: [GridCoordinate: CellSurfaceOverride] = [:]
 
 
         // Drag-controlled left/right turning: how many points of
@@ -2310,6 +2521,12 @@ struct HallwaySceneView: UIViewRepresentable {
         // constant — smaller means a shorter drag commits a turn,
         // larger means a longer, more deliberate one.
         private let dragRotateDistance: CGFloat = 140
+
+        // Sept 30 A/B experiment: HELD-WALK steering only (the free held
+        // walk's X = turn). Points of horizontal finger travel per 90
+        // degrees while walking; was dragRotateDistance (140). Ordinary
+        // Free Look / pan and held-endpoint look keep dragRotateDistance.
+        private let heldWalkSteerDistance: CGFloat = 230
 
         // Positional counterpart of dragRotateDistance -- how many
         // points of vertical drag equal one full grid cell of forward/
@@ -2343,38 +2560,6 @@ struct HallwaySceneView: UIViewRepresentable {
         // to retune independently of dragMoveDistance.
         private let pinchScalePerCell: Double = 0.4
 
-        // Sept 24 (TOUCH/INSPECTION pass): temporary two-finger pinch-scale
-        // on wall pictures -- same borrow-the-whole-gesture model the
-        // mission plaque below uses, so the two inspectable wall fixtures
-        // feel related. When a pinch begins ON a picture (see handlePinch),
-        // this whole gesture scales just the picture's frame node; on
-        // release it springs back to its authored size. Nothing is
-        // persisted and navigation/editor state never hears about it. nil
-        // whenever no picture is being pinched. Min kept at 0.6x; the max
-        // was raised from the old 1.6x to 2.5x this pass so a user can
-        // genuinely inspect a photograph rather than merely make it
-        // somewhat larger -- 2.5x is the conservative end of Eddie's
-        // 2.5-3.0 target, chosen to keep a magnified frame clear of
-        // near-plane/camera clipping.
-        private var pinchPictureFrame: SCNNode?
-        private var pinchPictureBaseScale = SCNVector3(1, 1, 1)
-        private let picturePinchMinScale: Double = 0.6
-        private let picturePinchMaxScale: Double = 2.5
-
-        // Sept 24 (TOUCH/INSPECTION pass): mission plaque counterpart of
-        // the picture pinch just above -- same model, same useful range,
-        // same spring-back. The WHOLE framed plaque assembly scales in
-        // place: its frame node is tagged .missionSign (DecoratorTarget)
-        // at build time and carries the plaque plane plus any picture
-        // light as children, so scaling that one node enlarges the
-        // complete plaque as a unit. It then snaps exactly back to the
-        // authored scale on release. nil whenever no plaque is being
-        // pinched.
-        private var pinchPlaqueFrame: SCNNode?
-        private var pinchPlaqueBaseScale = SCNVector3(1, 1, 1)
-        private let plaquePinchMinScale: Double = 0.6
-        private let plaquePinchMaxScale: Double = 2.5
-
         // Ticks while a long-press-forward is held -- see
         // handleLongPressForward below. nil whenever nothing's held.
         private var forwardHoldTimer: Timer?
@@ -2395,69 +2580,74 @@ struct HallwaySceneView: UIViewRepresentable {
         // be opened instead. Eddie, Sept 5: "i think it should wait for
         // you to tap the steel door before it slides up."
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard let controller = navigationController else { return }
+            guard let controller = navigationController else {
+                diag("tap.ignored", ["reason": "no navigation controller"])
+                return
+            }
+            // Oct 2 flight recorder: one compact line per tap (human-rate).
+            diag("tap.received", ["cell": controller.currentCell, "rideInProgress": controller.isElevatorRideInProgress,
+                                  "freeTapWalking": controller.isFreeTapWalking])
+            // TAP AGAIN -> STOP (Sept 30): while a navigation-tap walk is under
+            // way the whole screen is a brake -- ahead of every interaction
+            // below, and it never starts a new walk in the same tap.
+            if controller.isFreeTapWalking {
+                controller.stopFreeTapWalk()
+                diag("tap.stoppedFreeTapWalk")
+                return
+            }
             if let view = gesture.view as? SCNView, controller.canRotate,
                decorator?.select(at: gesture.location(in: view), in: view) == true {
+                diag("tap.consumed", ["by": "decorator selection"])
                 return
             }
-            if controller.pictureAtCurrentCell != nil {
-                // Sept 28 (picture content moved to Decorator): a
-                // Play-mode tap on a wall picture used to open the
-                // Change Picture menu right here (controller.
-                // activatePictureMenu) -- that menu now opens only from
-                // Decorator's "Content..." button (DecoratorMode.swift),
-                // so ordinary Play no longer mutates picture content at
-                // all. Still an intercepting `return` (not a fall-
-                // through to the hit-testing/advance() logic below), so
-                // a tap landing on a picture continues to do exactly
-                // what it always did to forward movement -- nothing --
-                // and pinch-zoom (handlePinch, unrelated to this tap
-                // gesture) is completely untouched. Reserved for a
-                // future Play tap behavior, probably a sound cue.
-                return
-            }
+            // Oct 2: the Play-mode picture early-return that used to sit
+            // here is gone. It keyed on (current cell, facing) -- not on
+            // what was tapped -- so in Free Walk a picture on the wall your
+            // nearest-cardinal facing pointed at silently killed EVERY tap
+            // on screen. Pictures stay inert in Play: nothing below acts on
+            // a picture hit, and content editing lives in Decorate.
             if let coord = controller.photoBoothAtCurrentCell {
-                controller.activatePhotoBooth(at: coord)
+                controller.composeWallView(.photoBooth, at: coord) { controller.activatePhotoBooth(at: coord) }
                 return
             }
             if let coord = controller.ticTacToeTerminalAtCurrentCell {
-                controller.activateTicTacToeTerminal(at: coord)
+                controller.composeWallView(.ticTacToe, at: coord) { controller.activateTicTacToeTerminal(at: coord) }
                 return
             }
             if let coord = controller.shellGameTerminalAtCurrentCell {
-                controller.activateShellGameTerminal(at: coord)
+                controller.composeWallView(.shellGame, at: coord) { controller.activateShellGameTerminal(at: coord) }
                 return
             }
             if let coord = controller.rockPaperScissorsTerminalAtCurrentCell {
-                controller.activateRockPaperScissorsTerminal(at: coord)
+                controller.composeWallView(.rockPaperScissors, at: coord) { controller.activateRockPaperScissorsTerminal(at: coord) }
                 return
             }
             if let coord = controller.higherLowerTerminalAtCurrentCell {
-                controller.activateHigherLowerTerminal(at: coord)
+                controller.composeWallView(.higherLower, at: coord) { controller.activateHigherLowerTerminal(at: coord) }
                 return
             }
             if let coord = controller.fiveCardDrawTerminalAtCurrentCell {
-                controller.activateFiveCardDrawTerminal(at: coord)
+                controller.composeWallView(.fiveCardDraw, at: coord) { controller.activateFiveCardDrawTerminal(at: coord) }
                 return
             }
             if let coord = controller.simonTerminalAtCurrentCell {
-                controller.activateSimonTerminal(at: coord)
+                controller.composeWallView(.simon, at: coord) { controller.activateSimonTerminal(at: coord) }
                 return
             }
             if let coord = controller.hangmanTerminalAtCurrentCell {
-                controller.activateHangmanTerminal(at: coord)
+                controller.composeWallView(.hangman, at: coord) { controller.activateHangmanTerminal(at: coord) }
                 return
             }
             if let coord = controller.connectFourTerminalAtCurrentCell {
-                controller.activateConnectFourTerminal(at: coord)
+                controller.composeWallView(.connectFour, at: coord) { controller.activateConnectFourTerminal(at: coord) }
                 return
             }
             if let coord = controller.checkersTerminalAtCurrentCell {
-                controller.activateCheckersTerminal(at: coord)
+                controller.composeWallView(.checkers, at: coord) { controller.activateCheckersTerminal(at: coord) }
                 return
             }
             if let coord = controller.woidleTerminalAtCurrentCell {
-                controller.activateWoidleTerminal(at: coord)
+                controller.composeWallView(.woidle, at: coord) { controller.activateWoidleTerminal(at: coord) }
                 return
             }
             if let view = gesture.view as? SCNView {
@@ -2495,6 +2685,47 @@ struct HallwaySceneView: UIViewRepresentable {
                     controller.activeElevatorPictureMenu = target
                     return
                 }
+                // Sept 28 (Floor Lamp): in Play, a tap whose NEAREST hit is
+                // a floor lamp switches it on/off and consumes the tap (no
+                // walking). Nearest-only, so a lamp can't be switched
+                // through a wall. Decorate mode never reaches here for a
+                // lamp -- DecoratorState.select above claims the tap first
+                // -- and is excluded explicitly as well.
+                if decorator?.enabled != true,
+                   let nearest = hits.first,
+                   let lampCoord = HallwayScene.floorLampCoordinate(for: nearest.node),
+                   decorator?.toggleFloorLamp(at: lampCoord) == true {
+                    navLog("tap toggled floor lamp at \(lampCoord)")
+                    return
+                }
+                // Sept 28 (Aquarium): in Play, a tap whose NEAREST hit is an
+                // aquarium is simply consumed -- no walk, no dialog, no
+                // pickup. It's scenery to look at. (Decorate mode claims the
+                // tap earlier via DecoratorState.select.)
+                if decorator?.enabled != true,
+                   let nearest = hits.first,
+                   let aquariumCoord = HallwayScene.aquariumCoordinate(for: nearest.node) {
+                    navLog("tap hit aquarium at \(aquariumCoord) -- consumed, no walk")
+                    return
+                }
+                // Sept 28 (Filing Cabinet): in Play, a tap whose NEAREST hit
+                // is a drawer (any part of it) opens/closes that drawer; a
+                // tap on the carcass does nothing. Either way the tap is
+                // consumed -- no walk, no pickup, no dialog. Resolved purely
+                // by scene-graph ancestry, so any viewing angle works.
+                // Decorate mode claims the tap earlier (DecoratorState.select
+                // selects the whole cabinet) and is excluded here as well.
+                if decorator?.enabled != true,
+                   let nearest = hits.first,
+                   let cabinetHit = HallwayScene.filingCabinetHit(for: nearest.node) {
+                    if let drawer = cabinetHit.drawerIndex {
+                        decorator?.tapFilingCabinetDrawer(drawer, at: cabinetHit.coord)
+                        navLog("tap filing cabinet drawer \(drawer) at \(cabinetHit.coord)")
+                    } else {
+                        navLog("tap hit filing cabinet body at \(cabinetHit.coord) -- consumed, no walk")
+                    }
+                    return
+                }
                 // Sept 12: each hit-test below can find its object's mesh
                 // visible straight down the hall well before the player has
                 // actually reached it -- e.g. the elevator, a chute, or a
@@ -2510,6 +2741,24 @@ struct HallwaySceneView: UIViewRepresentable {
                 // advance() -- held-walk never hit this because
                 // advanceWhileHeld() goes straight to movement with no
                 // hit-testing at all, which is why only tap was affected.
+                // Oct 2 (WALL INTERACTIONS, Play only): a tap whose first real
+                // surface belongs to ANY tappable wall object (picture, plaque,
+                // map, door, chute, game, booth, extinguisher -- see
+                // TapNavigationController.wallInteractionTarget) glides to that
+                // object's pose and, on arrival, runs its existing action.
+                // Falls through to the old per-object branches below whenever
+                // composition declines (Decorate, grid, locked) or the object
+                // has nothing available right now (open door, won game).
+                if decorator?.enabled != true,
+                   let exact = exactWallHit(at: location, in: view, controller: controller) {
+                    diag("wallTarget.exactHit", ["kind": exact.target.kind, "coord": exact.target.face.coord,
+                                                 "direction": exact.target.face.direction, "node": exact.hitNodeName,
+                                                 "tap": Self.pointText(location)])
+                    if controller.composeWallInteraction(exact.target) {
+                        navLog("tap on \(exact.target.kind) at \(exact.target.face.coord) -- composing interaction pose")
+                        return
+                    }
+                }
                 if let bathroomDoorCoord = hits.compactMap({ controller.bathroomDoorCoordinate(for: $0.node) }).first,
                    controller.isAdjacentToBathroomDoor(bathroomDoorCoord) {
                     navLog("tap hit bathroom door at \(bathroomDoorCoord)")
@@ -2572,57 +2821,57 @@ struct HallwaySceneView: UIViewRepresentable {
                    controller.extinguishFire(at: coord) { return }
                 if let coord = hits.compactMap({ controller.photoBoothCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activatePhotoBooth(at: coord)
+                    controller.composeWallView(.photoBooth, at: coord) { controller.activatePhotoBooth(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.ticTacToeTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateTicTacToeTerminal(at: coord)
+                    controller.composeWallView(.ticTacToe, at: coord) { controller.activateTicTacToeTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.shellGameTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateShellGameTerminal(at: coord)
+                    controller.composeWallView(.shellGame, at: coord) { controller.activateShellGameTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.rockPaperScissorsTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateRockPaperScissorsTerminal(at: coord)
+                    controller.composeWallView(.rockPaperScissors, at: coord) { controller.activateRockPaperScissorsTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.higherLowerTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateHigherLowerTerminal(at: coord)
+                    controller.composeWallView(.higherLower, at: coord) { controller.activateHigherLowerTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.fiveCardDrawTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateFiveCardDrawTerminal(at: coord)
+                    controller.composeWallView(.fiveCardDraw, at: coord) { controller.activateFiveCardDrawTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.simonTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateSimonTerminal(at: coord)
+                    controller.composeWallView(.simon, at: coord) { controller.activateSimonTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.hangmanTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateHangmanTerminal(at: coord)
+                    controller.composeWallView(.hangman, at: coord) { controller.activateHangmanTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.connectFourTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateConnectFourTerminal(at: coord)
+                    controller.composeWallView(.connectFour, at: coord) { controller.activateConnectFourTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.checkersTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateCheckersTerminal(at: coord)
+                    controller.composeWallView(.checkers, at: coord) { controller.activateCheckersTerminal(at: coord) }
                     return
                 }
                 if let coord = hits.compactMap({ controller.woidleTerminalCoordinate(for: $0.node) }).first,
                    coord == controller.currentCell {
-                    controller.activateWoidleTerminal(at: coord)
+                    controller.composeWallView(.woidle, at: coord) { controller.activateWoidleTerminal(at: coord) }
                     return
                 }
                 if hits.contains(where: { controller.isElevatorMissionSign($0.node) }), controller.elevatorAtCurrentCell {
@@ -2644,11 +2893,73 @@ struct HallwaySceneView: UIViewRepresentable {
                     return
                 }
                 if hits.contains(where: { controller.isFloorMapNode($0.node) }), controller.floorMapAtCurrentCell {
-                    return // Wall maps are read in place; no pop-up or movement.
+                    // Wall maps never pop up. (Oct 2: a nearby tap ON the map is
+                    // composed into a viewing pose above; this keeps the old
+                    // read-in-place no-op whenever that declines.)
+                    return
                 }
             }
-            navLog("tap")
-            controller.advance()
+            // TAP WHERE YOU WANT TO GO (Sept 30): a navigation tap walks one
+            // cell toward the horizontal bearing of the tapped screen point
+            // (same unprojection as pinch). Every interaction above still
+            // consumes its tap first; nil falls back to camera forward.
+            // TAP A PLACE -> GO THERE (Sept 30): the closest visible geometry
+            // under the finger gives the destination; its horizontal X/Z
+            // distance from the player is how far to walk. No hit -> the
+            // ray bearing alone and the old one-cell tap.
+            var direction: (x: Double, z: Double)?
+            var distance: Double?
+            if let view = gesture.view as? SCNView {
+                let point = gesture.location(in: view)
+                let near = view.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 0))
+                let far = view.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 1))
+                direction = TapNavigationController.horizontalDirection(near: near, far: far)
+                // Oct 1 (tap-to-approach, hit-test fix): look for a tap-to-collect
+                // floor object (trash can, paint bucket) along the WHOLE ray,
+                // nearest first, skipping only the invisible Decorate-selection
+                // floor plate each one carries (decoratorHitProxy, raised to
+                // mid-can height and cellSize*0.9 wide, so it sat in front of
+                // the lower part of the can and swallowed those taps) and the
+                // hanging-pickup cord. The first REAL surface decides: the can
+                // itself -> approach; anything else (floor, wall) -> ordinary.
+                if decorator?.enabled != true {
+                    let allHits = view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue, .ignoreHiddenNodes: true])
+                    if let firstReal = allHits.first(where: { $0.node.name != "decoratorHitProxy" && $0.node.name != "hangingPickupString" }),
+                       let fireCoord = controller.fireCoordinate(for: firstReal.node),
+                       let approach = controller.tapApproach(toFireAt: fireCoord) {
+                        controller.advance(travelDirection: approach.direction, travelDistance: approach.distance, finalYaw: approach.finalYaw)
+                        return
+                    }
+                    if let firstReal = allHits.first(where: { $0.node.name != "decoratorHitProxy" && $0.node.name != "hangingPickupString" }),
+                       let objectCoord = controller.objectCoordinate(for: firstReal.node),
+                       let approach = controller.tapApproach(toObjectAt: objectCoord) {
+                        navLog("tap on floor object at \(objectCoord): approach \(String(format: "%.2f", approach.distance)) m along the tap line")
+                        controller.advance(travelDirection: approach.direction, travelDistance: approach.distance, finalYaw: approach.finalYaw)
+                        return
+                    }
+                }
+                // Oct 2 (forgiving wall-object targeting): every exact handler
+                // above has declined, so this tap is about to become an
+                // ordinary walk. If it landed within a finger's width of a
+                // VISIBLE tappable wall object on screen, treat it as a tap on
+                // that object instead.
+                if decorator?.enabled != true,
+                   let assisted = assistedWallHit(at: point, in: view, controller: controller),
+                   controller.composeWallInteraction(assisted) {
+                    navLog("assisted tap on \(assisted.kind) at \(assisted.face.coord) -- composing interaction pose")
+                    return
+                }
+                if let hit = view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue,
+                                                           .ignoreHiddenNodes: true]).first {
+                    let eye = controller.cameraNode.worldPosition, spot = hit.worldCoordinates
+                    let dx = Double(spot.x - eye.x), dz = Double(spot.z - eye.z)
+                    let d = (dx * dx + dz * dz).squareRoot()
+                    distance = d
+                    if d > 1e-6 { direction = (dx / d, dz / d) }
+                }
+            }
+            navLog("tap, travel direction=\(String(describing: direction)) distance=\(String(describing: distance))")
+            controller.advance(travelDirection: direction, travelDistance: distance)
         }
 
         // Eddie, Sept 17 (pinch continuity fix): was "wait for the
@@ -2676,135 +2987,32 @@ struct HallwaySceneView: UIViewRepresentable {
             let velocityFraction = Double(gesture.velocity) / pinchScalePerCell
             switch gesture.state {
             case .began:
-                // Sept 24 (Finishing Pass): a pinch that starts on a real
-                // picture borrows that WHOLE gesture to temporarily scale
-                // just that one picture (no locomotion, no persisted
-                // state). Every other pinch keeps the existing live-scrub
-                // navigation below, entirely unchanged.
-                if let frame = pictureFrameTouched(by: gesture),
-                   decorator?.enabled != true {
-                    pinchPictureFrame = frame
-                    pinchPictureBaseScale = frame.scale
-                    navLog("pinch began on picture, scaling in place")
-                    return
+                // No object has its own pinch: a pinch over a picture OR a
+                // mission plaque (plaque scaling removed Oct 2) is ordinary
+                // spatial navigation, exactly like a pinch over the wall
+                // beside it -- walk closer to see it better.
+                // Pass #5: walk toward WHERE the pinch is -- the horizontal
+                // heading of the view ray under the pinch centroid at
+                // .began (held for the whole gesture so finger wobble can't
+                // steer it). Only the Free Walk scrub reads it; legacy
+                // ignores it. Scale still means how far / which way.
+                var direction: (x: Double, z: Double)?
+                if let view = gesture.view as? SCNView {
+                    let point = gesture.location(in: view)
+                    let near = view.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 0))
+                    let far = view.unprojectPoint(SCNVector3(Float(point.x), Float(point.y), 1))
+                    direction = TapNavigationController.horizontalDirection(near: near, far: far)
                 }
-                if let frame = missionPlaqueFrameTouched(by: gesture),
-                   decorator?.enabled != true {
-                    pinchPlaqueFrame = frame
-                    pinchPlaqueBaseScale = frame.scale
-                    navLog("pinch began on mission plaque, scaling in place")
-                    return
-                }
-                navLog("pinch began")
-                controller.beginDragMove()
+                navLog("pinch began, travel direction=\(String(describing: direction))")
+                controller.beginDragMove(travelDirection: direction)
             case .changed:
-                if let frame = pinchPictureFrame {
-                    applyPicturePinch(gesture.scale, to: frame)
-                    return
-                }
-                if let frame = pinchPlaqueFrame {
-                    applyPlaquePinch(gesture.scale, to: frame)
-                    return
-                }
                 controller.updateDragMove(fraction: fraction)
             case .ended, .cancelled, .failed:
-                if let frame = pinchPictureFrame {
-                    pinchPictureFrame = nil
-                    navLog("pinch ended, picture scale=\(String(format: "%.2f", gesture.scale)) snaps back")
-                    let base = pinchPictureBaseScale
-                    let from = frame.scale
-                    frame.removeAction(forKey: "picturePinch")
-                    frame.runAction(SCNAction.customAction(duration: 0.3) { node, elapsed in
-                        let t = min(elapsed / 0.3, 1)
-                        let eased = Float(1 - pow(1 - t, 3))
-                        let sx = from.x + (base.x - from.x) * eased
-                        let sy = from.y + (base.y - from.y) * eased
-                        let sz = from.z + (base.z - from.z) * eased
-                        node.scale = SCNVector3(sx, sy, sz)
-                    }, forKey: "picturePinch")
-                    return
-                }
-                if let frame = pinchPlaqueFrame {
-                    pinchPlaqueFrame = nil
-                    navLog("pinch ended, plaque scale=\(String(format: "%.2f", gesture.scale)) snaps back")
-                    let base = pinchPlaqueBaseScale
-                    let from = frame.scale
-                    frame.removeAction(forKey: "plaquePinch")
-                    frame.runAction(SCNAction.customAction(duration: 0.3) { node, elapsed in
-                        let t = min(elapsed / 0.3, 1)
-                        let eased = Float(1 - pow(1 - t, 3))
-                        let sx = from.x + (base.x - from.x) * eased
-                        let sy = from.y + (base.y - from.y) * eased
-                        let sz = from.z + (base.z - from.z) * eased
-                        node.scale = SCNVector3(sx, sy, sz)
-                    }, forKey: "plaquePinch")
-                    return
-                }
                 navLog("pinch ended, fraction=\(String(format: "%.2f", fraction)), velocityFraction=\(String(format: "%.2f", velocityFraction))")
                 controller.endDragMove(fraction: fraction, velocityFraction: velocityFraction)
             default:
                 break
             }
-        }
-
-        // Sept 24 (Finishing Pass): walks the hit chain from a pinch's
-        // touch point up to the Decorator-tagged picture frame and
-        // returns it, else nil -- the same parent-chain read the tap
-        // and editor paths use, and the picture frame node is exactly
-        // the node tagged .picture at build time (HallwayScene
-        // buildPictureNode's addPictureNode call site).
-        private func pictureFrameTouched(by gesture: UIPinchGestureRecognizer) -> SCNNode? {
-            guard let view = gesture.view as? SCNView,
-                  let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue, .ignoreHiddenNodes: true]).first else { return nil }
-            var node: SCNNode? = hit.node
-            while let current = node {
-                if let target = DecoratorTarget.read(current), target.kind == .picture {
-                    return current
-                }
-                node = current.parent
-            }
-            return nil
-        }
-
-        // Sept 24 (Finishing Pass): applies a clamped uniform scale to a
-        // picture frame in place (frame pivot sits at the picture's own
-        // center on the wall face, so it grows/shrinks centered and
-        // stays attached to the wall -- no movement, no rebuild).
-        private func applyPicturePinch(_ scale: CGFloat, to frame: SCNNode) {
-            let clamped = CGFloat(min(max(Double(scale), picturePinchMinScale), picturePinchMaxScale))
-            let base = pinchPictureBaseScale
-            frame.scale = SCNVector3(base.x * Float(clamped), base.y * Float(clamped), base.z * Float(clamped))
-        }
-
-        // Sept 24 (TOUCH/INSPECTION pass): same parent-chain hit walk as
-        // pictureFrameTouched just above, for the mission plaque. Returns
-        // the wall-mounted frame node carrying the .missionSign
-        // DecoratorTarget identity (HallwayScene.addMissionSignNode); the
-        // plaque plane and any picture light ride as its children, so
-        // scaling that node scales the complete visible plaque as one
-        // object. nil when the pinch does not begin on an actual plaque,
-        // so pinching bare wall keeps its normal meaning.
-        private func missionPlaqueFrameTouched(by gesture: UIPinchGestureRecognizer) -> SCNNode? {
-            guard let view = gesture.view as? SCNView,
-                  let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue, .ignoreHiddenNodes: true]).first else { return nil }
-            var node: SCNNode? = hit.node
-            while let current = node {
-                if let target = DecoratorTarget.read(current), target.kind == .missionSign {
-                    return current
-                }
-                node = current.parent
-            }
-            return nil
-        }
-
-        // Sept 24 (TOUCH/INSPECTION pass): clamped uniform scale for the
-        // mission plaque -- the applyPicturePinch mirror. The frame
-        // pivot sits at the assembly's own center on the wall face, so it
-        // grows/shrinks centered in place and stays attached to the wall.
-        private func applyPlaquePinch(_ scale: CGFloat, to frame: SCNNode) {
-            let clamped = CGFloat(min(max(Double(scale), plaquePinchMinScale), plaquePinchMaxScale))
-            let base = pinchPlaqueBaseScale
-            frame.scale = SCNVector3(base.x * Float(clamped), base.y * Float(clamped), base.z * Float(clamped))
         }
 
         @objc func handleTwoFingerTap() {
@@ -2815,6 +3023,21 @@ struct HallwaySceneView: UIViewRepresentable {
 
         @objc func handlePanRotate(_ gesture: UIPanGestureRecognizer) {
             guard let controller = navigationController, let view = gesture.view else { return }
+            // Oct 2 (auto-walk -> hold handoff): a drag that starts while a
+            // tap-to-point walk is running is the hold taking control -- routed
+            // whole (began/changed/ended) into the shared hold, never free look.
+            if gesture.state == .began, panBeganShouldTakeOverAutoWalk() {
+                beginHold(at: gesture.location(in: view)) { [weak gesture] in gesture?.location(in: gesture?.view) }
+                return
+            }
+            if panIsHoldTakeover {
+                switch gesture.state {
+                case .changed: updateHold(at: gesture.location(in: view))
+                case .ended, .cancelled, .failed: panEndedHoldTakeover(at: gesture.location(in: view))
+                default: break
+                }
+                return
+            }
             let translation = gesture.translation(in: view)
             let velocity = gesture.velocity(in: view)
             // Positive translation.x (finger moving left-to-right) is
@@ -2876,6 +3099,31 @@ struct HallwaySceneView: UIViewRepresentable {
             // locked, that axis keeps the rest of the gesture until
             // release, so a diagonal finger movement can never straddle
             // both a turn and a move in one interaction.
+            // FREE-WALK (polish pass #3): no axis winner. X = turn and
+            // Y = move for the whole touch -- see beginFreePan() in
+            // TapNavigationController.swift. Falls through to the legacy
+            // axis-locked drag below when Free Walk doesn't apply.
+            if gesture.state == .began, controller.beginFreePan() {
+                navLog("pan began (free 2-D)")
+                controller.updateFreePan(dx: Double(translation.x), dy: Double(translation.y),
+                                         pointsPerQuarterTurn: Double(dragRotateDistance), pointsPerCell: Double(dragMoveDistance))
+                return
+            }
+            if gesture.state != .began, controller.isFreePanning {
+                switch gesture.state {
+                case .changed:
+                    controller.updateFreePan(dx: Double(translation.x), dy: Double(translation.y),
+                                             pointsPerQuarterTurn: Double(dragRotateDistance), pointsPerCell: Double(dragMoveDistance))
+                case .ended, .cancelled, .failed:
+                    navLog("pan ended (free 2-D)")
+                    controller.updateFreePan(dx: Double(translation.x), dy: Double(translation.y),
+                                             pointsPerQuarterTurn: Double(dragRotateDistance), pointsPerCell: Double(dragMoveDistance))
+                    controller.endFreePan(dx: Double(translation.x), pointsPerQuarterTurn: Double(dragRotateDistance))
+                default:
+                    break
+                }
+                return
+            }
             switch gesture.state {
             case .began:
                 lockedPanAxis = nil
@@ -2929,23 +3177,200 @@ struct HallwaySceneView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 navLog("long-press forward began")
-                navigationController?.setWalkingHeld(true)
-                navigationController?.advanceWhileHeld()
-                forwardHoldTimer?.invalidate()
-                let timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
-                    guard let self else { return }
-                    self.navigationController?.advanceWhileHeld()
-                }
-                RunLoop.main.add(timer, forMode: .common)
-                forwardHoldTimer = timer
+                beginHold(at: gesture.location(in: gesture.view)) { [weak gesture] in gesture?.location(in: gesture?.view) }
+            case .changed:
+                updateHold(at: gesture.location(in: gesture.view))
             case .ended, .cancelled, .failed:
                 navLog("long-press forward ended")
-                navigationController?.setWalkingHeld(false)
-                forwardHoldTimer?.invalidate()
-                forwardHoldTimer = nil
+                endHold(at: gesture.location(in: gesture.view))
             default:
                 break
             }
+        }
+
+        // MARK: Shared hold (Oct 2, auto-walk -> hold handoff)
+        //
+        // The ONE held-walk input path. Two recognizers feed it:
+        //  - the long-press (finger down and still for 0.35 s), always;
+        //  - the one-finger pan, but ONLY when it begins during a running
+        //    tap-to-point walk (finger down and dragging) -- see handlePanRotate.
+        // Either way the controller sees exactly what a long-press has always
+        // sent: setWalkingHeld(true) + held ticks, then x/y updates for
+        // steering, then setWalkingHeld(false) on release. The first tick
+        // (advanceWhileHeld) is what converts a running tap walk into the
+        // ordinary held walk (takeOverFreeTapWalkForHold).
+
+        /// Finger down: start (or take over into) the held walk. `currentLocation`
+        /// is polled by the repeating tick for the finger's live position.
+        func beginHold(at location: CGPoint, currentLocation: @escaping @MainActor () -> CGPoint?) {
+            navigationController?.setWalkingHeld(true)
+            forwardHoldTimer?.invalidate()
+            forwardHoldTimer = nil
+            if heldWalkTick(at: location) { return } // already at an endpoint: look only
+            let timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+                guard let self, let point = currentLocation() else { return }
+                self.heldWalkTick(at: point)
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            forwardHoldTimer = timer
+        }
+
+        /// Finger moved while held: the existing held steering, nothing new.
+        func updateHold(at location: CGPoint) {
+            let fingerX = Double(location.x)
+            // Legacy: only does anything once the held walk has reached
+            // its endpoint (the controller ignores it otherwise).
+            navigationController?.updateHeldEndpointLook(fingerX: fingerX)
+            // Free walk: the same held finger drives BOTH axes at once --
+            // X turns, Y is the forward/stop/backward throttle (no-op otherwise).
+            navigationController?.updateHeldNavigation(fingerX: fingerX, fingerY: Double(location.y), pointsPerQuarterTurn: Double(heldWalkSteerDistance))
+        }
+
+        /// Finger up: stop right there (the old tap destination is long gone).
+        func endHold(at location: CGPoint) {
+            navigationController?.endHeldEndpointLook(fingerX: Double(location.x))
+            navigationController?.setWalkingHeld(false)
+            forwardHoldTimer?.invalidate()
+            forwardHoldTimer = nil
+        }
+
+        /// True while the current one-finger pan is acting as the hold that
+        /// took over a tap-to-point walk (decided once, at the pan's .began).
+        private(set) var panIsHoldTakeover = false
+
+        /// Pan .began: during a running tap walk the drag IS the hold (case C:
+        /// finger down + immediate drag). Everywhere else returns false and
+        /// the pan is the ordinary free look / drag turn, unchanged.
+        // MARK: Oct 2 -- forgiving wall-object targeting (every tappable wall
+        // object: see TapNavigationController.wallInteractionTarget)
+        //
+        // Before: the Play tap took SceneKit's single closest hit and walked
+        // up from it. A small/distant frame is only a few points wide, so a
+        // tap just beside it hit the wall (or the untagged backfill panel
+        // behind the frame) and fell through to an ordinary tap walk.
+
+        /// Hit-test results with the invisible Decorate floor plates and
+        /// hanging-pickup cords removed (same skip list the floor-object
+        /// approach uses) -- the first REAL surface along the ray.
+        private func firstRealHit(at point: CGPoint, in view: SCNView) -> SCNHitTestResult? {
+            view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue, .ignoreHiddenNodes: true])
+                .first { $0.node.name != "decoratorHitProxy" && $0.node.name != "hangingPickupString" }
+        }
+
+        /// The tap's first real surface belongs to a tappable wall object.
+        func exactWallHit(at point: CGPoint, in view: SCNView, controller: TapNavigationController)
+            -> (target: TapNavigationController.WallInteractionTarget, hitNodeName: String)? {
+            guard let hit = firstRealHit(at: point, in: view),
+                  let target = controller.wallInteractionTarget(for: hit.node) else { return nil }
+            return (target, hit.node.name ?? "unnamed")
+        }
+
+        /// Minimum on-screen target per axis (Apple's 44 pt touch minimum),
+        /// plus a fixed 12 pt finger margin around objects already bigger.
+        static let wallTargetMinimumPoints: CGFloat = 44
+        static let wallTargetMarginPoints: CGFloat = 12
+        /// Two candidates whose distances from the tap differ by less than
+        /// this are ambiguous -- no guess.
+        static let wallTargetAmbiguityPoints: CGFloat = 8
+
+        static func pointText(_ p: CGPoint) -> String { String(format: "(%.0f, %.0f)", p.x, p.y) }
+
+        /// A tap that missed every object near a visible wall object. Each
+        /// wall-interaction anchor's bounding box is projected to screen; its
+        /// touch target is that rect grown to >= 44 pt per axis (and by
+        /// >= 12 pt). A candidate counts only if a hit-test at the nearest
+        /// point INSIDE its real projected rect resolves to that same
+        /// interaction -- i.e. it's actually visible there, not behind a wall
+        /// or corner -- and it currently has something available.
+        func assistedWallHit(at point: CGPoint, in view: SCNView, controller: TapNavigationController)
+            -> TapNavigationController.WallInteractionTarget? {
+            guard let root = view.scene?.rootNode else { return nil }
+            let realHit = firstRealHit(at: point, in: view)
+            var anchors: [SCNNode] = []
+            root.enumerateChildNodes { node, _ in
+                if controller.isWallInteractionAnchor(node) { anchors.append(node) }
+            }
+            var best: [String: (target: TapNavigationController.WallInteractionTarget, distance: CGFloat, rect: CGRect)] = [:]
+            for anchor in anchors {
+                guard let anchorTarget = controller.wallInteractionTarget(for: anchor) else { continue }
+                let (lo, hi) = anchor.boundingBox
+                var minX = CGFloat.greatestFiniteMagnitude, minY = minX, maxX = -minX, maxY = -minX
+                var inFront = true
+                for x in [lo.x, hi.x] { for y in [lo.y, hi.y] { for z in [lo.z, hi.z] {
+                    let p = view.projectPoint(anchor.convertPosition(SCNVector3(x, y, z), to: nil))
+                    if p.z <= 0 || p.z >= 1 { inFront = false }
+                    minX = min(minX, CGFloat(p.x)); maxX = max(maxX, CGFloat(p.x))
+                    minY = min(minY, CGFloat(p.y)); maxY = max(maxY, CGFloat(p.y))
+                } } }
+                guard inFront, maxX > minX, maxY > minY else { continue }
+                let rect = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+                guard rect.intersects(view.bounds) else { continue }
+                let growX = max(Self.wallTargetMarginPoints, (Self.wallTargetMinimumPoints - rect.width) / 2)
+                let growY = max(Self.wallTargetMarginPoints, (Self.wallTargetMinimumPoints - rect.height) / 2)
+                guard rect.insetBy(dx: -growX, dy: -growY).contains(point) else { continue }
+                let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+                let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+                let distance = (dx * dx + dy * dy).squareRoot()
+                // Visibility probe: nearest point inside the anchor's rect,
+                // pulled slightly inward so it lands on the object, not its rim.
+                let inner = rect.insetBy(dx: min(4, rect.width / 4), dy: min(4, rect.height / 4))
+                let probe = CGPoint(x: min(max(point.x, inner.minX), inner.maxX), y: min(max(point.y, inner.minY), inner.maxY))
+                guard let probeHit = firstRealHit(at: probe, in: view),
+                      let probeTarget = controller.wallInteractionTarget(for: probeHit.node),
+                      probeTarget.key == anchorTarget.key else { continue }
+                if let existing = best[anchorTarget.key], existing.distance <= distance { continue }
+                best[anchorTarget.key] = (probeTarget, distance, rect)
+            }
+            let ranked = best.values.sorted { $0.distance < $1.distance }
+            guard let first = ranked.first else {
+                diag("wallTarget.miss", ["tap": Self.pointText(point), "hitNode": realHit?.node.name ?? "nothing",
+                                         "anchors": anchors.count])
+                return nil
+            }
+            if ranked.count > 1, first.distance > 0, ranked[1].distance - first.distance < Self.wallTargetAmbiguityPoints {
+                diag("wallTarget.miss", ["tap": Self.pointText(point), "hitNode": realHit?.node.name ?? "nothing",
+                                         "reason": "ambiguous between \(first.target.key) and \(ranked[1].target.key)"])
+                return nil
+            }
+            diag("wallTarget.assistedHit", ["kind": first.target.kind, "coord": first.target.face.coord,
+                                            "direction": first.target.face.direction,
+                                            "tap": Self.pointText(point), "hitNode": realHit?.node.name ?? "nothing",
+                                            "rect": String(format: "(%.0f, %.0f, %.0f x %.0f)", first.rect.minX, first.rect.minY, first.rect.width, first.rect.height),
+                                            "distancePt": Double(first.distance)])
+            return first.target
+        }
+
+        func panBeganShouldTakeOverAutoWalk() -> Bool {
+            guard let controller = navigationController else { return false }
+            panIsHoldTakeover = controller.tapWalkCanBeTakenOverByHold
+            return panIsHoldTakeover
+        }
+
+        func panEndedHoldTakeover(at location: CGPoint) {
+            panIsHoldTakeover = false
+            endHold(at: location)
+        }
+
+        /// Sept 28 (held-walk endpoint look): one held-walk poll. When the
+        /// controller reports the walk has reached its endpoint, the same
+        /// finger switches to Free Look -- its CURRENT x becomes the new
+        /// horizontal zero (walk drift never turns the camera) -- and the
+        /// poll stops for good: this gesture never walks again. Returns
+        /// true once endpoint look has begun.
+        @discardableResult
+        private func heldWalkTick(at location: CGPoint) -> Bool {
+            let fingerX = Double(location.x)
+            guard let controller = navigationController else { return false }
+            guard controller.advanceWhileHeld(),
+                  controller.beginHeldEndpointLook(fingerX: fingerX, pointsPerQuarterTurn: Double(dragRotateDistance)) else {
+                // Free walk: the tick that starts the held walk also pins
+                // the held-navigation origin to THIS finger x/y (no jump).
+                controller.updateHeldNavigation(fingerX: fingerX, fingerY: Double(location.y), pointsPerQuarterTurn: Double(heldWalkSteerDistance))
+                return false
+            }
+            forwardHoldTimer?.invalidate()
+            forwardHoldTimer = nil
+            return true
         }
 
         // Sept 20 (picture-teleport fix): updates ONE picture's already-
@@ -3012,19 +3437,36 @@ struct HallwaySceneView: UIViewRepresentable {
         // duplicate. Passing nil (no override) reproduces the exact
         // old behavior; this is a pure refactor for that case, an
         // actual bug fix only when an override is set.
-        func applyTheme(_ theme: HallwayTheme, wallTexture: String?, floorTexture: String?, ceilingTexture: String?) {
+        /// Oct 1 (cell-surface overrides): floor-wide defaults now skip the
+        /// wall pieces of cells with their own wall override (those get the
+        /// override instead), and cell floor/ceiling panels point at either
+        /// their override material or the shared default -- so a floor-wide
+        /// change never overwrites a local override, and removing one
+        /// inherits the CURRENT default.
+        func applyTheme(_ theme: HallwayTheme, wallTexture: String?, floorTexture: String?, ceilingTexture: String?, cellSurfaces: [GridCoordinate: CellSurfaceOverride] = [:], root: SCNNode? = nil) {
             if theme == .myPhotos {
                 applyPhotoRollTheme()
+                if let root {
+                    HallwayScene.applyCellFloorCeilingOverrides(in: root, cellSurfaces: cellSurfaces, floorDefault: floorMaterial, ceilingDefault: ceilingMaterial)
+                }
                 return
             }
             let effectiveWallImageName = HallwayScene.effectiveWallImageName(floorNumber: currentFloorNumber, theme: theme, wallTexture: wallTexture)
-            for material in wallMaterials {
+            let wallOverrides = root.map { HallwayScene.cellWallOverrideMaterials(in: $0, cellSurfaces: cellSurfaces) } ?? []
+            let overridden = Set(wallOverrides.map { ObjectIdentifier($0.material) })
+            for material in wallMaterials where !overridden.contains(ObjectIdentifier(material)) {
                 applySurface(material, imageName: effectiveWallImageName, fallbackColor: HallwayScene.wallFallbackColor)
+            }
+            for (material, imageName) in wallOverrides {
+                applySurface(material, imageName: imageName, fallbackColor: HallwayScene.wallFallbackColor)
             }
             let effectiveFloorImageName = HallwayScene.effectiveFloorImageName(floorNumber: currentFloorNumber, theme: theme, floorTexture: floorTexture)
             applySurface(floorMaterial, imageName: effectiveFloorImageName, fallbackColor: HallwayScene.floorFallbackColor)
             let effectiveCeilingImageName = HallwayScene.effectiveCeilingImageName(floorNumber: currentFloorNumber, theme: theme, ceilingTexture: ceilingTexture)
             applySurface(ceilingMaterial, imageName: effectiveCeilingImageName, fallbackColor: HallwayScene.ceilingFallbackColor)
+            if let root {
+                HallwayScene.applyCellFloorCeilingOverrides(in: root, cellSurfaces: cellSurfaces, floorDefault: floorMaterial, ceilingDefault: ceilingMaterial)
+            }
         }
 
         /// A nil imageName (or a missing file) reverts that surface to

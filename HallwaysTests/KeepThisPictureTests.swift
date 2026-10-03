@@ -53,7 +53,7 @@ struct KeepThisPictureTests {
 
     @Test func keepPromotesRandomElevatorPosterIdentityIntoElevatorCabDecoration() {
         let prefs = cabDefaults()
-        let store = MazeStore(cabDecorationDefaults: prefs)
+        let store = MazeStore(cabDecorationDefaults: prefs, bundledElevatorCab: { nil })
         #expect(store.elevatorCabDecoration.backArtwork == nil)
         #expect(store.elevatorCabDecoration.sideArtwork == nil)
 

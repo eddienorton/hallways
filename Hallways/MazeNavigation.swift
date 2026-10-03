@@ -15,6 +15,7 @@
 //  never as something you steer by hand mid-corridor.
 //
 
+import os
 import Foundation
 
 /// Lightweight console logging for diagnosing navigation input --
@@ -38,6 +39,18 @@ func navLog(_ message: @autoclosure () -> String) {
     #if DEBUG
     print("[Nav] \(message())")
     #endif
+}
+
+/// Oct 2 (beta: Carol stuck behind the arrival curtain): elevator-arrival
+/// breadcrumbs. Same Debug console line as navLog, PLUS a Release-visible
+/// unified-log entry (Console.app / sysdiagnose, subsystem "Hallways",
+/// category "Elevator") so a stuck external tester leaves a trail.
+private let elevatorLogger = Logger(subsystem: "Hallways", category: "Elevator")
+func elevatorLog(_ message: String) {
+    navLog("[ELEVATOR] " + message)
+    elevatorLogger.notice("\(message, privacy: .public)")
+    // Oct 2: also into the persistent flight recorder (DiagnosticRecorder).
+    DiagnosticRecorder.shared.record("elevatorLog", ["msg": message])
 }
 
 enum Direction: String, CaseIterable, Hashable, Codable {

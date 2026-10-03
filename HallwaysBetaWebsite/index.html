@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Hallways Building · Beta Testing</title>
+<meta name="description" content="Hallways beta testing — get the current TestFlight build.">
+<meta name="theme-color" content="#0e0c0a">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<meta property="og:title" content="The Hallways Building · Beta Testing">
+<meta property="og:description" content="Get the current Hallways beta on TestFlight.">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<style>
+  :root {
+    --bg: #0e0c0a;
+    --bg-deep: #070605;
+    --brass: #d2ac68;
+    --brass-bright: #f2d49a;
+    --brass-dim: #8a6f42;
+    --text: #e9e2d6;
+    --muted: #a39a8c;
+    --rule: rgba(210, 172, 104, 0.28);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 80% 55% at 50% 18%, rgba(210, 172, 104, 0.10), transparent 70%),
+      linear-gradient(var(--bg), var(--bg-deep));
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    display: flex;
+    justify-content: center;
+  }
+  main {
+    width: 100%;
+    max-width: 560px;
+    padding: max(28px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right))
+             max(40px, env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
+    text-align: center;
+  }
+  .plaque {
+    display: block;
+    width: min(78%, 340px);
+    height: auto;
+    margin: 0 auto;
+    -webkit-mask-image: radial-gradient(ellipse 72% 66% at 50% 50%, #000 70%, transparent 100%);
+            mask-image: radial-gradient(ellipse 72% 66% at 50% 50%, #000 70%, transparent 100%);
+  }
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .eyebrow {
+    margin: 6px 0 0;
+    font-size: 0.8rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--brass);
+  }
+  .rule {
+    width: 64px; height: 1px; border: 0; margin: 22px auto;
+    background: linear-gradient(90deg, transparent, var(--brass), transparent);
+  }
+  .copy {
+    margin: 0 auto;
+    max-width: 30em;
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 1.08rem;
+    color: var(--text);
+  }
+  .copy p { margin: 0 0 1em; }
+  .copy .lead { font-size: 1.2rem; color: #f3ede3; }
+  .cta {
+    display: block;
+    width: 100%;
+    max-width: 380px;
+    margin: 30px auto 0;
+    padding: 18px 20px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, var(--brass-bright), var(--brass) 55%, #b48a48);
+    color: #1a1308;
+    text-decoration: none;
+    font-weight: 800;
+    font-size: 1.02rem;
+    letter-spacing: 0.08em;
+    box-shadow: 0 10px 30px rgba(210, 172, 104, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .cta:hover { box-shadow: 0 12px 34px rgba(210, 172, 104, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.5); }
+  .cta:active { transform: translateY(1px) scale(0.995); }
+  .cta:focus-visible { outline: 2px solid var(--brass-bright); outline-offset: 4px; }
+  .build {
+    margin: 34px auto 0;
+    padding: 16px 18px;
+    max-width: 380px;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .build h2 {
+    margin: 0 0 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .build p { margin: 0; font-size: 1rem; color: var(--text); }
+  .signature {
+    margin: 30px 0 0;
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-style: italic;
+    font-size: 1.1rem;
+    color: var(--brass);
+  }
+  @media (min-width: 768px) {
+    main { padding-top: 64px; }
+    .plaque { width: 360px; }
+    .copy { font-size: 1.15rem; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <img class="plaque"
+       src="assets/hallways-plaque.jpg"
+       srcset="assets/hallways-plaque.jpg 600w, assets/hallways-plaque@2x.jpg 1200w"
+       sizes="(min-width: 768px) 360px, 78vw"
+       width="600" height="900"
+       alt="The Hallways Building">
+  <h1 class="visually-hidden">THE HALLWAYS BUILDING</h1>
+  <p class="eyebrow">Beta Testing</p>
+
+  <hr class="rule">
+
+  <div class="copy">
+    <p class="lead">Thanks for helping me test Hallways.</p>
+    <p>Just play normally. If something breaks, gets stuck, looks wrong, or simply doesn’t make sense, tell me. Screenshots are especially useful.</p>
+  </div>
+
+  <a class="cta" href="https://testflight.apple.com/join/F1ZtTTty">GET BUILD 4 ON TESTFLIGHT</a>
+
+  <section class="build" aria-label="Current build">
+    <h2>Current Build</h2>
+    <p>Build 4 — October 2, 2026</p>
+  </section>
+
+  <p class="signature">— Eddie</p>
+</main>
+</body>
+</html>

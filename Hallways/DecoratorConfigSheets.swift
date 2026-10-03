@@ -20,7 +20,13 @@ import ImageIO
 /// the whole sheet directly, unambiguously, from either screen.
 struct DecoratorSurfacesSheet: View {
     @ObservedObject var store: MazeStore
+    /// Oct 1 (Surfaces "This Cell"): supplies the current cell and the
+    /// cell-override edit.
+    @ObservedObject var state: DecoratorState
     @Binding var isPresented: Bool
+    /// Oct 1: off = the whole floor (unchanged behavior); on = only the
+    /// player's current cell, via the cell-surface overrides.
+    @State private var thisCell = false
 
     @State private var includeWalls = false
     @State private var includeFloor = false
@@ -39,13 +45,23 @@ struct DecoratorSurfacesSheet: View {
                     Text("Choose one, two, or all three, then pick a texture to apply it to every one you checked.")
                 }
                 Section {
+                    Toggle("This Cell", isOn: $thisCell)
+                        .disabled(state.cellForSurfaceEditing() == nil)
+                } footer: {
+                    Text(thisCell
+                         ? "Only the cell you're standing in changes. \"Use Floor Default\" makes it follow the floor again."
+                         : "Off: changes the whole floor.")
+                }
+                Section {
                     NavigationLink {
                         SurfaceTexturePicker(
                             applyWalls: includeWalls,
                             applyFloor: includeFloor,
                             applyCeiling: includeCeiling,
                             store: store,
-                            isPresented: $isPresented
+                            isPresented: $isPresented,
+                            cell: thisCell ? state.cellForSurfaceEditing() : nil,
+                            state: state
                         )
                     } label: {
                         Text("Choose Surface")
@@ -169,6 +185,10 @@ struct SurfaceTexturePicker: View {
     let applyCeiling: Bool
     @ObservedObject var store: MazeStore
     @Binding var isPresented: Bool
+    /// Oct 1 (Surfaces "This Cell"): nil = whole floor (unchanged); a coord
+    /// = that cell's overrides, and the Default tile reads "Use Floor Default".
+    let cell: GridCoordinate?
+    let state: DecoratorState?
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 12)]
     private let swatchSize: CGFloat = 100
@@ -188,13 +208,36 @@ struct SurfaceTexturePicker: View {
     @State private var thumbnailCache = SurfaceThumbnailCache()
     @State private var selectedTexture: SurfaceSelectionState?
 
-    init(applyWalls: Bool, applyFloor: Bool, applyCeiling: Bool, store: MazeStore, isPresented: Binding<Bool>) {
+    init(applyWalls: Bool, applyFloor: Bool, applyCeiling: Bool, store: MazeStore, isPresented: Binding<Bool>,
+         cell: GridCoordinate? = nil, state: DecoratorState? = nil) {
         self.applyWalls = applyWalls
         self.applyFloor = applyFloor
         self.applyCeiling = applyCeiling
         self.store = store
         self._isPresented = isPresented
-        self._selectedTexture = State(initialValue: Self.initialSelection(applyWalls: applyWalls, applyFloor: applyFloor, applyCeiling: applyCeiling, store: store))
+        self.cell = cell
+        self.state = state
+        self._selectedTexture = State(initialValue: Self.initialSelection(applyWalls: applyWalls, applyFloor: applyFloor, applyCeiling: applyCeiling, store: store, cell: cell))
+    }
+
+    /// Oct 1: the checked targets as cell-surface kinds.
+    static func surfaces(walls: Bool, floor: Bool, ceiling: Bool) -> [CellSurfaceKind] {
+        (walls ? [.wall] : []) + (floor ? [.floor] : []) + (ceiling ? [.ceiling] : [])
+    }
+
+    /// Oct 1: the ONE apply path for both scopes. cell == nil is exactly the
+    /// pre-existing whole-floor behavior; a cell writes only the checked
+    /// targets' overrides for that cell (nil = Use Floor Default removes them).
+    static func applyChoice(_ name: String?, walls: Bool, floor: Bool, ceiling: Bool,
+                            cell: GridCoordinate?, store: MazeStore, state: DecoratorState?) {
+        if let cell {
+            state?.setCellSurfaces(name, for: surfaces(walls: walls, floor: floor, ceiling: ceiling), at: cell)
+            return
+        }
+        if walls { store.setWallTexture(name) }
+        if floor { store.setFloorTexture(name) }
+        if ceiling { store.setCeilingTexture(name) }
+        store.saveCurrentFloorAsOverride()
     }
 
     /// Sept 27 (mixed Walls/Floor/Ceiling initial state): reads
@@ -204,11 +247,15 @@ struct SurfaceTexturePicker: View {
     /// currently agrees: all the same explicit texture -> that
     /// texture; all nil -> Default; anything mixed -> nothing
     /// pre-selected, per Eddie's spec exactly.
-    private static func initialSelection(applyWalls: Bool, applyFloor: Bool, applyCeiling: Bool, store: MazeStore) -> SurfaceSelectionState? {
+    private static func initialSelection(applyWalls: Bool, applyFloor: Bool, applyCeiling: Bool, store: MazeStore, cell: GridCoordinate? = nil) -> SurfaceSelectionState? {
         var values: [String?] = []
-        if applyWalls { values.append(store.wallTexture) }
-        if applyFloor { values.append(store.floorTexture) }
-        if applyCeiling { values.append(store.ceilingTexture) }
+        if let cell {
+            values = surfaces(walls: applyWalls, floor: applyFloor, ceiling: applyCeiling).map { store.cellSurfaceTexture($0, at: cell) }
+        } else {
+            if applyWalls { values.append(store.wallTexture) }
+            if applyFloor { values.append(store.floorTexture) }
+            if applyCeiling { values.append(store.ceilingTexture) }
+        }
         guard let first = values.first, values.allSatisfy({ $0 == first }) else { return nil }
         return first.map { .texture($0) } ?? .defaultTexture
     }
@@ -233,10 +280,7 @@ struct SurfaceTexturePicker: View {
         // file's own doc comment on SurfaceTexturePicker above), so
         // setting it false here closes the whole Surfaces sheet, not
         // just this pushed screen.
-        if applyWalls { store.setWallTexture(name) }
-        if applyFloor { store.setFloorTexture(name) }
-        if applyCeiling { store.setCeilingTexture(name) }
-        store.saveCurrentFloorAsOverride()
+        Self.applyChoice(name, walls: applyWalls, floor: applyFloor, ceiling: applyCeiling, cell: cell, store: store, state: state)
         selectedTexture = name.map { .texture($0) } ?? .defaultTexture
         isPresented = false
     }
@@ -249,7 +293,7 @@ struct SurfaceTexturePicker: View {
                 } label: {
                     defaultTile(selected: selectedTexture == .defaultTexture)
                 }
-                .accessibilityLabel("Default")
+                .accessibilityLabel(cell == nil ? "Default" : "Use Floor Default")
 
                 ForEach(HallwayScene.availableHallwayTextureNames(), id: \.self) { name in
                     Button {
@@ -262,7 +306,7 @@ struct SurfaceTexturePicker: View {
             }
             .padding()
         }
-        .navigationTitle("Choose Surface")
+        .navigationTitle(cell == nil ? "Choose Surface" : "Choose Surface — This Cell")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // Sept 27 (single-tap picker UX): this is no longer a
@@ -280,7 +324,7 @@ struct SurfaceTexturePicker: View {
         ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.gray.opacity(0.25))
-            Text("Default")
+            Text(cell == nil ? "Default" : "Use Floor Default")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

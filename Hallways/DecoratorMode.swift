@@ -35,7 +35,7 @@ struct DecoratorTarget: Equatable {
     /// it gets its own small set of methods (floorPosition/
     /// changeFloorPosition/floorObjectOrientation/changeFloorOrientation)
     /// further down in this file.
-    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth, roomEntranceDoor }
+    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth, roomEntranceDoor, table, desk, waterCooler, officeChair, floorLamp, aquarium, filingCabinet, game }
     let floor: Int
     /// Sept 26 (Decorate-mode elevator pictures): identifies WHICH of
     /// the elevator cab's 3 built-in posters a target refers to -- back
@@ -179,6 +179,31 @@ struct DecoratorTarget: Equatable {
         // swinging-door machinery, just with no sign and no window/
         // perimeter requirement.
         case .roomEntranceDoor: return "Room Entrance"
+        // Sept 28 (first furniture proof of concept): a decorative
+        // Table (MazeStore.tables) -- scenery only, never a pickup. Its
+        // optional Potted Plant is part of the table, not its own target.
+        case .table: return "Table"
+        // Sept 28: a decorative office Desk (MazeStore.desks) -- same
+        // scenery-only treatment as Table.
+        case .desk: return "Desk"
+        // Sept 28: a decorative office Water Cooler (MazeStore.
+        // waterCoolers) -- same scenery-only treatment as Table/Desk.
+        case .waterCooler: return "Water Cooler"
+        // Sept 28: a decorative Office Chair (MazeStore.officeChairs) --
+        // scenery only; may share a cell with one Desk.
+        case .officeChair: return "Office Chair"
+        // Sept 28: a Floor Lamp (MazeStore.floorLamps) with its own local
+        // light; Play taps switch it, Decorate taps select it.
+        case .floorLamp: return "Floor Lamp"
+        // Sept 28: a decorative Aquarium (MazeStore.aquariums) -- scenery
+        // only; Play taps are consumed, Decorate taps select it.
+        case .aquarium: return "Aquarium"
+        // Sept 28: a Filing Cabinet (MazeStore.filingCabinets) -- scenery
+        // whose drawers open in Play; Decorate taps select the whole cabinet.
+        case .filingCabinet: return "Filing Cabinet"
+        // Oct 1 (Decorator Games): any of the ten existing game fixtures
+        // (MazeStore.gameFixture names WHICH one; the overlay shows that).
+        case .game: return "Game"
         }
     }
 
@@ -199,11 +224,41 @@ final class DecoratorState: ObservableObject {
         didSet { selection = nil; if enabled { stopWalking?() } }
     }
     @Published var selection: DecoratorTarget?
+    /// Sept 28 (Decorator availability staleness fix): the player's
+    /// current cell, mirrored here ONLY so DecoratorOverlay re-renders
+    /// when the player moves. The "+" menu's .disabled(...) states
+    /// (Floor -> Table, etc.) are computed in DecoratorOverlay's body,
+    /// which previously re-ran only when this object or MazeStore
+    /// published -- walking never did, so availability stayed frozen at
+    /// whatever cell the last publish happened in (e.g. the cell a Table
+    /// was just placed in). Availability checks still read the live
+    /// currentPlayerCell() closure; this is purely the invalidation
+    /// signal. Fed by ContentView from TapNavigationController.$currentCell.
+    @Published private(set) var observedPlayerCell: GridCoordinate?
+    func playerCellDidChange(_ cell: GridCoordinate?) {
+        if observedPlayerCell != cell { observedPlayerCell = cell }
+    }
+    /// Oct 1 (Wall Front/Left/Right/Back fix): the same invalidation signal
+    /// for the player's logical facing. Turning in place never changes the
+    /// cell, so without this the PLUS -> Wall list stayed computed for the
+    /// facing at the last re-render (relative sides shown for a stale view).
+    @Published private(set) var observedPlayerFacing: Direction?
+    func playerFacingDidChange(_ facing: Direction?) {
+        if observedPlayerFacing != facing { observedPlayerFacing = facing }
+    }
     private weak var scene: SCNScene?
     private weak var store: MazeStore?
     private var floor: Int = 0
     var stopWalking: (() -> Void)?
     var canEditCab: () -> Bool = { false }
+    /// Elevator lighting fix #1: whether the player is PHYSICALLY standing
+    /// inside the elevator cab right now. Wired in ContentView to
+    /// TapNavigationController.elevatorAwaitingEntryDirection != nil --
+    /// the one state that is non-nil exactly while the camera is offset
+    /// into the cab (just arrived, or walked back in) and nil in the
+    /// hallway, including at the elevator's own hallway cell. currentCell
+    /// cannot tell the two apart: it stays the hallway cell in both.
+    var isPlayerInElevatorCab: () -> Bool = { false }
     /// Sept 21 (3D Decorator wall authoring): the one piece of live
     /// scene-build state DecoratorState itself has no other way to
     /// reach -- MazeStore doesn't know the current theme, and this
@@ -211,6 +266,37 @@ final class DecoratorState: ObservableObject {
     /// or its WallThemeStore. Wired up alongside canEditCab/stopWalking
     /// above. See HallwayScene.effectiveWallImageName.
     var currentWallImageName: () -> String? = { nil }
+    /// Oct 1 (cell-surface overrides): the image a live-built wall piece
+    /// owned by `coord` should use -- its cell's wall override, else the
+    /// floor's current resolved default (currentWallImageName).
+    func wallImageName(for coord: GridCoordinate) -> String? {
+        store?.cellSurfaces[coord]?.wallTexture ?? currentWallImageName()
+    }
+    /// Oct 1: the cell the Surfaces editor's "This Cell" mode edits -- the player's current
+    /// open cell on this floor (never the elevator cab).
+    func cellForSurfaceEditing() -> GridCoordinate? {
+        guard enabled, let store, store.currentMazeID == floor, !isPlayerInElevatorCab(),
+              let coord = currentPlayerCell(), store.cells.contains(coord) else { return nil }
+        return coord
+    }
+    /// Oct 1: one surface of one cell -- texture name, or nil = Use Floor
+    /// Default. Applies live (ContentView re-skins on the store change) and
+    /// saves through the normal floor-override path.
+    func setCellSurface(_ name: String?, for surface: CellSurfaceKind, at coord: GridCoordinate) {
+        setCellSurfaces(name, for: [surface], at: coord)
+    }
+
+    /// Oct 1 (Surfaces "This Cell"): several surfaces of one cell in ONE
+    /// edit (one undo step, one save). nil = Use Floor Default for each;
+    /// surfaces not listed are left exactly as they are.
+    func setCellSurfaces(_ name: String?, for surfaces: [CellSurfaceKind], at coord: GridCoordinate) {
+        guard enabled, let store, store.currentMazeID == floor, store.cells.contains(coord) else { return }
+        let changing = surfaces.filter { store.cellSurfaceTexture($0, at: coord) != name }
+        guard !changing.isEmpty else { return }
+        store.snapshotForUndo()
+        for surface in changing { store.setCellSurfaceTexture(name, for: surface, at: coord) }
+        store.saveCurrentFloorAsOverride()
+    }
     /// Sept 21 (3D Decorator wall authoring): after addPicture() below
     /// builds a live Picture, this registers it into the OTHER live
     /// state that already exists for every build-time Picture --
@@ -302,6 +388,9 @@ final class DecoratorState: ObservableObject {
     var unregisterLiveExtinguisher: (_ coord: GridCoordinate) -> Void = { _ in }
     var registerLivePhotoBooth: (_ direction: Direction, _ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _, _ in }
     var unregisterLivePhotoBooth: (_ coord: GridCoordinate) -> Void = { _ in }
+    /// Oct 1 (Decorator Games): TapNavigationController.registerGame/unregisterGame.
+    var registerLiveGame: (_ kind: GameFixtureKind, _ direction: Direction, _ coord: GridCoordinate, _ node: SCNNode) -> Void = { _, _, _, _ in }
+    var unregisterLiveGame: (_ kind: GameFixtureKind, _ coord: GridCoordinate) -> Void = { _, _ in }
     /// Sept 27 (Decorator Room Entrance authoring): same shape as the
     /// mirror/fire/extinguisher/photo-booth register/unregister
     /// closures just above -- addRoomEntranceDoorAtCurrentCell/
@@ -392,6 +481,14 @@ final class DecoratorState: ObservableObject {
             case .extinguisher: return false // no Fire Extinguisher in the elevator cab
             case .photoBooth: return false // no Photo Booth in the elevator cab
             case .roomEntranceDoor: return false // no Room Entrance door in the elevator cab
+            case .table: return false // no Table in the elevator cab
+            case .desk: return false // no Desk in the elevator cab
+            case .waterCooler: return false // no Water Cooler in the elevator cab
+            case .officeChair: return false // no Office Chair in the elevator cab
+            case .floorLamp: return false // no Floor Lamp in the elevator cab
+            case .aquarium: return false // no Aquarium in the elevator cab
+            case .filingCabinet: return false // no Filing Cabinet in the elevator cab
+            case .game: return false // no games in the elevator cab
             }
         }
         guard let coord = target.coord else { return false }
@@ -444,6 +541,18 @@ final class DecoratorState: ObservableObject {
         case .roomEntranceDoor:
             guard let direction = target.direction else { return false }
             return store.roomEntranceDoors[coord]?.direction == direction
+        // Sept 28: reads straight off MazeStore.tables.
+        case .table: return store.tables[coord] != nil
+        case .desk: return store.desks[coord] != nil
+        case .waterCooler: return store.waterCoolers[coord] != nil
+        case .officeChair: return store.officeChairs[coord] != nil
+        case .floorLamp: return store.floorLamps[coord] != nil
+        case .aquarium: return store.aquariums[coord] != nil
+        case .filingCabinet: return store.filingCabinets[coord] != nil
+        // Oct 1 (Decorator Games): wall-mounted, one per cell.
+        case .game:
+            guard let direction = target.direction else { return false }
+            return store.gameFixture(at: coord)?.direction == direction
         }
     }
 
@@ -837,7 +946,7 @@ final class DecoratorState: ObservableObject {
             case .west: (wx, wz) = (picX - half, picZ)
             }
             var newWallMaterials: [SCNMaterial] = []
-            HallwayScene.buildPictureBackfill(direction: direction, wallCenterX: wx, wallCenterZ: wz, coord: coord, floorNumber: floor, reservedWidth: newPanelWidth, reservedHeight: newPanelHeight, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), root: hallwayRoot, wallMaterials: &newWallMaterials)
+            HallwayScene.buildPictureBackfill(direction: direction, wallCenterX: wx, wallCenterZ: wz, coord: coord, floorNumber: floor, reservedWidth: newPanelWidth, reservedHeight: newPanelHeight, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: wallImageName(for: coord), root: hallwayRoot, wallMaterials: &newWallMaterials)
             appendWallMaterials(newWallMaterials)
         }
 
@@ -1188,7 +1297,7 @@ final class DecoratorState: ObservableObject {
         for node in wallNodes { node.removeFromParentNode() }
 
         var newWallMaterials: [SCNMaterial] = []
-        let (material, frameNode) = HallwayScene.buildPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, backfillWall: true, scale: PictureSize.standard.scale, pictureLightLevel: nil, coord: coord, floorNumber: floor, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), root: hallwayRoot, wallMaterials: &newWallMaterials)
+        let (material, frameNode) = HallwayScene.buildPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, backfillWall: true, scale: PictureSize.standard.scale, pictureLightLevel: nil, coord: coord, floorNumber: floor, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: wallImageName(for: coord), root: hallwayRoot, wallMaterials: &newWallMaterials)
         DecoratorTarget(floor: floor, coord: coord, kind: .picture, direction: direction).tag(frameNode)
         registerAddedPicture(coord, direction, material, newWallMaterials)
 
@@ -1435,6 +1544,48 @@ final class DecoratorState: ObservableObject {
         save(target)
     }
 
+    // MARK: Oct 1 (Decorator Games)
+
+    /// Whether Empty Wall -> Games -> <game> is offered for this wall.
+    func canAddGame(_ target: DecoratorTarget) -> Bool {
+        guard enabled, target.kind == .wallSurface, let store, let coord = target.coord, let direction = target.direction else { return false }
+        return store.canPlaceGame(direction, at: coord)
+    }
+
+    /// Tap an empty wall -> Games -> <game>. Authors the placement in the
+    /// game's EXISTING per-floor dictionary, builds the SAME node the
+    /// floor build loop makes (over the kept wall panel, like mirrors and
+    /// photo booths), and registers it with TapNavigationController so it
+    /// plays immediately. Saved like every other Decorator edit.
+    func addGame(_ kind: GameFixtureKind) {
+        guard enabled, let target = selection, target.kind == .wallSurface,
+              let coord = target.coord, let direction = target.direction,
+              canAddGame(target), let store, let scene else { return }
+        store.snapshotForUndo()
+        store.placeGame(kind, direction: direction, at: coord)
+        let node = kind.makeNode(at: coord, direction: direction, cellSize: store.cellSize)
+        scene.rootNode.addChildNode(node)
+        let placed = DecoratorTarget(floor: floor, coord: coord, kind: .game, direction: direction)
+        placed.tag(node)
+        registerLiveGame(kind, direction, coord, node)
+        selection = placed
+        save(target)
+    }
+
+    /// Reverse of addGame (also works on build-time / DefaultMazes.json games).
+    func deleteGame() {
+        guard enabled, let target = selection, target.kind == .game,
+              exists(target), let store, let coord = target.coord,
+              let kind = store.gameFixture(at: coord)?.kind else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.deleteContent([kind.editorContentKind], at: coord)
+        unregisterLiveGame(kind, coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: target.direction)
+        save(target)
+    }
+
     /// Sept 21 (Floor Object current-cell authoring): the catalog
     /// behind the small ADD menu beside DECORATE/DONE (DecoratorOverlay,
     /// below in this file). Deliberately just an extensible dispatch
@@ -1462,6 +1613,28 @@ final class DecoratorState: ObservableObject {
         case envelope
         case paintBucket
         case fire
+        // Sept 28 (first furniture proof of concept): decorative
+        // furniture, NOT an ObjectKind -- its own MazeStore.tables
+        // collection, like Fire's own independent Set.
+        case table
+        // Sept 28: decorative office Desk -- MazeStore.desks, same shape
+        // as Table.
+        case desk
+        // Sept 28: decorative office Water Cooler -- MazeStore.waterCoolers,
+        // same shape as Table/Desk.
+        case waterCooler
+        // Sept 28: decorative Office Chair -- MazeStore.officeChairs; the
+        // one furniture piece allowed to share a cell (with a Desk).
+        case officeChair
+        // Sept 28: Floor Lamp -- MazeStore.floorLamps; may stand on the
+        // opposite side of a cell from other furniture.
+        case floorLamp
+        // Sept 28: Aquarium -- MazeStore.aquariums; occupies its whole
+        // cell (no other furniture or floor object alongside).
+        case aquarium
+        // Sept 28: Filing Cabinet -- MazeStore.filingCabinets; occupies its
+        // whole cell, like the Aquarium.
+        case filingCabinet
 
         var title: String {
             switch self {
@@ -1469,6 +1642,13 @@ final class DecoratorState: ObservableObject {
             case .envelope: return "Envelope"
             case .paintBucket: return "Paint Bucket"
             case .fire: return "Fire"
+            case .table: return "Table"
+            case .desk: return "Desk"
+            case .waterCooler: return "Water Cooler"
+            case .officeChair: return "Office Chair"
+            case .floorLamp: return "Floor Lamp"
+            case .aquarium: return "Aquarium"
+            case .filingCabinet: return "Filing Cabinet"
             }
         }
 
@@ -1478,6 +1658,13 @@ final class DecoratorState: ObservableObject {
             case .envelope: return .envelope
             case .paintBucket: return .paintBucket
             case .fire: return nil // not an ObjectKind -- see this enum's own doc comment
+            case .table: return nil // furniture, not an ObjectKind
+            case .desk: return nil // furniture, not an ObjectKind
+            case .waterCooler: return nil // furniture, not an ObjectKind
+            case .officeChair: return nil // furniture, not an ObjectKind
+            case .floorLamp: return nil // furniture, not an ObjectKind
+            case .aquarium: return nil // furniture, not an ObjectKind
+            case .filingCabinet: return nil // furniture, not an ObjectKind
             }
         }
     }
@@ -1500,6 +1687,13 @@ final class DecoratorState: ObservableObject {
         switch item {
         case .trashCan, .envelope, .paintBucket: return store.objects[coord] == nil
         case .fire: return !store.hasFire(coord)
+        case .table: return store.canPlaceTable(at: coord)
+        case .desk: return store.canPlaceDesk(at: coord)
+        case .waterCooler: return store.canPlaceWaterCooler(at: coord)
+        case .officeChair: return store.canPlaceOfficeChair(at: coord)
+        case .floorLamp: return store.canPlaceFloorLamp(at: coord)
+        case .aquarium: return store.canPlaceAquarium(at: coord)
+        case .filingCabinet: return store.canPlaceFilingCabinet(at: coord)
         }
     }
 
@@ -1570,7 +1764,504 @@ final class DecoratorState: ObservableObject {
             registerLiveFire(coord, node)
             selection = target
             save(target)
+        case .table:
+            // Scenery only: no registerFloorObject, so the table never
+            // enters TapNavigationController's pickup bookkeeping.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            let table = defaultTable(at: coord)
+            store.placeTable(table, at: coord)
+            guard let placed = store.tables[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildTableNode(at: coord, cellSize: store.cellSize, floorNumber: floor, table: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .table)
+            selection = target
+            save(target)
+        case .desk:
+            // Scenery only, exactly like .table above.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            // Same player-relative default side/axis as Table -- unless an
+            // Office Chair is already here, in which case the desk goes
+            // on the chair's side (the one allowed Desk + Chair pairing).
+            let side = store.officeChairs[coord].map { FurnitureTable(position: $0.position, orientation: $0.orientation) } ?? defaultTable(at: coord)
+            store.placeDesk(FurnitureDesk(position: side.position, orientation: side.orientation), at: coord)
+            guard let placed = store.desks[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildDeskNode(at: coord, cellSize: store.cellSize, floorNumber: floor, desk: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .desk)
+            selection = target
+            save(target)
+        case .waterCooler:
+            // Scenery only, exactly like .table/.desk above.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            let side = defaultTable(at: coord) // same player-relative default side/axis
+            store.placeWaterCooler(FurnitureWaterCooler(position: side.position, orientation: side.orientation), at: coord)
+            guard let placed = store.waterCoolers[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildWaterCoolerNode(at: coord, cellSize: store.cellSize, floorNumber: floor, cooler: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .waterCooler)
+            selection = target
+            save(target)
+        case .officeChair:
+            // Scenery only, like the other furniture. Pulled up to the
+            // Desk already in this cell if there is one (its side and
+            // axis); otherwise the same player-relative default. Never
+            // attached to the desk -- two independent nodes and records.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            let side = store.desks[coord].map { FurnitureTable(position: $0.position, orientation: $0.orientation) } ?? defaultTable(at: coord)
+            store.placeOfficeChair(FurnitureOfficeChair(position: side.position, orientation: side.orientation), at: coord)
+            guard let placed = store.officeChairs[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildOfficeChairNode(at: coord, cellSize: store.cellSize, floorNumber: floor, chair: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .officeChair)
+            selection = target
+            save(target)
+        case .floorLamp:
+            // New lamps start ON. If other furniture already holds one side
+            // of this cell, the lamp takes the other side (and that
+            // furniture's axis); otherwise the usual player-relative
+            // default, falling back to the other side if needed.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            let preferred = defaultTable(at: coord)
+            var lamp = FurnitureFloorLamp(position: preferred.position, orientation: preferred.orientation, isOn: true)
+            if let existing = store.tables[coord]?.orientation ?? store.desks[coord]?.orientation
+                ?? store.waterCoolers[coord]?.orientation ?? store.officeChairs[coord]?.orientation {
+                lamp.orientation = existing
+            }
+            if !store.canPlaceFloorLamp(at: coord, side: lamp.position) {
+                lamp.position = lamp.position == .left ? .right : .left
+            }
+            store.placeFloorLamp(lamp, at: coord)
+            guard let placed = store.floorLamps[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildFloorLampNode(at: coord, cellSize: store.cellSize, floorNumber: floor, lamp: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .floorLamp)
+            selection = target
+            save(target)
+        case .aquarium:
+            // Scenery only, like the other furniture: same player-relative
+            // default side/axis as Table.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            let side = defaultTable(at: coord)
+            store.placeAquarium(FurnitureAquarium(position: side.position, orientation: side.orientation), at: coord)
+            guard let placed = store.aquariums[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildAquariumNode(at: coord, cellSize: store.cellSize, floorNumber: floor, aquarium: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .aquarium)
+            selection = target
+            save(target)
+        case .filingCabinet:
+            // Scenery only, like the other furniture: same player-relative
+            // default side/axis as Table. New cabinets start all closed.
+            guard let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+            let side = defaultTable(at: coord)
+            store.placeFilingCabinet(FurnitureFilingCabinet(position: side.position, orientation: side.orientation), at: coord)
+            guard let placed = store.filingCabinets[coord] else { return }
+            hallwayRoot.addChildNode(HallwayScene.buildFilingCabinetNode(at: coord, cellSize: store.cellSize, floorNumber: floor, cabinet: placed))
+            let target = DecoratorTarget(floor: floor, coord: coord, kind: .filingCabinet)
+            selection = target
+            save(target)
         }
+    }
+
+    // MARK: - Tables (Sept 28, first furniture proof of concept)
+
+    /// A new table's default placement, relative to the player: against
+    /// the player's LEFT side of the current cell, along the axis the
+    /// player is facing -- unless that side is an opening and the right
+    /// side is a wall, in which case it goes right. Converts that
+    /// player-relative side into the stored world convention (see
+    /// HallwayScene.tableFloorOffset: north-south axis left = west,
+    /// east-west axis left = north).
+    private func defaultTable(at coord: GridCoordinate) -> FurnitureTable {
+        guard let store, let facing = currentPlayerFacing() else { return FurnitureTable() }
+        func isWall(_ direction: Direction) -> Bool {
+            !store.cells.contains(GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col))
+        }
+        let side = (!isWall(facing.left) && isWall(facing.right)) ? facing.right : facing.left
+        let orientation: FluorescentOrientation = (facing == .north || facing == .south) ? .northSouth : .eastWest
+        let position: FloorPosition = (side == .west || side == .north) ? .left : .right
+        return FurnitureTable(position: position, orientation: orientation, hasPlant: false)
+    }
+
+    func table(_ target: DecoratorTarget) -> FurnitureTable? {
+        guard target.kind == .table, let coord = target.coord else { return nil }
+        return store?.tables[coord]
+    }
+
+    /// Every table edit goes through here: snapshot for Undo, write the
+    /// new state to MazeStore, then swap the live node for a freshly
+    /// built one (the SAME HallwayScene.buildTableNode a rebuild uses),
+    /// so position/axis/plant changes appear immediately with no floor
+    /// rebuild. The selection stays on the same target throughout.
+    private func updateSelectedTable(_ change: (inout FurnitureTable) -> Void) {
+        guard enabled, let target = selection, target.kind == .table,
+              exists(target), let store, let scene, let coord = target.coord,
+              let current = store.tables[coord],
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        store.snapshotForUndo()
+        store.updateTable(updated, at: coord)
+        guard let stored = store.tables[coord] else { return }
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        hallwayRoot.addChildNode(HallwayScene.buildTableNode(at: coord, cellSize: store.cellSize, floorNumber: floor, table: stored))
+        save(target)
+    }
+
+    func changeTablePosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedTable { $0.position = position }
+    }
+
+    func changeTableOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedTable { $0.orientation = orientation }
+    }
+
+    func setTableHasPlant(_ hasPlant: Bool) {
+        updateSelectedTable { $0.hasPlant = hasPlant }
+    }
+
+    // MARK: - Floor Lamps (Sept 28, fifth furniture object)
+
+    func floorLamp(_ target: DecoratorTarget) -> FurnitureFloorLamp? {
+        guard target.kind == .floorLamp, let coord = target.coord else { return nil }
+        return store?.floorLamps[coord]
+    }
+
+    /// Replaces the lamp's live node(s) with ONE freshly built lamp for the
+    /// stored state. Its light lives inside that node, so this is also
+    /// what switches the light: every old lamp node (and the light inside
+    /// it) is removed before the new one is added -- no orphan or
+    /// duplicate lights. Removes all nodes when the lamp no longer exists.
+    private func rebuildFloorLamp(at coord: GridCoordinate) {
+        guard let store, let scene,
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        for node in nodes(for: DecoratorTarget(floor: floor, coord: coord, kind: .floorLamp)) { node.removeFromParentNode() }
+        guard let lamp = store.floorLamps[coord] else { return }
+        hallwayRoot.addChildNode(HallwayScene.buildFloorLampNode(at: coord, cellSize: store.cellSize, floorNumber: floor, lamp: lamp))
+    }
+
+    /// Decorate-mode edits: same shape as updateSelectedDesk (snapshot for
+    /// Undo, write the new state, rebuild the live node).
+    private func updateSelectedFloorLamp(_ change: (inout FurnitureFloorLamp) -> Void) {
+        guard enabled, let target = selection, target.kind == .floorLamp,
+              exists(target), let store, let coord = target.coord,
+              let current = store.floorLamps[coord] else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        // Another piece of furniture holds that side: refuse before
+        // snapshotting, so Undo never gets an empty step.
+        if updated.sanitized.position != current.position,
+           store.furnitureSides(at: coord).contains(updated.sanitized.position) { return }
+        store.snapshotForUndo()
+        store.updateFloorLamp(updated, at: coord)
+        rebuildFloorLamp(at: coord)
+        save(target)
+    }
+
+    func changeFloorLampPosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedFloorLamp { $0.position = position }
+    }
+
+    func changeFloorLampOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedFloorLamp { $0.orientation = orientation }
+    }
+
+    func setFloorLampOn(_ isOn: Bool) {
+        updateSelectedFloorLamp { $0.isOn = isOn }
+    }
+
+    /// Same 1...5 level, same +/- shape as fireBrightness/
+    /// changeFireBrightness. Rebuilds the live lamp, so its SCNLight
+    /// changes immediately (when ON); undoable like fire brightness.
+    func floorLampBrightness(_ target: DecoratorTarget) -> Int {
+        floorLamp(target)?.brightness ?? FurnitureFloorLamp.defaultBrightness
+    }
+
+    func changeFloorLampBrightness(by delta: Int) {
+        updateSelectedFloorLamp { $0.brightness += delta }
+    }
+
+    /// Whether the selected lamp could move to `side` (the other side may
+    /// be held by other furniture). Backs the Position picker.
+    func canMoveSelectedFloorLamp(to side: FloorPosition) -> Bool {
+        guard let target = selection, target.kind == .floorLamp, let coord = target.coord,
+              let store, let lamp = store.floorLamps[coord] else { return false }
+        return side == lamp.position || !store.furnitureSides(at: coord).contains(side)
+    }
+
+    func deleteFloorLamp() {
+        guard enabled, let target = selection, target.kind == .floorLamp,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeFloorLamp(at: coord)
+        rebuildFloorLamp(at: coord) // lamp gone: removes its node and light
+        selection = nil
+        save(target)
+    }
+
+    /// PLAY-mode switch (ContentView's tap handler): flips ON/OFF, persists
+    /// it with the floor, and rebuilds the live lamp. Not an authoring
+    /// edit, so no Undo snapshot. Returns false if there's no lamp here.
+    @discardableResult
+    func toggleFloorLamp(at coord: GridCoordinate) -> Bool {
+        guard let store, store.currentMazeID == floor, var lamp = store.floorLamps[coord] else { return false }
+        lamp.isOn.toggle()
+        store.updateFloorLamp(lamp, at: coord)
+        rebuildFloorLamp(at: coord)
+        store.saveCurrentFloorAsOverride()
+        return true
+    }
+
+    // MARK: - Aquariums (Sept 28, sixth furniture object)
+
+    func aquarium(_ target: DecoratorTarget) -> FurnitureAquarium? {
+        guard target.kind == .aquarium, let coord = target.coord else { return nil }
+        return store?.aquariums[coord]
+    }
+
+    /// Same shape as updateSelectedOfficeChair. Removing the old node
+    /// takes its fish, light and running actions with it.
+    private func updateSelectedAquarium(_ change: (inout FurnitureAquarium) -> Void) {
+        guard enabled, let target = selection, target.kind == .aquarium,
+              exists(target), let store, let scene, let coord = target.coord,
+              let current = store.aquariums[coord],
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        store.snapshotForUndo()
+        store.updateAquarium(updated, at: coord)
+        guard let stored = store.aquariums[coord] else { return }
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        hallwayRoot.addChildNode(HallwayScene.buildAquariumNode(at: coord, cellSize: store.cellSize, floorNumber: floor, aquarium: stored))
+        save(target)
+    }
+
+    func changeAquariumPosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedAquarium { $0.position = position }
+    }
+
+    func changeAquariumOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedAquarium { $0.orientation = orientation }
+    }
+
+    func deleteAquarium() {
+        guard enabled, let target = selection, target.kind == .aquarium,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeAquarium(at: coord)
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    // MARK: - Filing Cabinets (Sept 28, seventh furniture object)
+
+    func filingCabinet(_ target: DecoratorTarget) -> FurnitureFilingCabinet? {
+        guard target.kind == .filingCabinet, let coord = target.coord else { return nil }
+        return store?.filingCabinets[coord]
+    }
+
+    /// Same shape as updateSelectedAquarium. The rebuilt cabinet keeps its
+    /// persisted open drawer (placed directly, no animation).
+    private func updateSelectedFilingCabinet(_ change: (inout FurnitureFilingCabinet) -> Void) {
+        guard enabled, let target = selection, target.kind == .filingCabinet,
+              exists(target), let store, let scene, let coord = target.coord,
+              let current = store.filingCabinets[coord],
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        store.snapshotForUndo()
+        store.updateFilingCabinet(updated, at: coord)
+        guard let stored = store.filingCabinets[coord] else { return }
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        hallwayRoot.addChildNode(HallwayScene.buildFilingCabinetNode(at: coord, cellSize: store.cellSize, floorNumber: floor, cabinet: stored))
+        save(target)
+    }
+
+    func changeFilingCabinetPosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedFilingCabinet { $0.position = position }
+    }
+
+    func changeFilingCabinetOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedFilingCabinet { $0.orientation = orientation }
+    }
+
+    func deleteFilingCabinet() {
+        guard enabled, let target = selection, target.kind == .filingCabinet,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeFilingCabinet(at: coord)
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    /// PLAY-mode drawer tap (ContentView's tap handler). Tapping the open
+    /// drawer closes it; tapping any other drawer makes it THE open one
+    /// (the previously open drawer closes). The single `openDrawerIndex`
+    /// in the store is the only truth -- the live drawers then slide to
+    /// the fixed positions it implies. Persisted with the floor, like a
+    /// lamp switch; not an authoring edit, so no Undo snapshot. Returns
+    /// false if there's no such cabinet/drawer here.
+    @discardableResult
+    func tapFilingCabinetDrawer(_ drawer: Int, at coord: GridCoordinate) -> Bool {
+        guard let store, store.currentMazeID == floor, var cabinet = store.filingCabinets[coord],
+              (0..<FurnitureFilingCabinet.drawerCount).contains(drawer) else { return false }
+        cabinet.openDrawerIndex = cabinet.openDrawerIndex == drawer ? nil : drawer
+        store.updateFilingCabinet(cabinet, at: coord)
+        let openIndex = store.filingCabinets[coord]?.openDrawerIndex
+        for node in nodes(for: DecoratorTarget(floor: floor, coord: coord, kind: .filingCabinet)) {
+            HallwayScene.setFilingCabinetDrawers(node, openDrawerIndex: openIndex, animated: true)
+        }
+        store.saveCurrentFloorAsOverride()
+        return true
+    }
+
+    // MARK: - Office Chairs (Sept 28, fourth furniture object)
+
+    func officeChair(_ target: DecoratorTarget) -> FurnitureOfficeChair? {
+        guard target.kind == .officeChair, let coord = target.coord else { return nil }
+        return store?.officeChairs[coord]
+    }
+
+    /// Same shape as updateSelectedDesk. Only the chair's own node is
+    /// swapped -- nodes(for:) matches the `.officeChair` tag, so a Desk
+    /// in the same cell (tagged `.desk`) is never touched.
+    private func updateSelectedOfficeChair(_ change: (inout FurnitureOfficeChair) -> Void) {
+        guard enabled, let target = selection, target.kind == .officeChair,
+              exists(target), let store, let scene, let coord = target.coord,
+              let current = store.officeChairs[coord],
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        store.snapshotForUndo()
+        store.updateOfficeChair(updated, at: coord)
+        guard let stored = store.officeChairs[coord] else { return }
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        hallwayRoot.addChildNode(HallwayScene.buildOfficeChairNode(at: coord, cellSize: store.cellSize, floorNumber: floor, chair: stored))
+        save(target)
+    }
+
+    func changeOfficeChairPosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedOfficeChair { $0.position = position }
+    }
+
+    func changeOfficeChairOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedOfficeChair { $0.orientation = orientation }
+    }
+
+    func deleteOfficeChair() {
+        guard enabled, let target = selection, target.kind == .officeChair,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeOfficeChair(at: coord)
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    // MARK: - Water Coolers (Sept 28, third furniture object)
+
+    func waterCooler(_ target: DecoratorTarget) -> FurnitureWaterCooler? {
+        guard target.kind == .waterCooler, let coord = target.coord else { return nil }
+        return store?.waterCoolers[coord]
+    }
+
+    /// Same shape as updateSelectedTable/updateSelectedDesk: snapshot for
+    /// Undo, write the new state, swap the live node for a fresh one.
+    private func updateSelectedWaterCooler(_ change: (inout FurnitureWaterCooler) -> Void) {
+        guard enabled, let target = selection, target.kind == .waterCooler,
+              exists(target), let store, let scene, let coord = target.coord,
+              let current = store.waterCoolers[coord],
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        store.snapshotForUndo()
+        store.updateWaterCooler(updated, at: coord)
+        guard let stored = store.waterCoolers[coord] else { return }
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        hallwayRoot.addChildNode(HallwayScene.buildWaterCoolerNode(at: coord, cellSize: store.cellSize, floorNumber: floor, cooler: stored))
+        save(target)
+    }
+
+    func changeWaterCoolerPosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedWaterCooler { $0.position = position }
+    }
+
+    func changeWaterCoolerOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedWaterCooler { $0.orientation = orientation }
+    }
+
+    func deleteWaterCooler() {
+        guard enabled, let target = selection, target.kind == .waterCooler,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeWaterCooler(at: coord)
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    // MARK: - Desks (Sept 28, second furniture object)
+
+    func desk(_ target: DecoratorTarget) -> FurnitureDesk? {
+        guard target.kind == .desk, let coord = target.coord else { return nil }
+        return store?.desks[coord]
+    }
+
+    /// Same shape as updateSelectedTable: snapshot for Undo, write the
+    /// new state, swap the live node for a freshly built one.
+    private func updateSelectedDesk(_ change: (inout FurnitureDesk) -> Void) {
+        guard enabled, let target = selection, target.kind == .desk,
+              exists(target), let store, let scene, let coord = target.coord,
+              let current = store.desks[coord],
+              let hallwayRoot = scene.rootNode.childNode(withName: "hallwaySceneRoot", recursively: false) else { return }
+        var updated = current
+        change(&updated)
+        guard updated.sanitized != current else { return }
+        store.snapshotForUndo()
+        store.updateDesk(updated, at: coord)
+        guard let stored = store.desks[coord] else { return }
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        hallwayRoot.addChildNode(HallwayScene.buildDeskNode(at: coord, cellSize: store.cellSize, floorNumber: floor, desk: stored))
+        save(target)
+    }
+
+    func changeDeskPosition(_ position: FloorPosition) {
+        guard position != .center else { return }
+        updateSelectedDesk { $0.position = position }
+    }
+
+    func changeDeskOrientation(_ orientation: FluorescentOrientation) {
+        updateSelectedDesk { $0.orientation = orientation }
+    }
+
+    func deleteDesk() {
+        guard enabled, let target = selection, target.kind == .desk,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeDesk(at: coord)
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        selection = nil
+        save(target)
+    }
+
+    /// Deletes the table and, since the plant is part of the table, its
+    /// plant too -- both the data and the live nodes.
+    func deleteTable() {
+        guard enabled, let target = selection, target.kind == .table,
+              exists(target), let store, let coord = target.coord else { return }
+        store.snapshotForUndo()
+        store.removeTable(at: coord)
+        for node in nodes(for: target) { node.removeFromParentNode() }
+        selection = nil
+        save(target)
     }
 
     /// Sept 21 (Floor Object placement, first pass): the specific
@@ -1684,7 +2375,7 @@ final class DecoratorState: ObservableObject {
         let doorCenterY = doorHeight / 2
 
         var newWallMaterials: [SCNMaterial] = []
-        _ = HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), root: assembly, wallMaterials: &newWallMaterials, tag: { target.tag($0) })
+        _ = HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: wallImageName(for: coord), root: assembly, wallMaterials: &newWallMaterials, tag: { target.tag($0) })
         let hinge = HallwayScene.makeBathroomDoorPanel(at: coord, direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, hingeNamePrefix: "roomEntranceDoor", includeSign: false)
         target.tag(hinge)
         assembly.addChildNode(hinge)
@@ -1904,7 +2595,14 @@ final class DecoratorState: ObservableObject {
     /// independent legality -- see canAddExitSignAtCurrentCell below.
     /// Backs the menu item's own .disabled(...) in DecoratorOverlay.
     func canAddCeilingObjectAtCurrentCell(_ item: CeilingObjectCatalogItem) -> Bool {
-        guard enabled, let coord = currentPlayerCell() else { return false }
+        guard enabled else { return false }
+        // In the cab, Spotlight/Fluorescent mean the cab's ONE building-wide
+        // ceiling slot (same legality as tapping the cab ceiling: editable,
+        // mount present, slot empty) -- never the hallway cell's lights.
+        if isPlayerInElevatorCab(), item == .fluorescent || item == .spotlight {
+            return canAdd(cabCeilingSurface)
+        }
+        guard let coord = currentPlayerCell() else { return false }
         switch item {
         case .fluorescent: return canAdd(DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface), kind: .fluorescent)
         case .spotlight: return canAdd(DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface), kind: .ceiling)
@@ -1926,8 +2624,22 @@ final class DecoratorState: ObservableObject {
     /// supplying the coordinate add(_:) would otherwise get from a tap.
     /// Exit Sign (Sept 23) is its own independent entrance -- see
     /// addExitSignAtCurrentCell below.
+    /// The cab ceiling exactly as a direct tap on it selects it.
+    private var cabCeilingSurface: DecoratorTarget {
+        DecoratorTarget(floor: floor, location: .elevatorCeiling, kind: .ceilingSurface)
+    }
+
     func addCeilingObjectAtCurrentCell(_ item: CeilingObjectCatalogItem) {
-        guard canAddCeilingObjectAtCurrentCell(item), let coord = currentPlayerCell() else { return }
+        guard canAddCeilingObjectAtCurrentCell(item) else { return }
+        if isPlayerInElevatorCab(), item == .fluorescent || item == .spotlight {
+            // Same path as tapping the cab ceiling then "Add": add(_:)'s
+            // isCab branch writes ElevatorCabDecoration.ceilingFixture and
+            // hangs the fixture on elevatorCabCeilingMount.
+            selection = cabCeilingSurface
+            add(item == .fluorescent ? .fluorescent : .ceiling)
+            return
+        }
+        guard let coord = currentPlayerCell() else { return }
         switch item {
         case .fluorescent:
             selection = DecoratorTarget(floor: floor, coord: coord, kind: .ceilingSurface)
@@ -2103,23 +2815,41 @@ final class DecoratorState: ObservableObject {
     /// translated to an absolute Direction only at the moment of use
     /// (absoluteDirection(for:) below), never exposed as N/E/S/W to
     /// Eddie in this flow.
+    /// Oct 1: relative to the player's CURRENT view (the logical facing,
+    /// which every gesture release sets to the nearest cardinal of the
+    /// actual camera yaw). Never shown as compass directions.
     enum WallSide: CaseIterable, Hashable {
-        case left, right
+        case front, left, right, back
 
         var title: String {
             switch self {
-            case .left: return "Left Wall"
-            case .right: return "Right Wall"
+            case .front: return "Front"
+            case .left: return "Left"
+            case .right: return "Right"
+            case .back: return "Back"
+            }
+        }
+
+        /// The absolute wall this side names when facing `facing`.
+        func direction(facing: Direction) -> Direction {
+            switch self {
+            case .front: return facing
+            case .left: return facing.left
+            case .right: return facing.right
+            case .back: return facing.opposite
             }
         }
     }
 
+    /// Oct 1: the sides of the current cell that have an eligible wall, in
+    /// Front/Left/Right/Back order -- only these are offered.
+    func eligibleWallSidesAtCurrentCell() -> [WallSide] {
+        WallSide.allCases.filter { canSelectWallAtCurrentCell($0) }
+    }
+
     private func absoluteDirection(for side: WallSide) -> Direction? {
         guard let facing = currentPlayerFacing() else { return nil }
-        switch side {
-        case .left: return facing.left
-        case .right: return facing.right
-        }
+        return side.direction(facing: facing)
     }
 
     /// Sept 21 (current-cell Wall authoring): whether "+" -> Wall ->
@@ -2220,7 +2950,7 @@ final class DecoratorState: ObservableObject {
         var newWallMaterials: [SCNMaterial] = []
         let wall = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
         if nodes(for: wall).isEmpty {
-            HallwayScene.buildWallPanel(coord: coord, direction: direction, width: panelWidth, length: panelLength, x: wx, z: wz, wallHeight: store.wallHeight, effectiveWallImageName: currentWallImageName(), floorNumber: floor, root: hallwayRoot, wallMaterials: &newWallMaterials)
+            HallwayScene.buildWallPanel(coord: coord, direction: direction, width: panelWidth, length: panelLength, x: wx, z: wz, wallHeight: store.wallHeight, effectiveWallImageName: wallImageName(for: coord), floorNumber: floor, root: hallwayRoot, wallMaterials: &newWallMaterials)
             appendWallMaterials(newWallMaterials)
         }
         unregisterPicture(coord, direction)
@@ -2231,6 +2961,27 @@ final class DecoratorState: ObservableObject {
 }
 
 struct DecoratorOverlay: View {
+    // Oct 2 (Build 6 HUD fix) -- layout constants derived from the real
+    // neighbours, not eyeballed:
+    //  * this overlay's bottom edge sits 12 pt above the safe-area bottom
+    //    (its .padding(.bottom, 12)); the FLOOR N pill's bottom sits
+    //    hudPillToSafeGap above it, then is pushed down floorPillOffsetY.
+    //    Offsetting the DECORATE pill by that difference -- plus half the
+    //    height difference between the two capsules -- centers both on one
+    //    line.
+    //  * PlayerSettingsButton: 56 pt gear, 20 pt from the leading edge, its
+    //    bottom 28 pt above the safe-area bottom. The + menu (34 pt) sits
+    //    10 pt to the gear's right, vertically centered on it.
+    private static let overlayBottomPadding: CGFloat = 12
+    private static var decoratePillHeight: CGFloat { UIFont.systemFont(ofSize: 12, weight: .bold).lineHeight + 20 }
+    static var decoratePillOffsetY: CGFloat {
+        (overlayBottomPadding - HandheldMapGeometry.hudPillToSafeGap) + HandheldMapGeometry.floorPillOffsetY
+            + (decoratePillHeight - HandheldMapGeometry.hudPillHeight) / 2
+    }
+    private static let gearLeading: CGFloat = 20, gearSize: CGFloat = 56, gearBottom: CGFloat = 28
+    private static let addMenuSize: CGFloat = 34
+    static var addMenuLeading: CGFloat { gearLeading + gearSize + 10 - 12 }      // minus this overlay's 12 pt leading padding
+    static var addMenuLift: CGFloat { gearBottom + (gearSize - addMenuSize) / 2 - overlayBottomPadding }
     @ObservedObject var state: DecoratorState
     @ObservedObject var store: MazeStore
 
@@ -2332,7 +3083,7 @@ struct DecoratorOverlay: View {
             if state.enabled, let target = state.selection, target.floor == store.currentMazeID {
                 VStack(spacing: 10) {
                     HStack {
-                        Text(target.kind == .floorObject ? floorObjectTitle(target) : target.title).font(.headline)
+                        Text(target.kind == .floorObject ? floorObjectTitle(target) : target.kind == .game ? (target.coord.flatMap { store.gameFixture(at: $0)?.kind.title } ?? target.title) : target.title).font(.headline)
                         Spacer()
                         Button("Close") { state.selection = nil }
                     }
@@ -2509,6 +3260,15 @@ struct DecoratorOverlay: View {
                                     .disabled(!item.isEnabled)
                                     .font(.body)
                             }
+                            // Oct 1 (Decorator Games): one Games entry
+                            // listing all ten existing games.
+                            Menu("Games") {
+                                ForEach(GameFixtureKind.allCases) { game in
+                                    Button(game.title) { state.addGame(game) }
+                                }
+                            }
+                            .disabled(!state.canAddGame(target))
+                            .font(.body)
                         }
                     } else if target.kind == .floorObject {
                         // Sept 21 (Floor Object placement, first pass --
@@ -2560,6 +3320,219 @@ struct DecoratorOverlay: View {
                             // this pass -- see deleteFloorObject's own
                             // doc comment.
                             Button("Delete Object", role: .destructive) { state.deleteFloorObject() }
+                        }
+                    } else if target.kind == .table, let table = state.table(target) {
+                        // Sept 28 (first furniture proof of concept):
+                        // LEFT/RIGHT only (CENTER is the walking line),
+                        // the same hallway-axis picker Trash Can uses,
+                        // and the Potted Plant as a property of THIS
+                        // table -- it isn't a Floor menu item.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { table.position },
+                                set: { state.changeTablePosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { table.orientation },
+                                set: { state.changeTableOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            if table.hasPlant {
+                                Button("Remove Potted Plant") { state.setTableHasPlant(false) }
+                            } else {
+                                Button("Add Potted Plant") { state.setTableHasPlant(true) }
+                            }
+                            Button("Delete Table", role: .destructive) { state.deleteTable() }
+                        }
+                    } else if target.kind == .desk, let desk = state.desk(target) {
+                        // Sept 28 (second furniture object): same LEFT/
+                        // RIGHT + Hallway Axis controls as Table.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { desk.position },
+                                set: { state.changeDeskPosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { desk.orientation },
+                                set: { state.changeDeskOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Button("Delete Desk", role: .destructive) { state.deleteDesk() }
+                        }
+                    } else if target.kind == .waterCooler, let cooler = state.waterCooler(target) {
+                        // Sept 28 (third furniture object): same LEFT/
+                        // RIGHT + Hallway Axis controls as Table/Desk.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { cooler.position },
+                                set: { state.changeWaterCoolerPosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { cooler.orientation },
+                                set: { state.changeWaterCoolerOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Button("Delete Water Cooler", role: .destructive) { state.deleteWaterCooler() }
+                        }
+                    } else if target.kind == .officeChair, let chair = state.officeChair(target) {
+                        // Sept 28 (fourth furniture object): same LEFT/
+                        // RIGHT + Hallway Axis controls as the other
+                        // furniture. Moving it never moves a Desk.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { chair.position },
+                                set: { state.changeOfficeChairPosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { chair.orientation },
+                                set: { state.changeOfficeChairOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Button("Delete Office Chair", role: .destructive) { state.deleteOfficeChair() }
+                        }
+                    } else if target.kind == .floorLamp, let lamp = state.floorLamp(target) {
+                        // Sept 28 (Floor Lamp): LEFT/RIGHT (a side held by
+                        // other furniture is unavailable), Hallway Axis,
+                        // ON/OFF (live), Delete.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { lamp.position },
+                                set: { state.changeFloorLampPosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .disabled(!state.canMoveSelectedFloorLamp(to: lamp.position == .left ? .right : .left))
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { lamp.orientation },
+                                set: { state.changeFloorLampOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Lamp").font(.caption).foregroundStyle(.secondary)
+                            Picker("Lamp", selection: Binding(
+                                get: { lamp.isOn },
+                                set: { state.setFloorLampOn($0) })) {
+                                    Text("On").tag(true)
+                                    Text("Off").tag(false)
+                                }
+                                .pickerStyle(.segmented)
+
+                            // Same Brightness row as Fire's (1...5, +/-).
+                            HStack {
+                                Text("Brightness")
+                                Button { state.changeFloorLampBrightness(by: -1) } label: { Image(systemName: "minus.circle.fill") }
+                                    .disabled(lamp.brightness <= FurnitureFloorLamp.brightnessRange.lowerBound)
+                                Text("\(lamp.brightness) / \(FurnitureFloorLamp.brightnessRange.upperBound)").monospacedDigit()
+                                Button { state.changeFloorLampBrightness(by: 1) } label: { Image(systemName: "plus.circle.fill") }
+                                    .disabled(lamp.brightness >= FurnitureFloorLamp.brightnessRange.upperBound)
+                            }
+
+                            Button("Delete Floor Lamp", role: .destructive) { state.deleteFloorLamp() }
+                        }
+                    } else if target.kind == .aquarium, let aquarium = state.aquarium(target) {
+                        // Sept 28 (Aquarium): LEFT/RIGHT + Hallway Axis +
+                        // Delete. No light or animation controls.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { aquarium.position },
+                                set: { state.changeAquariumPosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { aquarium.orientation },
+                                set: { state.changeAquariumOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Button("Delete Aquarium", role: .destructive) { state.deleteAquarium() }
+                        }
+                    } else if target.kind == .filingCabinet, let cabinet = state.filingCabinet(target) {
+                        // Sept 28 (Filing Cabinet): LEFT/RIGHT + Hallway
+                        // Axis + Delete. No drawer controls -- drawers are
+                        // opened by tapping them in Play.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Position").font(.caption).foregroundStyle(.secondary)
+                            Picker("Position", selection: Binding(
+                                get: { cabinet.position },
+                                set: { state.changeFilingCabinetPosition($0) })) {
+                                    ForEach([FloorPosition.left, .right], id: \.self) { position in
+                                        Text(position.title).tag(position)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Text("Hallway Axis").font(.caption).foregroundStyle(.secondary)
+                            Picker("Axis", selection: Binding(
+                                get: { cabinet.orientation },
+                                set: { state.changeFilingCabinetOrientation($0) })) {
+                                    ForEach(FluorescentOrientation.allCases, id: \.self) { orientation in
+                                        Text(orientation.title).tag(orientation)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+
+                            Button("Delete Filing Cabinet", role: .destructive) { state.deleteFilingCabinet() }
                         }
                     } else if target.kind == .exitSign {
                         // Sept 23 (Decorator Ceiling expansion: Exit
@@ -2629,6 +3602,10 @@ struct DecoratorOverlay: View {
                         // removal (deregisters the booth bookkeeping and
                         // cancels any in-flight session).
                         Button("Delete Photo Booth", role: .destructive) { state.deletePhotoBooth() }
+                    } else if target.kind == .game {
+                        // Oct 1 (Decorator Games): a placed game's only
+                        // authoring affordance is removal.
+                        Button("Delete Game", role: .destructive) { state.deleteGame() }
                     } else if target.kind == .roomEntranceDoor {
                         // Sept 27 (Decorator Room Entrance authoring):
                         // same minimal shape as the .roomDoor branch
@@ -2722,12 +3699,22 @@ struct DecoratorOverlay: View {
             // carried-objects strip and the 3D view. Moved to BOTTOM
             // CENTER, just above the FLOOR N pill (which is a separate
             // NavigationOverlay element, untouched -- see its own doc).
-            HStack(spacing: 8) {
+            // Oct 2 (Build 6 HUD fix, Eddie): DECORATE moved DOWN onto the
+            // bottom HUD row -- vertically centered on exactly the same
+            // line as the FLOOR N pill (NavigationOverlay) -- so it no
+            // longer collides with the Settings gear, which stays where it
+            // was, now above DECORATE. The orange + ADD menu (decorating
+            // only) moved beside the gear, to its right, so the longer
+            // "DECORATING · Done" pill never reaches the centered FLOOR N
+            // pill. Behavior of all three controls unchanged.
+            ZStack(alignment: .bottomLeading) {
                 Button(state.enabled ? "DECORATING · Done" : "DECORATE") { state.enabled.toggle() }
                     .font(.system(size: 12, weight: .bold))
                     .padding(10)
                     .background(state.enabled ? Color.orange : Color.black.opacity(0.75), in: Capsule())
                     .foregroundStyle(.white)
+                    .offset(y: Self.decoratePillOffsetY)
+                Group {
                 if state.enabled {
                     Menu {
                         // Sept 27 (Decorator Room Entrance authoring):
@@ -2764,11 +3751,13 @@ struct DecoratorOverlay: View {
                             }
                         }
                         Menu("Wall") {
-                            ForEach(DecoratorState.WallSide.allCases, id: \.self) { side in
+                            // Oct 1: only this cell's eligible walls, named
+                            // relative to the current view.
+                            ForEach(state.eligibleWallSidesAtCurrentCell(), id: \.self) { side in
                                 Button(side.title) { state.selectWallAtCurrentCell(side) }
-                                    .disabled(!state.canSelectWallAtCurrentCell(side))
                             }
                         }
+                        .disabled(state.eligibleWallSidesAtCurrentCell().isEmpty)
                         // Sept 27 (Decorator Surfaces): opens a small
                         // Walls/Floor/Ceiling picker, then a visual
                         // texture browser -- see DecoratorSurfacesSheet/
@@ -2794,6 +3783,9 @@ struct DecoratorOverlay: View {
                             .background(Color.orange, in: Circle())
                     }
                 }
+                }
+                .padding(.leading, Self.addMenuLeading)
+                .offset(y: -Self.addMenuLift)
             }
             // Sept 26 (Eddie: orange Decorate controls covering the
             // large map's bottom row): this HStack used to rely on the
@@ -2849,7 +3841,7 @@ struct DecoratorOverlay: View {
         // same way SystemPhotoPicker/HallwaysArtPicker were, to keep
         // this already very large file's own diff small.
         .sheet(isPresented: $showSurfacesSheet) {
-            DecoratorSurfacesSheet(store: store, isPresented: $showSurfacesSheet)
+            DecoratorSurfacesSheet(store: store, state: state, isPresented: $showSurfacesSheet)
         }
         .sheet(isPresented: $showAutoLightsSheet) {
             AutoLightsConfigSheet(state: state)

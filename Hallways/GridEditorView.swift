@@ -1904,7 +1904,10 @@ struct GridEditorView: View {
     /// negative.
     private func stepNextMazeID(by delta: Int) {
         let base = mazeStore.nextMazeID ?? mazeStore.currentMazeID
-        let candidate = base + delta
+        var candidate = base + delta
+        // Oct 2, Build 6: step OVER the current floor -- an exit to itself
+        // is refused by setNextMazeID (see its comment).
+        if candidate == mazeStore.currentMazeID { candidate += delta }
         mazeStore.setNextMazeID(candidate >= 1 ? candidate : nil)
     }
 

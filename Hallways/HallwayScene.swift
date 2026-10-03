@@ -1525,7 +1525,7 @@ enum HallwayScene {
         camera.zFar = Double(L1 + L2) + 40
         let cameraNode = SCNNode()
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(0, 1.6, -1.0)
+        cameraNode.position = SCNVector3(0, PlayerHeight.currentEyeHeight, -1.0)
         root.addChildNode(cameraNode)
 
         return (scene, cameraNode, [walkable1, walkable2], wallMaterial, floorMaterial, ceilingMaterial)
@@ -1845,7 +1845,7 @@ enum HallwayScene {
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
     static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [WallFace: PictureSize] = [:], mirrors: [GridCoordinate: Direction] = [:],
-                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
+                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], tables: [GridCoordinate: FurnitureTable] = [:], desks: [GridCoordinate: FurnitureDesk] = [:], waterCoolers: [GridCoordinate: FurnitureWaterCooler] = [:], officeChairs: [GridCoordinate: FurnitureOfficeChair] = [:], floorLamps: [GridCoordinate: FurnitureFloorLamp] = [:], aquariums: [GridCoordinate: FurnitureAquarium] = [:], filingCabinets: [GridCoordinate: FurnitureFilingCabinet] = [:], cellSurfaces: [GridCoordinate: CellSurfaceOverride] = [:], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -1991,6 +1991,20 @@ enum HallwayScene {
         // fresh build would have used, without duplicating this
         // per-floor override table. Same values, same behavior.
         let effectiveWallImageName = Self.effectiveWallImageName(floorNumber: floorNumber, theme: theme, wallTexture: wallTexture)
+        // Oct 1 (cell-surface overrides): an ordinary cell-owned wall piece
+        // uses its OWNER cell's wall override, else the floor's resolved
+        // default. Special geometry passes followsCellOverride: false.
+        func cellWallImageName(_ owner: GridCoordinate) -> String? {
+            cellSurfaces[owner]?.wallTexture ?? effectiveWallImageName
+        }
+        var cellOverrideMaterialCache: [String: SCNMaterial] = [:]
+        func cellOverrideMaterial(_ surface: CellSurfaceKind, _ imageName: String) -> SCNMaterial {
+            let key = "\(surface.rawValue):\(imageName)"
+            if let cached = cellOverrideMaterialCache[key] { return cached }
+            let material = Self.makeCellSurfaceOverrideMaterial(surface, imageName: imageName)
+            cellOverrideMaterialCache[key] = material
+            return material
+        }
         let effectiveCeilingImageName = Self.effectiveCeilingImageName(floorNumber: floorNumber, theme: theme, ceilingTexture: ceilingTexture)
         let ceilingMaterial = makeCeilingMaterial(imageName: effectiveCeilingImageName)
         var wallMaterials: [SCNMaterial] = []
@@ -2056,7 +2070,20 @@ enum HallwayScene {
         // opening instead of a full cell) fill in everything AROUND
         // the door, so the cubby becomes a small hole in a
         // normal-looking wall again, not the entire wall itself.
-        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, into container: SCNNode? = nil, tag: ((SCNNode) -> Void)? = nil) {
+        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, into container: SCNNode? = nil, tag: ((SCNNode) -> Void)? = nil, followsCellOverride: Bool = true) {
+            // Oct 1 (cell-surface overrides): strips follow their OWNER cell
+            // (same owner rule buildDoorFrame uses for the cellWall- name);
+            // special geometry keeps the floor default and is marked exempt
+            // so live re-skins skip it too.
+            let owner = Self.cellWallOwner(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, cellSize: cellSize)
+            let stripImageName = followsCellOverride ? cellWallImageName(owner) : effectiveWallImageName
+            var stripTag = tag
+            if !followsCellOverride {
+                stripTag = { node in
+                    Self.markCellSurfaceExempt(node)
+                    tag?(node)
+                }
+            }
             // Sept 21 (3D Decorator wall authoring): now forwards to the
             // real HallwayScene.buildDoorFrame static method -- see this
             // file's "Sept 21" MARK section above. Behavior unchanged.
@@ -2069,7 +2096,7 @@ enum HallwayScene {
             // roomEntranceDoors loop below passes them, so that door's
             // own frame strips land inside its owning assembly node
             // instead of loose in the scene root.
-            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: container ?? root, wallMaterials: &wallMaterials, tag: tag)
+            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: stripImageName, root: container ?? root, wallMaterials: &wallMaterials, tag: stripTag)
         }
 
         func addDestinationDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, kind: ObjectKind) -> SCNNode {
@@ -2182,7 +2209,7 @@ enum HallwayScene {
                 door.eulerAngles.y = .pi / 2
             }
 
-            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: destinationDoorWidth, doorHeight: destinationDoorHeight, doorCenterY: destinationCenterY)
+            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: destinationDoorWidth, doorHeight: destinationDoorHeight, doorCenterY: destinationCenterY, followsCellOverride: false)
 
             // "we need to put a sign on the chutes that says trash in
             // small letters" (Eddie, Sept 5) -- a child of `door` so it
@@ -2238,6 +2265,27 @@ enum HallwayScene {
             let assembly = SCNNode()
             assembly.addChildNode(cubby)
             assembly.addChildNode(door)
+            // Oct 2 (beta: Gene -- "it is not inherently known that this is
+            // where you drop off the trash"): fixed building signage on the
+            // wall just BELOW the chute opening. Deliberately not a child of
+            // `door` (the shutter slides up 0.66 when used), so it never
+            // moves, never covers or is covered by the shutter, and never
+            // overlaps its tap area. Mounted with the door's own per-direction
+            // rotation, pulled back from the door's 0.12 offset to 8 mm proud
+            // of the wall face (wall panels are 0.1 thick, centred on the
+            // cell boundary). Visual only: no name the chute logic looks for.
+            if kind == .trashCan {
+                let signHeight: CGFloat = 0.2
+                let mount = SCNNode()
+                mount.eulerAngles = door.eulerAngles
+                mount.position = door.position
+                mount.localTranslate(by: SCNVector3(
+                    0,
+                    -Float(destinationDoorHeight / 2) - 0.07 - Float(signHeight / 2),
+                    -Float(0.05 + destinationDoorGap) + 0.058))
+                mount.addChildNode(Self.makeChuteSignNode(text: "DROP TRASH HERE", width: 0.86, height: signHeight))
+                assembly.addChildNode(mount)
+            }
             root.addChildNode(assembly)
             return door
         }
@@ -3047,7 +3095,7 @@ enum HallwayScene {
             // that look like they don't reach the ceiling. Same 4
             // brick-textured strips the destination doors and
             // floor maps already get, sized to this doorway.
-            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: elevatorDoorWidth, doorHeight: elevatorDoorHeight, doorCenterY: elevatorCenterY, interiorMaterial: elevatorShaftInteriorMaterial, topFrontExtension: 0.04)
+            addDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: elevatorDoorWidth, doorHeight: elevatorDoorHeight, doorCenterY: elevatorCenterY, interiorMaterial: elevatorShaftInteriorMaterial, topFrontExtension: 0.04, followsCellOverride: false)
 
             // Fixed hallway-facing frame, independent of moving doors and cab.
             let entrance = SCNNode()
@@ -3463,7 +3511,7 @@ enum HallwayScene {
             // build a Picture using this SAME geometry logic outside
             // this function, not a second implementation of it.
             // Behavior unchanged.
-            HallwayScene.buildPictureNode(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, texture: texture, backfillWall: backfillWall, scale: scale, pictureLightLevel: pictureLightLevel, coord: coord, floorNumber: floorNumber, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, root: root, wallMaterials: &wallMaterials)
+            HallwayScene.buildPictureNode(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, texture: texture, backfillWall: backfillWall, scale: scale, pictureLightLevel: pictureLightLevel, coord: coord, floorNumber: floorNumber, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: cellWallImageName(coord), root: root, wallMaterials: &wallMaterials)
         }
 
         // Window Rooms are keyed by their DOOR's cell (coord), but
@@ -3507,14 +3555,18 @@ enum HallwayScene {
             let z = worldZ(coord.row)
 
             let floorGeo = SCNBox(width: cellSize, height: 0.1, length: cellSize, chamferRadius: 0)
-            floorGeo.materials = [floorMaterial]
+            // Oct 1 (cell-surface overrides): this cell's own floor/ceiling
+            // texture if it has one, else the floor's shared default.
+            floorGeo.materials = [cellSurfaces[coord]?.floorTexture.map { cellOverrideMaterial(.floor, $0) } ?? floorMaterial]
             let floorNode = SCNNode(geometry: floorGeo)
+            floorNode.name = Self.cellFloorNodeName(coord)
             floorNode.position = SCNVector3(Float(x), -0.05, Float(z))
             root.addChildNode(floorNode)
 
             let ceilingGeo = SCNBox(width: cellSize, height: 0.1, length: cellSize, chamferRadius: 0)
-            ceilingGeo.materials = [ceilingMaterial]
+            ceilingGeo.materials = [cellSurfaces[coord]?.ceilingTexture.map { cellOverrideMaterial(.ceiling, $0) } ?? ceilingMaterial]
             let ceilingNode = SCNNode(geometry: ceilingGeo)
+            ceilingNode.name = Self.cellCeilingNodeName(coord)
             ceilingNode.position = SCNVector3(Float(x), Float(wallHeight) + 0.05, Float(z))
             DecoratorTarget(floor: floorNumber, coord: coord, kind: .ceilingSurface).tag(ceilingNode)
             root.addChildNode(ceilingNode)
@@ -3729,7 +3781,7 @@ enum HallwayScene {
                 // see this file's "Sept 21" MARK section above -- so a
                 // live Decorator wall-tap ADD can build/rebuild this
                 // exact same panel outside this loop. Behavior unchanged.
-                HallwayScene.buildWallPanel(coord: coord, direction: direction, width: width, length: length, x: x, z: z, wallHeight: wallHeight, effectiveWallImageName: effectiveWallImageName, floorNumber: floorNumber, root: root, wallMaterials: &wallMaterials)
+                HallwayScene.buildWallPanel(coord: coord, direction: direction, width: width, length: length, x: x, z: z, wallHeight: wallHeight, effectiveWallImageName: cellWallImageName(coord), floorNumber: floorNumber, root: root, wallMaterials: &wallMaterials)
             }
 
             if hasWallNorth && destinationMountDirection != .north && elevatorMountDirection != .north && mapDirection != .north && missionDirection != .north && !hasPictureFace(.north) && mirrorDirection != .north && windowDirection != .north {
@@ -3773,6 +3825,49 @@ enum HallwayScene {
                     root.addChildNode(assembly)
                     objectNodes[coord] = assembly
                 }
+            }
+
+            // Sept 28 (first furniture proof of concept): a decorative
+            // Table (and its plant, if any) -- scenery only. Deliberately
+            // NOT added to objectNodes: that map feeds
+            // TapNavigationController's pickup/walk-stop/mission logic,
+            // which a table must never participate in.
+            if let table = tables[coord] {
+                root.addChildNode(buildTableNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, table: table))
+            }
+            // Sept 28: a decorative Desk -- same scenery-only treatment
+            // as the Table just above (never in objectNodes).
+            if let desk = desks[coord] {
+                root.addChildNode(buildDeskNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, desk: desk))
+            }
+            // Sept 28: a decorative Water Cooler -- same scenery-only
+            // treatment (never in objectNodes).
+            if let cooler = waterCoolers[coord] {
+                root.addChildNode(buildWaterCoolerNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, cooler: cooler))
+            }
+            // Sept 28: a decorative Office Chair -- its own independent
+            // node even when a Desk shares this cell (never a child of
+            // the desk), same scenery-only treatment (never in objectNodes).
+            if let chair = officeChairs[coord] {
+                root.addChildNode(buildOfficeChairNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, chair: chair))
+            }
+            // Sept 28: a Floor Lamp, carrying its own local light when ON
+            // (inside its own node tree -- see FloorLampFurniture.swift).
+            // Never in objectNodes.
+            if let lamp = floorLamps[coord] {
+                root.addChildNode(buildFloorLampNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, lamp: lamp))
+            }
+            // Sept 28: an Aquarium -- stand, tank, fish, its own soft light
+            // and looping animations all inside its own node tree (see
+            // AquariumFurniture.swift). Never in objectNodes.
+            if let aquarium = aquariums[coord] {
+                root.addChildNode(buildAquariumNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, aquarium: aquarium))
+            }
+            // Sept 28: a Filing Cabinet, its drawers placed straight from
+            // the persisted open drawer (see FilingCabinetFurniture.swift).
+            // Never in objectNodes.
+            if let cabinet = filingCabinets[coord] {
+                root.addChildNode(buildFilingCabinetNode(at: coord, cellSize: cellSize, floorNumber: floorNumber, cabinet: cabinet))
             }
 
             // The deposit half -- manually placed per cell (GridEditorView).
@@ -3932,7 +4027,7 @@ enum HallwayScene {
             // (below) whenever currentCell changes afterward, so the red
             // dot tracks you live from here on -- see its
             // refreshFloorMapTexture().
-            let mapTexture = makeFloorMapTexture(cells: cells, end: end, playerAt: start, facing: startingFacing(at: start, cells: cells), missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), photoBoothCells: Array(photoBooths.keys), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors)
+            let mapTexture = makeFloorMapTexture(cells: cells, end: end, playerAt: start, facing: startingFacing(at: start, cells: cells), missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), photoBoothCells: Array(photoBooths.keys), gameCells: Array(Set(ticTacToeTerminals.keys).union(shellGameStations.keys).union(rockPaperScissorsTerminals.keys).union(higherLowerTerminals.keys).union(fiveCardDrawTerminals.keys).union(simonTerminals.keys).union(hangmanTerminals.keys).union(connectFourTerminals.keys).union(checkersTerminals.keys).union(woidleTerminals.keys).intersection(cells)), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors)
             for (coord, direction) in floorMaps {
                 guard cells.contains(coord) else { continue }
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
@@ -4405,23 +4500,18 @@ enum HallwayScene {
         // + addDoorFrame backfill" shape as mirrors right above (reusing
         // its exact 0.86 x 1.16 @ y=1.6 footprint), so there's no
         // separate black-hole-in-the-wall bug to rediscover here.
+        // Oct 3: game terminals (all 10 loops below) mount IN FRONT of
+        // the ordinary solid wall panel -- no opening, so no addDoorFrame
+        // strips. Those strips sat exactly coplanar with the still-built
+        // wall panel and z-fought (Floor 7 flickering wall patch).
         for (coord, direction) in ticTacToeTerminals where cells.contains(coord) {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeTicTacToeTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             ticTacToeTerminalNodes[coord] = node
-            let terminalX = worldX(coord.col)
-            let terminalZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (terminalX, terminalZ - half)
-            case .south: (wx, wz) = (terminalX, terminalZ + half)
-            case .east: (wx, wz) = (terminalX + half, terminalZ)
-            case .west: (wx, wz) = (terminalX - half, terminalZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 8's shell-game station -- same "small wall fixture +
@@ -4431,19 +4521,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeShellGameStationNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             shellGameStationNodes[coord] = node
-            let stationX = worldX(coord.col)
-            let stationZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (stationX, stationZ - half)
-            case .south: (wx, wz) = (stationX, stationZ + half)
-            case .east: (wx, wz) = (stationX + half, stationZ)
-            case .west: (wx, wz) = (stationX - half, stationZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 9's Rock Paper Scissors terminal -- same "small wall
@@ -4453,19 +4534,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeRockPaperScissorsTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             rockPaperScissorsTerminalNodes[coord] = node
-            let rpsX = worldX(coord.col)
-            let rpsZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (rpsX, rpsZ - half)
-            case .south: (wx, wz) = (rpsX, rpsZ + half)
-            case .east: (wx, wz) = (rpsX + half, rpsZ)
-            case .west: (wx, wz) = (rpsX - half, rpsZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 10's Higher/Lower terminal -- same "small wall fixture
@@ -4475,19 +4547,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeHigherLowerTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             higherLowerTerminalNodes[coord] = node
-            let hiLoX = worldX(coord.col)
-            let hiLoZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (hiLoX, hiLoZ - half)
-            case .south: (wx, wz) = (hiLoX, hiLoZ + half)
-            case .east: (wx, wz) = (hiLoX + half, hiLoZ)
-            case .west: (wx, wz) = (hiLoX - half, hiLoZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 11's Five-Card Draw terminal -- same "small wall
@@ -4497,19 +4560,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeFiveCardDrawTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             fiveCardDrawTerminalNodes[coord] = node
-            let pokerX = worldX(coord.col)
-            let pokerZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (pokerX, pokerZ - half)
-            case .south: (wx, wz) = (pokerX, pokerZ + half)
-            case .east: (wx, wz) = (pokerX + half, pokerZ)
-            case .west: (wx, wz) = (pokerX - half, pokerZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 13's Simon terminal -- same "small wall fixture +
@@ -4519,19 +4573,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeSimonTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             simonTerminalNodes[coord] = node
-            let simonX = worldX(coord.col)
-            let simonZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (simonX, simonZ - half)
-            case .south: (wx, wz) = (simonX, simonZ + half)
-            case .east: (wx, wz) = (simonX + half, simonZ)
-            case .west: (wx, wz) = (simonX - half, simonZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 12's Hangman terminal -- same "small wall fixture +
@@ -4541,19 +4586,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeHangmanTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             hangmanTerminalNodes[coord] = node
-            let hangmanX = worldX(coord.col)
-            let hangmanZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (hangmanX, hangmanZ - half)
-            case .south: (wx, wz) = (hangmanX, hangmanZ + half)
-            case .east: (wx, wz) = (hangmanX + half, hangmanZ)
-            case .west: (wx, wz) = (hangmanX - half, hangmanZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 14's Connect Four terminal -- same "small wall fixture
@@ -4563,19 +4599,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeConnectFourTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             connectFourTerminalNodes[coord] = node
-            let connectFourX = worldX(coord.col)
-            let connectFourZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (connectFourX, connectFourZ - half)
-            case .south: (wx, wz) = (connectFourX, connectFourZ + half)
-            case .east: (wx, wz) = (connectFourX + half, connectFourZ)
-            case .west: (wx, wz) = (connectFourX - half, connectFourZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 15's Checkers terminal -- same "small wall fixture +
@@ -4585,19 +4612,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeCheckersTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             checkersTerminalNodes[coord] = node
-            let checkersX = worldX(coord.col)
-            let checkersZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (checkersX, checkersZ - half)
-            case .south: (wx, wz) = (checkersX, checkersZ + half)
-            case .east: (wx, wz) = (checkersX + half, checkersZ)
-            case .west: (wx, wz) = (checkersX - half, checkersZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         // Floor 16's Woidle terminal -- same "small wall fixture +
@@ -4607,19 +4625,10 @@ enum HallwayScene {
             let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
             guard !cells.contains(neighbor) else { continue }
             let node = HallwayScene.makeWoidleTerminalNode(at: coord, direction: direction, cellSize: cellSize)
+            // Oct 1 (Decorator Games): selectable/deletable in Decorate, same tag a live-placed game gets.
+            DecoratorTarget(floor: floorNumber, coord: coord, kind: .game, direction: direction).tag(node)
             root.addChildNode(node)
             woidleTerminalNodes[coord] = node
-            let woidleX = worldX(coord.col)
-            let woidleZ = worldZ(coord.row)
-            let wx: CGFloat
-            let wz: CGFloat
-            switch direction {
-            case .north: (wx, wz) = (woidleX, woidleZ - half)
-            case .south: (wx, wz) = (woidleX, woidleZ + half)
-            case .east: (wx, wz) = (woidleX + half, woidleZ)
-            case .west: (wx, wz) = (woidleX - half, woidleZ)
-            }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: 0.86, doorHeight: 1.16, doorCenterY: 1.6)
         }
 
         if !cameraRollMaterials.isEmpty {
@@ -4750,7 +4759,9 @@ enum HallwayScene {
         camera.zFar = Double(span) + 40
         let cameraNode = SCNNode()
         cameraNode.camera = camera
-        cameraNode.position = SCNVector3(Float(startX), 1.6, Float(startZ))
+        // Sept 28 (Your Height): eye height comes from the player's
+        // height preference (default 5' 8" -> 1.606 m, today's view).
+        cameraNode.position = SCNVector3(Float(startX), PlayerHeight.currentEyeHeight, Float(startZ))
         cameraNode.eulerAngles = SCNVector3(0, Float(spawnYaw), 0)
         root.addChildNode(cameraNode)
 
@@ -5276,6 +5287,99 @@ enum HallwayScene {
         makeSurfaceMaterial(imageName: imageName, fallbackColor: ceilingFallbackColor, roughness: 0.95)
     }
 
+    // MARK: Oct 1 (cell-surface overrides)
+
+    /// A cell's own floor/ceiling material -- same construction as the
+    /// floor's shared default, just with the override image. (Walls keep
+    /// their existing one-material-per-piece construction.)
+    static func makeCellSurfaceOverrideMaterial(_ surface: CellSurfaceKind, imageName: String) -> SCNMaterial {
+        switch surface {
+        case .floor: return makeFloorMaterial(imageName: imageName)
+        case .ceiling: return makeCeilingMaterial(imageName: imageName)
+        case .wall: return makeWallMaterial(imageName: imageName)
+        }
+    }
+
+    /// Oct 1: the map arrow's screen rotation (clockwise from up = north).
+    /// With the camera's actual yaw it is continuous (SceneKit yaw is
+    /// counter-clockwise from north, so it is simply negated); without one,
+    /// the old cardinal angles.
+    static func floorMapArrowAngle(facing: Direction, headingYaw: Double?) -> CGFloat {
+        if let headingYaw { return CGFloat(-headingYaw) }
+        switch facing {
+        case .north: return 0
+        case .east: return .pi / 2
+        case .south: return .pi
+        case .west: return -.pi / 2
+        }
+    }
+
+    static func cellFloorNodeName(_ coord: GridCoordinate) -> String { "cellFloor-\(coord.row)-\(coord.col)" }
+    static func cellCeilingNodeName(_ coord: GridCoordinate) -> String { "cellCeiling-\(coord.row)-\(coord.col)" }
+
+    /// Parses "<prefix><row>-<col>" (cellWall-/cellFloor-/cellCeiling-).
+    static func cellCoordinate(fromNodeName name: String?, prefix: String) -> GridCoordinate? {
+        guard let name, name.hasPrefix(prefix) else { return nil }
+        let parts = name.dropFirst(prefix.count).split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 2, let row = Int(parts[0]), let col = Int(parts[1]) else { return nil }
+        return GridCoordinate(row: row, col: col)
+    }
+
+    /// The cell owning a wall piece centred at (wallCenterX, wallCenterZ)
+    /// on `direction` -- the exact rule buildDoorFrame uses for its
+    /// cellWall- node names.
+    static func cellWallOwner(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, cellSize: CGFloat) -> GridCoordinate {
+        GridCoordinate(row: Int((wallCenterZ / cellSize - CGFloat(direction.delta.row) / 2).rounded()),
+                       col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
+    }
+
+    /// Special (non-cell) wall geometry -- elevator and destination cubby
+    /// frames -- is marked so cell overrides never re-skin it.
+    private static var cellSurfaceExemptKey: UInt8 = 0
+    static func markCellSurfaceExempt(_ node: SCNNode) {
+        objc_setAssociatedObject(node, &cellSurfaceExemptKey, true, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+    static func isCellSurfaceExempt(_ node: SCNNode) -> Bool {
+        (objc_getAssociatedObject(node, &cellSurfaceExemptKey) as? Bool) == true
+    }
+
+    /// Live: for every ordinary cell-owned wall piece whose owner has a wall
+    /// override, its material(s) and that override's image name. Everything
+    /// else keeps following the floor default.
+    static func cellWallOverrideMaterials(in root: SCNNode, cellSurfaces: [GridCoordinate: CellSurfaceOverride]) -> [(material: SCNMaterial, imageName: String)] {
+        guard !cellSurfaces.isEmpty else { return [] }
+        var result: [(material: SCNMaterial, imageName: String)] = []
+        root.enumerateChildNodes { node, _ in
+            guard let owner = cellCoordinate(fromNodeName: node.name, prefix: "cellWall-"),
+                  let imageName = cellSurfaces[owner]?.wallTexture,
+                  !isCellSurfaceExempt(node), let materials = node.geometry?.materials else { return }
+            for material in materials { result.append((material, imageName)) }
+        }
+        return result
+    }
+
+    /// Live: point every cell floor/ceiling panel at its override material,
+    /// or back at the floor's shared default material when it has none.
+    static func applyCellFloorCeilingOverrides(in root: SCNNode, cellSurfaces: [GridCoordinate: CellSurfaceOverride], floorDefault: SCNMaterial?, ceilingDefault: SCNMaterial?) {
+        var cache: [String: SCNMaterial] = [:]
+        func material(_ surface: CellSurfaceKind, _ name: String) -> SCNMaterial {
+            let key = "\(surface.rawValue):\(name)"
+            if let cached = cache[key] { return cached }
+            let made = makeCellSurfaceOverrideMaterial(surface, imageName: name)
+            cache[key] = made
+            return made
+        }
+        root.enumerateChildNodes { node, _ in
+            if let coord = cellCoordinate(fromNodeName: node.name, prefix: "cellFloor-") {
+                if let name = cellSurfaces[coord]?.floorTexture { node.geometry?.materials = [material(.floor, name)] }
+                else if let floorDefault { node.geometry?.materials = [floorDefault] }
+            } else if let coord = cellCoordinate(fromNodeName: node.name, prefix: "cellCeiling-") {
+                if let name = cellSurfaces[coord]?.ceilingTexture { node.geometry?.materials = [material(.ceiling, name)] }
+                else if let ceilingDefault { node.geometry?.materials = [ceilingDefault] }
+            }
+        }
+    }
+
     /// A full, undistorted photo — clamped (not tiled) and lit with
     /// .constant so it's immune to the headlamp/ambient falloff that
     /// can wash a normal wall out to near-white at close range. Falls
@@ -5545,7 +5649,7 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], fireCells: [GridCoordinate] = [], extinguisherCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false, wallObjectFaces: Set<WallFace> = [], doorFaces: Set<WallFace> = [], exitSignFaces: Set<WallFace> = []) -> UIImage {
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, headingYaw: Double? = nil, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], fireCells: [GridCoordinate] = [], extinguisherCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], gameCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false, wallObjectFaces: Set<WallFace> = [], doorFaces: Set<WallFace> = [], exitSignFaces: Set<WallFace> = []) -> UIImage {
         // simplified (the handheld mini-map): a small, clean corridor
         // shape -- floor cells plus the live player marker only. No
         // room numbers, mission dots, elevator, booths, painted fill,
@@ -5847,6 +5951,26 @@ enum HallwayScene {
                 cg.stroke(boothRect.insetBy(dx: 3, dy: 3))
             }
 
+            // Oct 1 (game map markers): one generic marker for all ten
+            // game fixtures -- a purple diamond with a white outline, same
+            // size/shape language as the photo booth square just above.
+            let gameColor = UIColor(red: 0.55, green: 0.25, blue: 0.75, alpha: 1)
+            for coord in gameCells {
+                let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
+                let r = rect.insetBy(dx: cellPx * 0.17, dy: cellPx * 0.17)
+                let diamond = UIBezierPath()
+                diamond.move(to: CGPoint(x: r.midX, y: r.minY))
+                diamond.addLine(to: CGPoint(x: r.maxX, y: r.midY))
+                diamond.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+                diamond.addLine(to: CGPoint(x: r.minX, y: r.midY))
+                diamond.close()
+                gameColor.setFill()
+                diamond.fill()
+                UIColor.white.setStroke()
+                diamond.lineWidth = 2
+                diamond.stroke()
+            }
+
             UIColor(red: 0.85, green: 0.1, blue: 0.1, alpha: 1).setFill()
             for coord in missionDestinationCells {
                 let rect = CGRect(x: margin + CGFloat(coord.col) * cellPx, y: margin + CGFloat(coord.row) * cellPx, width: cellPx, height: cellPx)
@@ -5894,26 +6018,23 @@ enum HallwayScene {
             // the existing player arrow. Drawn before the arrow so
             // the arrow stays fully visible on top, though as a mere
             // outline it wouldn't occlude it either way.
-            let hereRingDiameter = cellPx * 1.08
+            // Oct 1: the YOU marker is ~22% larger (ring 1.08 -> 1.32 cells,
+            // arrow scaled by the same youMarkerScale).
+            let youMarkerScale: CGFloat = 1.22
+            let hereRingDiameter = cellPx * 1.08 * youMarkerScale
             let hereRingRect = CGRect(x: center.x - hereRingDiameter / 2, y: center.y - hereRingDiameter / 2, width: hereRingDiameter, height: hereRingDiameter)
             UIColor(red: 0.08, green: 0.12, blue: 0.85, alpha: 1).setStroke()
             cg.setLineWidth(simplified ? 2 : 4)
             cg.strokeEllipse(in: hereRingRect)
 
-            let angle: CGFloat
-            switch facing {
-            case .north: angle = 0
-            case .east: angle = .pi / 2
-            case .south: angle = .pi
-            case .west: angle = -.pi / 2
-            }
+            let angle = Self.floorMapArrowAngle(facing: facing, headingYaw: headingYaw)
             cg.saveGState()
             cg.translateBy(x: center.x, y: center.y)
             cg.rotate(by: angle)
             UIColor(red: 0.08, green: 0.12, blue: 0.85, alpha: 1).setFill()
-            cg.move(to: CGPoint(x: 0, y: -cellPx * 0.34))
-            cg.addLine(to: CGPoint(x: cellPx * 0.27, y: cellPx * 0.24))
-            cg.addLine(to: CGPoint(x: -cellPx * 0.27, y: cellPx * 0.24))
+            cg.move(to: CGPoint(x: 0, y: -cellPx * 0.34 * youMarkerScale))
+            cg.addLine(to: CGPoint(x: cellPx * 0.27 * youMarkerScale, y: cellPx * 0.24 * youMarkerScale))
+            cg.addLine(to: CGPoint(x: -cellPx * 0.27 * youMarkerScale, y: cellPx * 0.24 * youMarkerScale))
             cg.closePath()
             cg.fillPath()
             cg.restoreGState()
@@ -6846,6 +6967,53 @@ enum HallwayScene {
         return anchor
     }
 
+    /// Oct 2: a plain enamel building sign (light lettering on a dark
+    /// plate with a thin inset border), drawn once into a texture on a
+    /// single-sided plane facing local +Z (the player side). A touch of
+    /// emission keeps it legible in dim corridors without glowing.
+    static func makeChuteSignNode(text: String, width: CGFloat, height: CGFloat) -> SCNNode {
+        let pixels = CGSize(width: 860, height: 200)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: pixels, format: format).image { _ in
+            let rect = CGRect(origin: .zero, size: pixels)
+            UIColor(white: 0.13, alpha: 1).setFill()
+            UIRectFill(rect)
+            let border = UIBezierPath(roundedRect: rect.insetBy(dx: 12, dy: 12), cornerRadius: 10)
+            border.lineWidth = 5
+            UIColor(white: 0.82, alpha: 1).setStroke()
+            border.stroke()
+            let style = NSMutableParagraphStyle()
+            style.alignment = .center
+            var fontSize: CGFloat = 84
+            var attributes: [NSAttributedString.Key: Any] = [:]
+            var size = CGSize.zero
+            repeat {
+                attributes = [.font: UIFont.systemFont(ofSize: fontSize, weight: .heavy),
+                              .foregroundColor: UIColor(white: 0.95, alpha: 1),
+                              .paragraphStyle: style, .kern: 3]
+                size = (text as NSString).size(withAttributes: attributes)
+                fontSize -= 2
+            } while size.width > pixels.width - 80 && fontSize > 20
+            (text as NSString).draw(in: CGRect(x: 0, y: (pixels.height - size.height) / 2,
+                                               width: pixels.width, height: size.height),
+                                    withAttributes: attributes)
+        }
+        let material = SCNMaterial()
+        material.diffuse.contents = image
+        material.diffuse.mipFilter = .linear
+        material.emission.contents = image
+        material.emission.intensity = 0.3
+        material.lightingModel = .blinn
+        material.isDoubleSided = false
+        let plane = SCNPlane(width: width, height: height)
+        plane.materials = [material]
+        let node = SCNNode(geometry: plane)
+        node.name = "chuteSign"
+        return node
+    }
+
     private static func makeMarkerMaterial() -> SCNMaterial {
         let m = SCNMaterial()
         m.diffuse.contents = UIColor(red: 1.0, green: 0.72, blue: 0.2, alpha: 1)
@@ -6899,5 +7067,118 @@ extension HallwayScene {
         // the whole hanging presentation as one unit.
         DecoratorTarget(floor: floorNumber, coord: coord, kind: .floorObject).tag(assembly)
         return assembly
+    }
+}
+
+// MARK: - Floor glow sequence (Oct 3 EXPERIMENT 1: authored sequence cue)
+//
+// One authored, repeating sequence per FloorGlowSequence record: each listed
+// floor cell in turn briefly glows with its OWN material (a private copy whose
+// emission is its own diffuse texture), then gets back its exact original
+// material array. One SCNAction clock per sequence, on a node inside this
+// floor's scene -- so it starts with the scene, dies with it when makeUIView
+// rebuilds the scene for another floor (every floor change does), never
+// touches another floor, and never accumulates. No lights, no per-frame scan.
+// A floor with no sequences installs nothing.
+extension HallwayScene {
+    static let floorGlowClockNodeName = "floorGlowSequenceClock"
+
+    static func installFloorGlowSequences(_ sequences: [FloorGlowSequence], cells: Set<GridCoordinate>, root: SCNNode) {
+        for (index, sequence) in sequences.enumerated() {
+            let floorNodes: [SCNNode] = sequence.cells.compactMap { coord in
+                guard cells.contains(coord) else { return nil }
+                return root.childNode(withName: cellFloorNodeName(coord), recursively: true)
+            }
+            guard !floorNodes.isEmpty else {
+                diag("floorGlow.skipped", ["sequence": index, "reason": "no valid cells"])
+                continue
+            }
+            let stepDelay = max(0, sequence.stepDelay)
+            let glowDuration = max(0.1, sequence.glowDuration)
+            // A run must finish before the next one starts, so a cell's glow
+            // can never overlap its own next glow.
+            let runLength = Double(floorNodes.count - 1) * stepDelay + glowDuration
+            let repeatInterval = max(sequence.repeatInterval, runLength + 0.1)
+            let clock = SCNNode()
+            clock.name = "\(floorGlowClockNodeName)-\(index)"
+            root.addChildNode(clock)
+            let cycle = FloorGlowCellState.clockCycle(floorNodes: floorNodes, stepDelay: stepDelay,
+                                                     glowDuration: glowDuration, repeatInterval: repeatInterval)
+            clock.runAction(.repeatForever(cycle), forKey: floorGlowClockNodeName)
+            diag("floorGlow.installed", ["sequence": index, "cells": floorNodes.count, "authoredCells": sequence.cells.count,
+                                         "stepDelay": stepDelay, "glowDuration": glowDuration, "repeatInterval": repeatInterval])
+        }
+    }
+}
+
+/// One floor cell's temporary glow. Runs entirely inside SCNAction blocks on
+/// the render thread. A pulse swaps in private glow copies of the cell's
+/// CURRENT materials (so a live re-skin is picked up next pulse) and, when it
+/// ends, puts the original array back -- but only if the glow copies are still
+/// what's mounted (a live re-skin mid-pulse wins and is never undone).
+nonisolated final class FloorGlowCellState: @unchecked Sendable {
+    static let pulseActionKey = "floorGlowPulse"
+    /// Peak emission intensity of the cell's own texture (0 = no glow).
+    static let peakEmission: CGFloat = 0.55
+
+    private weak var node: SCNNode?
+    private var original: [SCNMaterial] = []
+    private var glow: [SCNMaterial] = []
+
+    init(node: SCNNode) { self.node = node }
+
+    static func clockCycle(floorNodes: [SCNNode], stepDelay: Double, glowDuration: Double, repeatInterval: Double) -> SCNAction {
+        var steps: [SCNAction] = []
+        for (i, node) in floorNodes.enumerated() {
+            if i > 0 { steps.append(.wait(duration: stepDelay)) }
+            let state = FloorGlowCellState(node: node)
+            steps.append(.run { _ in state.pulse(duration: glowDuration) })
+        }
+        steps.append(.wait(duration: repeatInterval - Double(floorNodes.count - 1) * stepDelay))
+        return .sequence(steps)
+    }
+
+    func pulse(duration: Double) {
+        guard let node, let geometry = node.geometry else { return }
+        restoreIfStillGlowing(geometry)
+        let base = geometry.materials
+        let glowing = base.compactMap { Self.glowCopy(of: $0) }
+        guard !glowing.isEmpty, glowing.count == base.count else { return }
+        original = base
+        glow = glowing
+        geometry.materials = glowing
+        let peak = Self.peakEmission
+        let swell = SCNAction.customAction(duration: duration) { _, elapsed in
+            let t = min(1, max(0, Double(elapsed) / duration))
+            let level = CGFloat(sin(Double.pi * t)) * peak
+            for material in glowing { material.emission.intensity = level }
+        }
+        node.runAction(.sequence([swell, .run { [weak self] _ in self?.restoreIfStillGlowing(geometry) }]),
+                       forKey: Self.pulseActionKey)
+    }
+
+    private func restoreIfStillGlowing(_ geometry: SCNGeometry) {
+        guard !glow.isEmpty else { return }
+        let current = geometry.materials
+        if current.count == glow.count, zip(current, glow).allSatisfy({ $0 === $1 }) {
+            geometry.materials = original
+        }
+        glow = []
+        original = []
+    }
+
+    /// The same material, made to glow with its own diffuse texture.
+    private static func glowCopy(of material: SCNMaterial) -> SCNMaterial? {
+        guard let copy = material.copy() as? SCNMaterial else { return nil }
+        copy.emission.contents = material.diffuse.contents
+        copy.emission.contentsTransform = material.diffuse.contentsTransform
+        copy.emission.wrapS = material.diffuse.wrapS
+        copy.emission.wrapT = material.diffuse.wrapT
+        copy.emission.mappingChannel = material.diffuse.mappingChannel
+        copy.emission.minificationFilter = material.diffuse.minificationFilter
+        copy.emission.magnificationFilter = material.diffuse.magnificationFilter
+        copy.emission.mipFilter = material.diffuse.mipFilter
+        copy.emission.intensity = 0
+        return copy
     }
 }

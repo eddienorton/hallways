@@ -32,6 +32,10 @@ struct HandheldMapGeometry {
     /// edge -- NavigationOverlay pads with exactly this value, so the
     /// pill position the map keys off is the pill position that renders.
     static let hudPillToSafeGap: CGFloat = 8
+    /// The FLOOR N pill's extra downward nudge (NavigationOverlay's
+    /// `.offset(y:)`), shared so the bottom-row DECORATE pill can sit on
+    /// exactly the same line (Oct 2, Build 6 HUD fix).
+    static let floorPillOffsetY: CGFloat = 30
     /// Gap between the bottom of the map (mini OR full) and the top of
     /// the "FLOOR N" pill.
     static let mapToHudPillGap: CGFloat = 8

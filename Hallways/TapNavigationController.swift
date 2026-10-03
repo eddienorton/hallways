@@ -47,7 +47,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private let cells: Set<GridCoordinate>
     private let cellSize: CGFloat
     private let endCell: GridCoordinate
-    private let eyeHeight: Float
+    /// Seeded from the camera HallwayScene built (PlayerHeight's eye
+    /// height); changed live by setEyeHeight(_:) when Your Height changes.
+    private(set) var eyeHeight: Float
     /// Units/sec while animating between cell centers.
     private let travelSpeed: Double = 6.0
     // Aspect-compensated lighting (see header note above).
@@ -218,8 +220,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     @Published private(set) var activePhotoBooth: GridCoordinate?
     @Published private(set) var photoBoothCompletionImage: UIImage?
     @Published private(set) var photoBoothCameraState: String?
-    private let ticTacToeTerminalNodes: [GridCoordinate: SCNNode]
-    private let ticTacToeDirections: [GridCoordinate: Direction]
+    private var ticTacToeTerminalNodes: [GridCoordinate: SCNNode]
+    private var ticTacToeDirections: [GridCoordinate: Direction]
     /// Non-nil while the aptitude-test overlay is on screen -- same
     /// shape as activePhotoBooth/handheldMapVisible.
     /// The Picture (coord in `pictures`) the player just tapped while
@@ -248,32 +250,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// TapNavigationController is built per floor load anyway, so this
     /// never needs resetting mid-floor except by the dev reset() below.
     @Published private(set) var ticTacToeWon = false { didSet { refreshElevatorMissionSign() } }
-    private let shellGameStationNodes: [GridCoordinate: SCNNode]
-    private let shellGameDirections: [GridCoordinate: Direction]
+    private var shellGameStationNodes: [GridCoordinate: SCNNode]
+    private var shellGameDirections: [GridCoordinate: Direction]
     /// Non-nil while the shell-game overlay is on screen -- same shape
     /// as activeTicTacToeTerminal.
     @Published private(set) var activeShellGameTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER taps the correct cup -- see
     /// isMissionComplete. Same one-Bool shape as ticTacToeWon.
     @Published private(set) var shellGameWon = false { didSet { refreshElevatorMissionSign() } }
-    private let rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode]
-    private let rockPaperScissorsDirections: [GridCoordinate: Direction]
+    private var rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode]
+    private var rockPaperScissorsDirections: [GridCoordinate: Direction]
     /// Non-nil while the Rock Paper Scissors overlay is on screen --
     /// same shape as activeShellGameTerminal.
     @Published private(set) var activeRockPaperScissorsTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER's move beats the computer's --
     /// see isMissionComplete. Same one-Bool shape as shellGameWon.
     @Published private(set) var rockPaperScissorsWon = false { didSet { refreshElevatorMissionSign() } }
-    private let higherLowerTerminalNodes: [GridCoordinate: SCNNode]
-    private let higherLowerDirections: [GridCoordinate: Direction]
+    private var higherLowerTerminalNodes: [GridCoordinate: SCNNode]
+    private var higherLowerDirections: [GridCoordinate: Direction]
     /// Non-nil while the Higher/Lower overlay is on screen -- same
     /// shape as activeRockPaperScissorsTerminal.
     @Published private(set) var activeHigherLowerTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER reaches a 3-correct streak --
     /// see isMissionComplete. Same one-Bool shape as rockPaperScissorsWon.
     @Published private(set) var higherLowerWon = false { didSet { refreshElevatorMissionSign() } }
-    private let fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode]
-    private let fiveCardDrawDirections: [GridCoordinate: Direction]
+    private var fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode]
+    private var fiveCardDrawDirections: [GridCoordinate: Direction]
     /// Non-nil while the Five-Card Draw overlay is on screen -- same
     /// shape as activeHigherLowerTerminal.
     @Published private(set) var activeFiveCardDrawTerminal: GridCoordinate?
@@ -281,8 +283,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// or better) -- see isMissionComplete. Same one-Bool shape as
     /// higherLowerWon.
     @Published private(set) var fiveCardDrawWon = false { didSet { refreshElevatorMissionSign() } }
-    private let simonTerminalNodes: [GridCoordinate: SCNNode]
-    private let simonDirections: [GridCoordinate: Direction]
+    private var simonTerminalNodes: [GridCoordinate: SCNNode]
+    private var simonDirections: [GridCoordinate: Direction]
     /// Non-nil while the Simon overlay is on screen -- same shape as
     /// activeWhackAMoleTerminal.
     @Published private(set) var activeSimonTerminal: GridCoordinate?
@@ -290,32 +292,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// sequence -- see isMissionComplete. Same one-Bool shape as
     /// whackAMoleWon.
     @Published private(set) var simonWon = false { didSet { refreshElevatorMissionSign() } }
-    private let hangmanTerminalNodes: [GridCoordinate: SCNNode]
-    private let hangmanDirections: [GridCoordinate: Direction]
+    private var hangmanTerminalNodes: [GridCoordinate: SCNNode]
+    private var hangmanDirections: [GridCoordinate: Direction]
     /// Non-nil while the Hangman overlay is on screen -- same shape
     /// as activeSimonTerminal.
     @Published private(set) var activeHangmanTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER reveals the whole word -- see
     /// isMissionComplete. Same one-Bool shape as simonWon.
     @Published private(set) var hangmanWon = false { didSet { refreshElevatorMissionSign() } }
-    private let connectFourTerminalNodes: [GridCoordinate: SCNNode]
-    private let connectFourDirections: [GridCoordinate: Direction]
+    private var connectFourTerminalNodes: [GridCoordinate: SCNNode]
+    private var connectFourDirections: [GridCoordinate: Direction]
     /// Non-nil while the Connect Four overlay is on screen -- same
     /// shape as activeHangmanTerminal.
     @Published private(set) var activeConnectFourTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER wins a game -- see
     /// isMissionComplete. Same one-Bool shape as hangmanWon.
     @Published private(set) var connectFourWon = false { didSet { refreshElevatorMissionSign() } }
-    private let checkersTerminalNodes: [GridCoordinate: SCNNode]
-    private let checkersDirections: [GridCoordinate: Direction]
+    private var checkersTerminalNodes: [GridCoordinate: SCNNode]
+    private var checkersDirections: [GridCoordinate: Direction]
     /// Non-nil while the Checkers overlay is on screen -- same
     /// shape as activeConnectFourTerminal.
     @Published private(set) var activeCheckersTerminal: GridCoordinate?
     /// Set once, the instant the PLAYER wins a game -- see
     /// isMissionComplete. Same one-Bool shape as connectFourWon.
     @Published private(set) var checkersWon = false { didSet { refreshElevatorMissionSign() } }
-    private let woidleTerminalNodes: [GridCoordinate: SCNNode]
-    private let woidleDirections: [GridCoordinate: Direction]
+    private var woidleTerminalNodes: [GridCoordinate: SCNNode]
+    private var woidleDirections: [GridCoordinate: Direction]
     /// Non-nil while the Woidle overlay is on screen -- same shape as
     /// activeCheckersTerminal.
     @Published private(set) var activeWoidleTerminal: GridCoordinate?
@@ -567,6 +569,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// dolly, an unrelated position action that can still be
     /// in-flight on this same cameraNode this early in the ride.
     private static let elevatorAutoSpinActionKey = "elevatorAutoSpin"
+    /// Oct 2 (yaw-normalization experiment): the carry-in's straighten-up
+    /// turn. Own key so a manual camera grab cancels it, exactly like the
+    /// auto-spin, without touching the position carry-in.
+    private static let elevatorEntryAlignActionKey = "elevatorEntryAlign"
 
     /// Every compass direction that's actually walkable from
     /// currentCell right now, computed fresh from the maze data rather
@@ -687,6 +693,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         case translate  // moving forward, facing already locked in
         case awaitingTurnCommit // render finished; main-thread state update pending
         case scriptedWalkOut // SceneKit action owns translation, not the grid renderer
+        case freeMove   // FREE-WALK EXPERIMENT: continuous X/Z along the camera's yaw (see freeWalkEnabled)
     }
 
     private var animationSteps: [NavigationStep] = []
@@ -707,6 +714,923 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private var pivotStartYaw: Double = 0
     private var pivotTargetYaw: Double = 0
     private let pivotDuration: Double = 0.18
+
+    // MARK: - Free look (Sept 28 experiment: DISCRETE POSITION, CONTINUOUS VISION)
+    //
+    // When true, a normal horizontal drag leaves the camera wherever the
+    // finger releases it (no snap to a cardinal), with no one-gesture
+    // quarter-turn limit. Logical `facing` still becomes the NEAREST
+    // cardinal to the camera's yaw -- through the existing turn-completion
+    // path, so its side effects (booth/terminal auto-open etc.) still run
+    // -- and every movement entry point straightens the camera to
+    // `facing.yaw` right before moving (alignCameraToFacingBeforeTranslate
+    // / beginDragMove). This is the principle elevator arrival already
+    // uses (arbitrary yaw + nearest-cardinal facing + straighten before
+    // the walk-out), applied to ordinary navigation. Set false to restore
+    // the old snap-to-cardinal behavior exactly.
+    var freeLookEnabled = true
+    private static let freeLookAlignActionKey = "freeLookAlign"
+
+    // MARK: - Magnetic cardinal snap (Oct 3 EXPERIMENT)
+    //
+    // Free look stays fully freeform WHILE the finger is down. On release,
+    // if the camera has turned at least threshold + dead zone (30 + 0 = 30
+    // degrees; first device pass at 45 + 5 was too weak) away from the
+    // cardinal it started nearest to, the existing standalone .pivot phase
+    // finishes the turn to the cardinal it was turning toward: the nearest
+    // cardinal to the release yaw, or -- below 45 degrees, where that is
+    // still the starting one -- the next cardinal in the turn direction
+    // (pivotDuration, smoothstep) -- the same pivot a legacy snapped turn
+    // uses. Smaller looks are left exactly where the finger released them.
+    // Set false to restore pure free-look release exactly.
+    var magneticSnapEnabled = true
+    private let magneticSnapThresholdDegrees: Double = 30
+    private let magneticSnapDeadZoneDegrees: Double = 0
+
+    /// The cardinal direction whose yaw is closest to `yaw` (ties resolve
+    /// deterministically by Direction.allCases order).
+    private func nearestCardinal(toYaw yaw: Double) -> Direction {
+        Direction.allCases.min { a, b in
+            abs(shortestDelta(from: yaw, to: a.yaw)) < abs(shortestDelta(from: yaw, to: b.yaw))
+        } ?? facing
+    }
+
+    /// Free look: if the camera isn't looking along `facing`, turn the
+    /// already-queued translate into a short pivot to `facing.yaw` first.
+    /// The existing non-standalone .pivot case falls straight through to
+    /// .translate when it finishes, so this reuses the ordinary walk
+    /// machinery -- no second movement implementation. Call only after the
+    /// walk's segment/steps are set up and just before it starts.
+    private func alignCameraToFacingBeforeTranslate() {
+        guard freeLookEnabled else { return }
+        let yaw = Double(cameraNode.eulerAngles.y)
+        let delta = shortestDelta(from: yaw, to: facing.yaw)
+        guard abs(delta) > 0.001 else { return }
+        standaloneRotation = false
+        pivotStartYaw = yaw
+        pivotTargetYaw = yaw + delta
+        segmentProgress = 0
+        phase = .pivot
+    }
+    // MARK: - FREE-WALK EXPERIMENT (Sept 29)
+    //
+    // DISCRETE BUILDING, CONTINUOUS PLAYER. With freeWalkEnabled, an
+    // ordinary tap walks one cellSize along the camera's ACTUAL yaw and
+    // stops at the exact resulting X/Z; a long press walks continuously
+    // along the camera's yaw and stops dead on release. Nothing recenters
+    // the player. The authored grid is untouched: physical position ->
+    // containing cell -> currentCell (through the ordinary applyArrival),
+    // never the other way round. Collision is the BUILDING only (walls,
+    // closed doors, missing cells) -- see FreeWalkGeometry. Furniture and
+    // props are deliberately ignored. The old grid path is untouched and
+    // runs whenever this is false, and for every non-player-controlled
+    // walk (ceremonial, mission arrival, elevator, scout/pinch, Decorate
+    // holds).
+    //
+    // Off by default on a bare controller (so every existing navigation
+    // test exercises the old path unchanged); ContentView switches it on
+    // for the app from `freeWalkExperimentOn`.
+    static let freeWalkExperimentOn = true
+    var freeWalkEnabled = false
+
+    /// The building's walkable space, snapshotted on the main thread when a
+    /// free movement starts (door state included) so the render thread
+    /// never reads live door sets.
+    private var freeWalkGeometry: FreeWalkGeometry?
+    /// Render-side containing cell during a free movement -- the one place
+    /// that decides "entered a new cell", so arrival fires exactly once.
+    private var freeWalkCell = GridCoordinate(row: 0, col: 0)
+    private var freeMoveHeld = false
+    /// FREE-WALK vertical-pan / pinch scrub in progress (see beginDragMove).
+    private var freeDragMoveActive = false
+    private var freeDragBaseYaw: Double = 0
+    /// Horizontal unit travel direction of the free scrub: camera forward,
+    /// or (pinch, pass #5) the direction under the pinch point.
+    private var freeDragDirection: (x: Double, z: Double) = (0, -1)
+    private var freeTapDuration: Double = 0.5
+    private(set) var freeWalkFootstepsOn = false
+    /// How many times free-walk footsteps have (re)started -- one per walk,
+    /// plus one per resume after wall contact. Steering never adds one.
+    private(set) var freeWalkFootstepStarts = 0
+
+    /// The current building, as FreeWalkGeometry sees it (cells + every
+    /// open boundary, from the same openRunLength legality the grid walks use).
+    func makeFreeWalkGeometry() -> FreeWalkGeometry {
+        var open: Set<FreeWalkGeometry.Edge> = []
+        for cell in cells {
+            for direction in Direction.allCases where openRunLength(from: cell, direction: direction, limit: 1) == 1 {
+                open.insert(FreeWalkGeometry.Edge(cell: cell, direction: direction))
+            }
+        }
+        return FreeWalkGeometry(cells: cells, openEdges: open, cellSize: Double(cellSize))
+    }
+
+    /// Whether a player-controlled walk takes the free path right now.
+    /// Excluded: the elevator entry/exit states (their scripted walks
+    /// assume the cell center) and, for holds, Decorate's one-step cap.
+    private func freeWalkApplies(held: Bool) -> Bool {
+        freeWalkEnabled && elevatorAwaitingEntryDirection == nil && !canReenterArrivedElevator
+            && !(held && decorateModeEnabled)
+    }
+
+    /// Where a free tap would end: one cellSize along the camera's yaw,
+    /// cut short by the building.
+    func freeWalkTapTarget() -> SCNVector3 {
+        let geometry = makeFreeWalkGeometry()
+        let start = cameraNode.position
+        let forward = FreeWalkGeometry.forward(yaw: Double(cameraNode.eulerAngles.y))
+        return geometry.slideEndpoint(from: SCNVector3(start.x, eyeHeight, start.z),
+                                      dx: forward.x * Double(cellSize), dz: forward.z * Double(cellSize))
+    }
+
+    /// The resolved (wall-slid) path of a free tap, and its cumulative
+    /// arc length -- the tap glides along THIS, never along a chord.
+    private var freeTapPath: [SCNVector3] = []
+    private var freeTapArc: [Double] = []
+    private var freeTapSegment = 0
+
+    private func freeTapPosition(atDistance d: Double) -> SCNVector3 {
+        guard freeTapPath.count > 1 else { return freeTapPath.first ?? cameraNode.position }
+        while freeTapSegment < freeTapArc.count - 2, freeTapArc[freeTapSegment + 1] < d { freeTapSegment += 1 }
+        let a = freeTapPath[freeTapSegment], b = freeTapPath[freeTapSegment + 1]
+        let l0 = freeTapArc[freeTapSegment], l1 = freeTapArc[freeTapSegment + 1]
+        let f = Float(l1 > l0 ? min(1, max(0, (d - l0) / (l1 - l0))) : 1)
+        return SCNVector3(a.x + (b.x - a.x) * f, eyeHeight, a.z + (b.z - a.z) * f)
+    }
+
+    /// TAP WHERE YOU WANT TO GO (Sept 30): the view turns toward the tapped
+    /// bearing over the same eased curve as the one-cell glide. Arbitrary
+    /// yaw -- exactly the bearing tapped, never a cardinal.
+    private var freeTapStartYaw: Double = 0
+    private var freeTapEndYaw: Double = 0
+
+    /// The yaw whose camera forward is `direction`, expressed as the
+    /// nearest equivalent of `current` (so the turn is the short way).
+    static func yaw(facing direction: (x: Double, z: Double), near current: Double) -> Double {
+        let raw = atan2(-direction.x, -direction.z)   // inverse of FreeWalkGeometry.forward
+        var delta = (raw - current).truncatingRemainder(dividingBy: 2 * .pi)
+        if delta > .pi { delta -= 2 * .pi } else if delta <= -.pi { delta += 2 * .pi }
+        return current + delta
+    }
+
+    // MARK: TAP A PLACE -> GO THERE / TAP AGAIN -> STOP (Sept 30)
+    //
+    // A destination tap requests its real horizontal distance (not one
+    // cell) through the same slidePath. Up to one cell it glides exactly
+    // like the old tap; longer walks run at plain travelSpeed with a short
+    // ease in/out (freeTapRamp) instead of one long smoothstep, and the
+    // view turn keeps the one-cell timescale however long the walk is.
+    // While such a walk runs, any tap requests a stop, applied by the
+    // render loop on its next frame, right where the player is.
+
+    /// Ease in/out time at each end of a longer-than-one-cell tap walk.
+    static let freeTapRamp: Double = 0.3
+    private var freeTapRampTime: Double = 0          // 0 = the old one-cell smoothstep
+    private var freeTapTurnDuration: Double = 0
+    private var freeTapStopRequested = false
+    private(set) var freeTapWalkActive = false
+
+    /// True while a navigation-tap walk is under way (the next tap stops it).
+    /// Oct 2 (auto-walk -> hold handoff): a finger that goes down and stays
+    /// down -- still OR dragging -- during a running tap-to-point walk takes
+    /// it over as the ordinary held walk (see takeOverFreeTapWalkForHold).
+    var tapWalkCanBeTakenOverByHold: Bool { isFreeTapWalking && freeWalkApplies(held: true) }
+    var isFreeTapWalking: Bool { freeTapWalkActive && isAnimating && !freeMoveHeld && (phase == .freeMove || phase == .awaitingTurnCommit) }
+
+    /// Tap-to-stop: the walk ends where it is on the next frame -- current
+    /// position and yaw kept, no snap, no THUD.
+    func stopFreeTapWalk() {
+        guard isFreeTapWalking else { return }
+        cancelPendingWallInteraction("tap to stop")
+        freeTapStopRequested = true
+        navLog("free walk tap: stop requested")
+    }
+
+    /// Distance along a tap walk after `elapsed` seconds: constant speed
+    /// `v`, eased over `ramp` seconds at each end, total length `length`.
+    static func tapWalkDistance(elapsed e: Double, length: Double, speed v: Double, ramp a: Double) -> Double {
+        let total = length / v + a
+        if e <= 0 { return 0 }
+        if e >= total { return length }
+        if e < a { return v * e * e / (2 * a) }
+        if e > total - a { return length - v * (total - e) * (total - e) / (2 * a) }
+        return v * (e - a / 2)
+    }
+
+    // MARK: Oct 1 (tap-to-approach floor interactables)
+    //
+    // A tapped floor object that is collected by a deliberate tap from the
+    // adjacent cell (ObjectKind.requiresTapToCollect: trash can, paint
+    // bucket -- NOT hanging pickups, which you walk through) must not be
+    // walked INTO. The tap keeps the ordinary point-to-walk line -- straight
+    // from the player toward the object's actual world position -- and is
+    // simply shortened by one cell, finishing facing along that same line.
+
+    /// The approach walk for a tap on the object at `coord`, or nil when
+    /// this tap should stay an ordinary destination walk.
+    func tapApproach(toObjectAt coord: GridCoordinate) -> (direction: (x: Double, z: Double)?, distance: Double, finalYaw: Double)? {
+        guard let kind = objectKinds[coord], kind.requiresTapToCollect, !collectedCoords.contains(coord) else { return nil }
+        let target = objectNodes[coord].map { (x: Double($0.worldPosition.x), z: Double($0.worldPosition.z)) }
+            ?? (x: Double(coord.col) * Double(cellSize), z: Double(coord.row) * Double(cellSize))
+        let player = (x: Double(cameraNode.position.x), z: Double(cameraNode.position.z))
+        return Self.approachAlongLine(from: player, to: target, standOff: Double(cellSize), currentYaw: Double(cameraNode.eulerAngles.y))
+    }
+
+    /// Fire uses the same interruptible straight-line walk as floor pickups.
+    func tapApproach(toFireAt coord: GridCoordinate) -> (direction: (x: Double, z: Double)?, distance: Double, finalYaw: Double)? {
+        guard fireCoords.contains(coord), !extinguishedFireCoords.contains(coord),
+              let fire = fireNodes[coord], fire.parent != nil else { return nil }
+        let player = cameraNode.worldPosition, target = fire.worldPosition
+        return Self.approachAlongLine(from: (Double(player.x), Double(player.z)),
+            to: (Double(target.x), Double(target.z)), standOff: Double(cellSize), currentYaw: Double(cameraNode.eulerAngles.y))
+    }
+
+    /// Same direction as walking straight at `target`, distance shortened by
+    /// `standOff` (never negative), finishing facing the target. Already
+    /// within the stand-off: no travel, just face it.
+    static func approachAlongLine(from player: (x: Double, z: Double), to target: (x: Double, z: Double), standOff: Double, currentYaw: Double)
+        -> (direction: (x: Double, z: Double)?, distance: Double, finalYaw: Double) {
+        let dx = target.x - player.x, dz = target.z - player.z
+        let length = (dx * dx + dz * dz).squareRoot()
+        guard length > 1e-6 else { return (nil, 0, currentYaw) }
+        let direction = (x: dx / length, z: dz / length)
+        return (direction, max(0, length - standOff), atan2(-direction.x, -direction.z))
+    }
+
+    // MARK: Oct 2 -- WALL INTERACTIONS (one shared mechanism)
+    //
+    // Free Walk is free; a deliberate tap on a wall object asks Hallways to
+    // put you where that object is used. Every tappable Play-mode wall
+    // object resolves, from a hit-tested node, to ONE WallInteractionTarget:
+    //
+    //   kind    -- diagnostics label
+    //   face    -- the cell to stand at the center of + the wall to face
+    //   action  -- the object's EXISTING tap action, run only on arrival
+    //              (nil for passive objects: viewing IS the interaction)
+    //
+    // The shared machinery (forgiving targeting in ContentView, then
+    // composeWallInteraction -> beginWallComposition -> the ordinary Free
+    // Walk tap glide, then the pending action) is the same for all of them.
+    // A NEW wall object only needs a case in wallInteractionTarget(for:)
+    // (and, if its anchor node isn't recognizable there, isWallInteractionAnchor).
+
+    struct WallInteractionTarget {
+        let kind: String
+        let face: WallFace
+        let action: (() -> Void)?
+        /// Identity for de-duplication / ambiguity (several nodes of one
+        /// object resolve to the same target).
+        var key: String { "\(kind)@\(face.coord.row),\(face.coord.col)" }
+        var objectWorld: SCNVector3?
+    }
+
+    enum WallInteraction: String {
+        case photoBooth, ticTacToe, shellGame, rockPaperScissors, higherLower, fiveCardDraw,
+             simon, hangman, connectFour, checkers, woidle
+    }
+
+    /// The wall a fixture of `kind` at `coord` is mounted on -- nil when it
+    /// isn't there or its interaction is no longer available (won/completed).
+    private func wallInteractionDirection(_ kind: WallInteraction, at coord: GridCoordinate) -> Direction? {
+        switch kind {
+        case .photoBooth:
+            return photoBoothExpressions[coord] != nil && !completedPhotoBooths.contains(coord) ? photoBoothDirections[coord] : nil
+        case .ticTacToe: return ticTacToeWon ? nil : ticTacToeDirections[coord]
+        case .shellGame: return shellGameWon ? nil : shellGameDirections[coord]
+        case .rockPaperScissors: return rockPaperScissorsWon ? nil : rockPaperScissorsDirections[coord]
+        case .higherLower: return higherLowerWon ? nil : higherLowerDirections[coord]
+        case .fiveCardDraw: return fiveCardDrawWon ? nil : fiveCardDrawDirections[coord]
+        case .simon: return simonWon ? nil : simonDirections[coord]
+        case .hangman: return hangmanWon ? nil : hangmanDirections[coord]
+        case .connectFour: return connectFourWon ? nil : connectFourDirections[coord]
+        case .checkers: return checkersWon ? nil : checkersDirections[coord]
+        case .woidle: return woidleWon ? nil : woidleDirections[coord]
+        }
+    }
+
+    /// Hit-test node -> fixture coordinate + that fixture's EXISTING activate.
+    private var fixtureResolvers: [(kind: WallInteraction, coordinate: (SCNNode) -> GridCoordinate?, activate: (GridCoordinate) -> Void)] {
+        [
+            (.photoBooth, { [unowned self] in self.photoBoothCoordinate(for: $0) }, { [weak self] in self?.activatePhotoBooth(at: $0) }),
+            (.ticTacToe, { [unowned self] in self.ticTacToeTerminalCoordinate(for: $0) }, { [weak self] in self?.activateTicTacToeTerminal(at: $0) }),
+            (.shellGame, { [unowned self] in self.shellGameTerminalCoordinate(for: $0) }, { [weak self] in self?.activateShellGameTerminal(at: $0) }),
+            (.rockPaperScissors, { [unowned self] in self.rockPaperScissorsTerminalCoordinate(for: $0) }, { [weak self] in self?.activateRockPaperScissorsTerminal(at: $0) }),
+            (.higherLower, { [unowned self] in self.higherLowerTerminalCoordinate(for: $0) }, { [weak self] in self?.activateHigherLowerTerminal(at: $0) }),
+            (.fiveCardDraw, { [unowned self] in self.fiveCardDrawTerminalCoordinate(for: $0) }, { [weak self] in self?.activateFiveCardDrawTerminal(at: $0) }),
+            (.simon, { [unowned self] in self.simonTerminalCoordinate(for: $0) }, { [weak self] in self?.activateSimonTerminal(at: $0) }),
+            (.hangman, { [unowned self] in self.hangmanTerminalCoordinate(for: $0) }, { [weak self] in self?.activateHangmanTerminal(at: $0) }),
+            (.connectFour, { [unowned self] in self.connectFourTerminalCoordinate(for: $0) }, { [weak self] in self?.activateConnectFourTerminal(at: $0) }),
+            (.checkers, { [unowned self] in self.checkersTerminalCoordinate(for: $0) }, { [weak self] in self?.activateCheckersTerminal(at: $0) }),
+            (.woidle, { [unowned self] in self.woidleTerminalCoordinate(for: $0) }, { [weak self] in self?.activateWoidleTerminal(at: $0) }),
+        ]
+    }
+
+    /// The nearest-cardinal wall a node sits on, relative to a cell center
+    /// -- read from the RENDERED node's world position (used where the
+    /// controller has no stored direction, e.g. the trash chute).
+    private func mountDirection(of node: SCNNode, in coord: GridCoordinate) -> Direction {
+        let p = node.worldPosition, c = worldPosition(for: coord)
+        let dx = Double(p.x - c.x), dz = Double(p.z - c.z)
+        if abs(dx) > abs(dz) { return dx > 0 ? .east : .west }
+        return dz > 0 ? .south : .north
+    }
+
+    /// A door between `coord` and its neighbour that way: stand on whichever
+    /// side the player is nearer (both are legal operating spots for the
+    /// existing door code), facing the door.
+    private func twoSidedDoorFace(at coord: GridCoordinate, direction: Direction) -> WallFace {
+        let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+        guard cells.contains(neighbor) else { return WallFace(coord: coord, direction: direction) }
+        let p = cameraNode.position
+        func d2(_ c: GridCoordinate) -> Float {
+            let w = worldPosition(for: c); return (w.x - p.x) * (w.x - p.x) + (w.z - p.z) * (w.z - p.z)
+        }
+        return d2(neighbor) < d2(coord) ? WallFace(coord: neighbor, direction: direction.opposite)
+                                         : WallFace(coord: coord, direction: direction)
+    }
+
+    /// THE taxonomy: any hit-tested node -> the wall interaction it belongs
+    /// to, or nil (not a wall object, or one with nothing available now --
+    /// open door, won game, busy chute -- which keeps its old tap behavior).
+    func wallInteractionTarget(for node: SCNNode) -> WallInteractionTarget? {
+        // Passive: pictures, mission plaques, wall floor maps.
+        if let passive = Self.passiveWallObject(for: node) {
+            let direction: Direction?
+            switch passive.kind {
+            case .picture:
+                direction = passive.direction.flatMap { pictureFaces.contains(WallFace(coord: passive.coord, direction: $0)) ? $0 : nil }
+            case .missionSign: direction = missionSignDirections[passive.coord]
+            case .floorMap: direction = floorMapDirections[passive.coord]
+            }
+            guard let direction else { return nil }
+            return WallInteractionTarget(kind: passive.kind.rawValue, face: WallFace(coord: passive.coord, direction: direction),
+                                         action: nil, objectWorld: passive.objectWorld)
+        }
+        // Wall fixtures: photo booth + game terminals.
+        for resolver in fixtureResolvers {
+            if let coord = resolver.coordinate(node) {
+                guard let direction = wallInteractionDirection(resolver.kind, at: coord) else { return nil }
+                let activate = resolver.activate
+                return WallInteractionTarget(kind: resolver.kind.rawValue, face: WallFace(coord: coord, direction: direction),
+                                             action: { activate(coord) })
+            }
+        }
+        // Trash chute (destination cubby door).
+        var walk: SCNNode? = node
+        while let candidate = walk {
+            if let coord = destinationNodes.first(where: { $0.value === candidate })?.key {
+                guard destinationKinds[coord] != nil, !chuteInUse else { return nil }
+                return WallInteractionTarget(kind: "trashChute", face: WallFace(coord: coord, direction: mountDirection(of: candidate, in: coord)),
+                                             action: { [weak self] in self?.openDestinationDoor(at: coord) })
+            }
+            walk = candidate.parent
+        }
+        // Swing doors (either side).
+        if let coord = bathroomDoorCoordinate(for: node) {
+            guard let direction = bathroomDoors[coord], !openBathroomDoors.contains(coord) else { return nil }
+            return WallInteractionTarget(kind: "bathroomDoor", face: twoSidedDoorFace(at: coord, direction: direction),
+                                         action: { [weak self] in self?.openBathroomDoor(at: coord) })
+        }
+        if let coord = windowRoomDoorCoordinate(for: node) {
+            guard let direction = windowRooms[coord]?.direction, !openWindowRoomDoors.contains(coord) else { return nil }
+            return WallInteractionTarget(kind: "windowRoomDoor", face: twoSidedDoorFace(at: coord, direction: direction),
+                                         action: { [weak self] in self?.openWindowRoomDoor(at: coord) })
+        }
+        if let coord = roomEntranceDoorCoordinate(for: node) ?? Self.taggedCoord(of: node, kind: .roomEntranceDoor) {
+            guard let direction = roomEntranceDoors[coord], !openRoomEntranceDoors.contains(coord) else { return nil }
+            return WallInteractionTarget(kind: "roomEntranceDoor", face: twoSidedDoorFace(at: coord, direction: direction),
+                                         action: { [weak self] in self?.openRoomEntranceDoor(at: coord) })
+        }
+        // Numbered room door (mail slot / knock): operated from its own cell.
+        if let coord = roomDoorCoordinate(for: node) ?? Self.taggedCoord(of: node, kind: .roomDoor) {
+            guard let door = roomDoors[coord] else { return nil }
+            return WallInteractionTarget(kind: "roomDoor", face: WallFace(coord: coord, direction: door.direction),
+                                         action: { [weak self] in self?.interactWithRoomDoor(at: coord) })
+        }
+        // Wall-mounted fire extinguisher.
+        if let coord = extinguisherCoordinate(for: node) {
+            guard let direction = extinguisherCoords[coord], !carryingExtinguisher, !extinguisherPickupInProgress,
+                  !pickedUpExtinguisherCoords.contains(coord), extinguisherNodes[coord]?.parent != nil else { return nil }
+            return WallInteractionTarget(kind: "extinguisher", face: WallFace(coord: coord, direction: direction),
+                                         action: { [weak self] in _ = self?.pickUpExtinguisher(at: coord) })
+        }
+        return nil
+    }
+
+    private static func taggedCoord(of node: SCNNode, kind: DecoratorTarget.Kind) -> GridCoordinate? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let target = DecoratorTarget.read(candidate) { return target.kind == kind ? target.coord : nil }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    /// Cheap per-node test used to collect forgiving-targeting candidates:
+    /// the top node of each wall object (its tag / name / chute door).
+    func isWallInteractionAnchor(_ node: SCNNode) -> Bool {
+        if let target = DecoratorTarget.read(node), target.coord != nil {
+            switch target.kind {
+            case .picture, .missionSign, .floorMap, .photoBooth, .game, .roomDoor, .roomEntranceDoor, .extinguisher: return true
+            default: break
+            }
+        }
+        if let name = node.name, name.hasPrefix("bathroomDoor_") || name.hasPrefix("windowRoomDoor_") { return true }
+        return destinationNodes.values.contains { $0 === node }
+    }
+
+    /// The interaction waiting for its alignment glide to finish.
+    private var pendingWallInteraction: (kind: String, targetYaw: Double, run: (() -> Void)?)?
+
+    private func cancelPendingWallInteraction(_ reason: String) {
+        guard let pending = pendingWallInteraction else { return }
+        pendingWallInteraction = nil
+        diag("wallInteraction.align.cancel", ["kind": pending.kind, "reason": reason,
+                                              "pendingActionCancelled": pending.run != nil])
+    }
+
+    /// Compose the target's pose, then run its action (if any) on arrival.
+    /// Returns false -- caller keeps its old tap behavior -- in Decorate,
+    /// grid navigation, while input is locked, or if the glide can't start.
+    /// No distance limit: a recognized tap is intent.
+    func composeWallInteraction(_ target: WallInteractionTarget) -> Bool {
+        guard !decorateModeEnabled, freeWalkApplies(held: false), canRotate else {
+            diag("wallInteraction.declined", ["kind": target.kind, "coord": target.face.coord,
+                                              "reason": "not applicable (decorate/grid/locked)"])
+            return false
+        }
+        var check: (yaw: Double, error: Double)?
+        if let objectWorld = target.objectWorld {
+            let pose = worldPosition(for: target.face.coord)
+            let ox = Double(objectWorld.x - pose.x), oz = Double(objectWorld.z - pose.z)
+            if (ox * ox + oz * oz) > 1e-6 {
+                let lookAt = atan2(-ox, -oz)
+                check = (lookAt, shortestDelta(from: target.face.direction.yaw, to: lookAt))
+            }
+        }
+        return beginWallComposition(kind: target.kind, face: target.face, then: target.action,
+                                    extra: ["coord": target.face.coord, "direction": target.face.direction,
+                                            "hasAction": target.action != nil,
+                                            "geometricYaw": check?.yaw, "geometricYawError": check?.error])
+    }
+
+    /// Kept for the "standing in the fixture's cell" taps in handleTap
+    /// (games/booth opened by any tap there, unchanged): same shared path.
+    func composeWallView(_ kind: WallInteraction, at coord: GridCoordinate, then interact: @escaping () -> Void) {
+        guard let direction = wallInteractionDirection(kind, at: coord),
+              composeWallInteraction(WallInteractionTarget(kind: kind.rawValue, face: WallFace(coord: coord, direction: direction),
+                                                           action: interact))
+        else {
+            interact()
+            return
+        }
+    }
+
+    enum PassiveWallObject: String { case picture, missionSign, floorMap }
+
+    /// The passive wall object a hit-tested node belongs to (walks up to the
+    /// frame's DecoratorTarget tag). Grid objects only.
+    static func passiveWallObject(for node: SCNNode) -> (kind: PassiveWallObject, coord: GridCoordinate, direction: Direction?, objectWorld: SCNVector3)? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if let target = DecoratorTarget.read(candidate), let coord = target.coord {
+                switch target.kind {
+                case .picture: return (.picture, coord, target.direction, candidate.worldPosition)
+                case .missionSign: return (.missionSign, coord, target.direction, candidate.worldPosition)
+                case .floorMap: return (.floorMap, coord, target.direction, candidate.worldPosition)
+                default: return nil
+                }
+            }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    /// The one shared pose: `face.coord`'s cell center looking along
+    /// `face.direction` (every wall object is mounted centered on its cell's
+    /// wall, half a cell out; Direction.yaw looks that way -- the same
+    /// convention every activate guard checks). Returns true when handled
+    /// (glide started, or already in pose and the action ran).
+    @discardableResult
+    private func beginWallComposition(kind: String, face: WallFace, then interact: (() -> Void)?,
+                                      extra: [String: Any?] = [:]) -> Bool {
+        let target = worldPosition(for: face.coord)
+        let targetYaw = face.direction.yaw
+        let start = cameraNode.position
+        let startYaw = Double(cameraNode.eulerAngles.y)
+        let dx = Double(target.x - start.x), dz = Double(target.z - start.z)
+        let distance = (dx * dx + dz * dz).squareRoot()
+        let yawError = abs(shortestDelta(from: startYaw, to: targetYaw))
+        if distance < 0.03 && yawError < 0.02 {           // already there: no glide
+            if let interact { diag("wallInteraction.action.invoked", ["kind": kind, "note": "already in pose"]); interact() }
+            return true
+        }
+        let extraText = extra.sorted { $0.key < $1.key }.map { "\($0.key)=\(DiagnosticRecorder.render($0.value))" }.joined(separator: " ")
+        diag("wallInteraction.align.start", ["kind": kind,
+             "from": String(format: "(%.3f, %.3f)", start.x, start.z),
+             "to": String(format: "(%.3f, %.3f)", target.x, target.z),
+             "startYaw": startYaw, "targetYaw": targetYaw, "detail": (extraText.isEmpty ? nil : extraText) as String?])
+        beginFreeWalkTap(travelDirection: distance > 1e-6 ? (dx / distance, dz / distance) : nil,
+                         travelDistance: distance, finalYaw: targetYaw, turnAcrossWholeGlide: true)
+        guard freeTapWalkActive else {
+            diag("wallInteraction.align.cancel", ["kind": kind, "reason": "glide could not start"])
+            return false
+        }
+        pendingWallInteraction = (kind, targetYaw, interact)
+        return true
+    }
+
+    /// Oct 2 flight recorder: which canRotate condition is blocking (reads only).
+    var diagCanRotateBlockers: String {
+        var b: [String] = []
+        if isAnimating { b.append("animating") }
+        if isDragRotating { b.append("dragRotating") }
+        if isDragMoving { b.append("dragMoving") }
+        if elevatorInUse { b.append("elevatorInUse") }
+        if chuteInUse { b.append("chuteInUse") }
+        if extinguisherPickupInProgress { b.append("extinguisherPickup") }
+        if !extinguishingFireCoords.isEmpty { b.append("extinguishing") }
+        if activePictureMenu != nil { b.append("pictureMenu") }
+        if activePhotoBooth != nil { b.append("photoBooth") }
+        if activeTicTacToeTerminal != nil || activeShellGameTerminal != nil || activeRockPaperScissorsTerminal != nil
+            || activeHigherLowerTerminal != nil || activeFiveCardDrawTerminal != nil || activeSimonTerminal != nil
+            || activeHangmanTerminal != nil || activeConnectFourTerminal != nil || activeCheckersTerminal != nil
+            || activeWoidleTerminal != nil { b.append("gameTerminal") }
+        return b.isEmpty ? "none" : b.joined(separator: ",")
+    }
+
+    private func beginFreeWalkTap(travelDirection: (x: Double, z: Double)? = nil, travelDistance: Double? = nil, finalYaw: Double? = nil,
+                                  turnAcrossWholeGlide: Bool = false) {
+        cancelPendingWallInteraction("superseded by another tap walk")
+        guard canRotate else {
+            diag("tapWalk.rejected", ["reason": "canRotate false", "blockers": diagCanRotateBlockers])
+            return
+        }
+        let start = cameraNode.position
+        let startYaw = Double(cameraNode.eulerAngles.y)
+        // Tapped (essentially) where the player already stands: nothing to do.
+        if finalYaw == nil, let travelDistance, travelDistance < 0.05 {
+            navLog("free walk tap: destination under the player (\(String(format: "%.3f", travelDistance)) m), ignored")
+            diag("tapWalk.rejected", ["reason": "destination under player", "distance": travelDistance])
+            return
+        }
+        let requested = finalYaw != nil && (travelDistance ?? 0) < 0.05 ? 0 : (travelDistance ?? Double(cellSize))
+        let forward = travelDirection ?? FreeWalkGeometry.forward(yaw: startYaw)
+        let path = makeFreeWalkGeometry().slidePath(from: SCNVector3(start.x, eyeHeight, start.z),
+                                                    dx: forward.x * requested, dz: forward.z * requested)
+        var arc: [Double] = [0]
+        for i in 1..<max(1, path.count) {
+            arc.append(arc[i - 1] + Double(hypotf(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z)))
+        }
+        let target = path.last ?? start
+        let distance = arc.last ?? 0
+        // THUD only when the building leaves (essentially) nothing of the
+        // request (under 5 cm) -- a useful slide along the wall is a step,
+        // not a crash; a sub-5 cm creep is treated as the crash it feels like.
+        guard distance > 0.05 || finalYaw != nil else {
+            SoundEffects.playHitWall()
+            navLog("free walk tap blocked at \(start) yaw=\(cameraNode.eulerAngles.y)")
+            diag("tapWalk.rejected", ["reason": "blocked by wall", "cell": currentCell])
+            return
+        }
+        cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
+        freeWalkGeometry = makeFreeWalkGeometry()
+        freeWalkCell = currentCell
+        freeMoveHeld = false
+        continuousRun = false
+        segmentStart = start
+        segmentTarget = target
+        freeTapPath = path
+        freeTapArc = arc
+        freeTapSegment = 0
+        freeTapStartYaw = startYaw
+        freeTapEndYaw = finalYaw.map { Self.yaw(facing: FreeWalkGeometry.forward(yaw: $0), near: startYaw) }
+            ?? travelDirection.map { Self.yaw(facing: $0, near: startYaw) } ?? startYaw
+        segmentProgress = 0
+        let oneCell = Double(cellSize) / travelSpeed
+        if distance > Double(cellSize) + 1e-6 {
+            freeTapRampTime = Self.freeTapRamp
+            freeTapDuration = distance / travelSpeed + Self.freeTapRamp
+            // Oct 2: a wall-composition glide (only) turns across the whole
+            // approach, so it never arrives side-on and crabs into place.
+            freeTapTurnDuration = turnAcrossWholeGlide ? freeTapDuration : oneCell
+        } else {                                   // exactly the old tap glide
+            freeTapRampTime = 0
+            freeTapDuration = distance / travelSpeed
+            freeTapTurnDuration = freeTapDuration
+            if finalYaw != nil {                   // approach: always a full, unhurried turn
+                freeTapDuration = max(freeTapDuration, oneCell)
+                freeTapTurnDuration = freeTapDuration
+            }
+        }
+        let walks = distance > 0.05
+        freeTapStopRequested = false
+        freeTapWalkActive = true
+        movementPace = 1
+        SoundEffects.setWalkingPace(1)
+        phase = .freeMove
+        isAnimating = true
+        if walks {                                 // a turn-in-place approach is silent
+            freeWalkFootstepsOn = true
+            freeWalkFootstepsReverse = false
+            freeWalkFootstepStarts += 1
+            SoundEffects.startWalking()
+        }
+        navLog("free walk tap from \(start) to \(target) (\(String(format: "%.2f", distance)) m)")
+        diag("tapWalk.accepted", ["distance": distance, "turnOnly": !walks, "cell": currentCell])
+    }
+
+    /// Oct 2 (auto-walk -> long-press handoff): converts a running tap-to-
+    /// point walk into the ORDINARY free held walk, in place -- same
+    /// position, same yaw, still moving (phase stays .freeMove, isAnimating
+    /// stays true, footsteps keep their current state), so the next frame
+    /// simply runs the existing held branch. The tap walk's destination,
+    /// eased path, pending turn and stop request are discarded, so nothing
+    /// can resume or snap to it later. Only while the tap walk is genuinely
+    /// mid-move (.freeMove): if it is already finishing (.awaitingTurnCommit,
+    /// its main-thread completion queued), returns false and the hold's
+    /// next tick starts a normal held walk once that completes.
+    @discardableResult
+    func takeOverFreeTapWalkForHold() -> Bool {
+        guard walkingHeld, isFreeTapWalking, phase == .freeMove, freeWalkApplies(held: true) else { return false }
+        cancelPendingWallInteraction("hold/drag takeover")
+        manualFootstepsFromAutoWalk = true
+        freeTapStopRequested = false
+        freeTapWalkActive = false
+        freeTapPath = []
+        freeTapArc = []
+        freeTapSegment = 0
+        freeTapEndYaw = Double(cameraNode.eulerAngles.y)
+        freeTapStartYaw = freeTapEndYaw
+        segmentTarget = cameraNode.position
+        freeMoveHeld = true
+        continuousRun = true
+        heldSteeringActive = false        // first held update pins the steering origin here (no jump)
+        heldThrottle = 1
+        heldDistance = 0
+        navLog("free walk tap taken over by a hold at \(cameraNode.position) yaw=\(cameraNode.eulerAngles.y)")
+        return true
+    }
+
+    /// Oct 2 (auto-walk -> pinch handoff): ends a running tap-to-point walk
+    /// at once, IN PLACE (this position, this yaw; no glide, no snap), and
+    /// discards its destination/path/stop request, so the ordinary pinch
+    /// (beginDragMove) can begin from here on this same call. Synchronous on
+    /// purpose: canRotate must be true before beginDragMove's guard. Same
+    /// end state finishFreeMove's completion leaves (stopped, .translate,
+    /// facing = nearest cardinal). Only while the walk is genuinely mid-move.
+    @discardableResult
+    func takeOverFreeTapWalkForPinch() -> Bool {
+        guard isFreeTapWalking, phase == .freeMove, freeWalkApplies(held: false) else { return false }
+        cancelPendingWallInteraction("pinch takeover")
+        manualFootstepsFromAutoWalk = true
+        freeTapStopRequested = false
+        freeTapWalkActive = false
+        freeTapPath = []
+        freeTapArc = []
+        freeTapSegment = 0
+        freeTapEndYaw = Double(cameraNode.eulerAngles.y)
+        freeTapStartYaw = freeTapEndYaw
+        segmentTarget = cameraNode.position
+        isAnimating = false
+        phase = .translate
+        freeWalkFootstepsOn = false
+        freeWalkFootstepsReverse = false
+        SoundEffects.stopWalking()
+        movementPace = 1
+        SoundEffects.setWalkingPace(1)
+        let heading = nearestCardinal(toYaw: Double(cameraNode.eulerAngles.y))
+        if facing != heading { facing = heading }
+        navLog("free walk tap taken over by a pinch at \(cameraNode.position) yaw=\(cameraNode.eulerAngles.y)")
+        return true
+    }
+
+    private func beginFreeHeldWalk() {
+        guard canRotate else { return }
+        cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
+        freeWalkGeometry = makeFreeWalkGeometry()
+        freeWalkCell = currentCell
+        freeMoveHeld = true
+        continuousRun = true
+        heldSteeringActive = false
+        heldThrottle = 1
+        phase = .freeMove
+        isAnimating = true
+        // Oct 2 (final audio rule): a hold started from standing is silent.
+        manualFootstepsFromAutoWalk = false
+        freeWalkFootstepsOn = false
+        freeWalkFootstepsReverse = false
+        navLog("free walk hold began at \(cameraNode.position)")
+    }
+
+    /// Render thread: after moving, notice a new containing cell and hand
+    /// it to the ordinary arrival path (pickups, doors closing behind,
+    /// map, viewed flags) -- once per cell entered.
+    private func freeWalkTrackCell(_ position: SCNVector3) {
+        guard let geometry = freeWalkGeometry else { return }
+        let cell = geometry.containingCell(x: Double(position.x), z: Double(position.z), previous: freeWalkCell)
+        guard cell != freeWalkCell else { return }
+        freeWalkCell = cell
+        let heading = nearestCardinal(toYaw: Double(cameraNode.eulerAngles.y))
+        DispatchQueue.main.async { [weak self] in
+            self?.applyNavigationUpdate { [weak self] in
+                guard let self else { return }
+                self.applyArrival(cell: cell, heading: heading)
+                self.markFloorMapViewedIfPresent(at: cell)
+                self.markMissionSignViewedIfPresent(at: cell)
+                navLog("free walk entered \(cell)")
+            }
+        }
+    }
+
+    /// Render thread: the movement is over, exactly where it is.
+    private func finishFreeMove() {
+        phase = .awaitingTurnCommit
+        let heading = nearestCardinal(toYaw: Double(cameraNode.eulerAngles.y))
+        let position = cameraNode.position
+        DispatchQueue.main.async { [weak self] in
+            self?.applyNavigationUpdate { [weak self] in
+                guard let self else { return }
+                self.isAnimating = false
+                self.freeMoveHeld = false
+                self.heldSteeringActive = false
+                self.freeTapWalkActive = false
+                self.freeWalkFootstepsOn = false
+                self.freeWalkFootstepsReverse = false
+                SoundEffects.stopWalking()
+                if self.facing != heading { self.facing = heading }
+                if !self.walkingHeld {
+                    self.movementPace = 1
+                    SoundEffects.setWalkingPace(1)
+                }
+                self.phase = .translate
+                navLog("free walk stopped at \(position) in \(self.currentCell) facing \(self.facing)")
+                // Oct 2 wall-interaction experiment: the glide ended on its
+                // own (every takeover/stop cleared this first) -- now the
+                // fixture's ordinary activate runs, with its own guards.
+                if let pending = self.pendingWallInteraction {
+                    self.pendingWallInteraction = nil
+                    let finalYaw = Double(self.cameraNode.eulerAngles.y)
+                    diag("wallInteraction.align.complete", ["kind": pending.kind,
+                         "at": String(format: "(%.3f, %.3f)", position.x, position.z),
+                         "yaw": finalYaw, "yawError": self.shortestDelta(from: finalYaw, to: pending.targetYaw),
+                         "facing": "\(self.facing)", "cell": self.currentCell])
+                    if let run = pending.run {
+                        diag("wallInteraction.action.invoked", ["kind": pending.kind])
+                        run()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Footsteps on/off, and (Oct 2) forward or backward loop while on. A
+    /// direction change while moving swaps loops once; holding a direction
+    /// never restarts it. Backing up through the stop band goes silent first.
+    private func setFreeWalkFootsteps(_ on: Bool, reverse: Bool = false) {
+        guard on != freeWalkFootstepsOn || (on && reverse != freeWalkFootstepsReverse) else { return }
+        if on && !freeWalkFootstepsOn { freeWalkFootstepStarts += 1 }
+        freeWalkFootstepsOn = on
+        if on { freeWalkFootstepsReverse = reverse }
+        DispatchQueue.main.async { on ? SoundEffects.startWalking(reverse: reverse) : SoundEffects.stopWalking() }
+    }
+    /// Oct 2: true while the free-walk footsteps are the backward loop.
+    private(set) var freeWalkFootstepsReverse = false
+    /// Oct 2 (final audio rule): walking sound belongs to tap-to-destination
+    /// auto-walk. Manual movement is silent -- EXCEPT the one gesture (hold/pan
+    /// or pinch) that took ownership of a running auto-walk, which keeps
+    /// directional footsteps until it ends. Set ONLY by the two takeovers;
+    /// cleared when that gesture ends (setWalkingHeld(false), endDragMove) and
+    /// by any manual gesture that starts from standing, so it never leaks.
+    private(set) var manualFootstepsFromAutoWalk = false
+
+    // MARK: - FREE-WALK held steering (Sept 29, polish pass #1)
+    //
+    // HOLD = WALK. SAME HELD FINGER LEFT/RIGHT = STEER. LIFT = STOP.
+    // The long press that started the free held walk owns the touch (the
+    // Free Look pan can't recognize once it has) and keeps delivering
+    // .changed locations -- the same stream legacy HeldEndpointLook uses.
+    // Horizontal displacement from where the finger was when steering
+    // began turns the camera with Free Look's exact math
+    // (pointsPerQuarterTurn points = 90 degrees, finger right = positive
+    // yaw = turn left, unclamped). The .freeMove loop already samples the
+    // camera yaw every frame, so the path simply curves. No snap, no turn
+    // event, no pause. A wall-blocked hold is still a held walk, so
+    // steering away lets the next frame's step become legal and walking
+    // resumes on its own.
+
+    private(set) var heldSteeringActive = false
+    private var heldSteeringOriginX: Double = 0
+    private var heldSteeringOriginY: Double?
+    private var heldSteeringOriginYaw: Double = 0
+    private var heldSteeringPointsPerQuarterTurn: Double = 140
+
+    // MARK: FREE-WALK held-walk TURN-RATE LIMIT (Sept 30 experiment)
+    //
+    // The finger sets a TARGET yaw (same 230 pt = 90 deg mapping as before).
+    // While the held walk is translating (throttle != 0, even if a wall is
+    // blocking it) the actual yaw moves toward that target by at most
+    // heldWalkMaxTurnRate * dt per frame -- a big finger excursion becomes
+    // an arc, not an instant 90-degree swerve. A RATE limit only: no angle
+    // clamp, no snapping, no momentum (the target is followed exactly,
+    // never overshot; bring the finger back and the turn stops). Stationary
+    // (neutral throttle) turning keeps the old immediate response.
+    // Unwrapped yaw on purpose: +270 deg of finger means +270 deg of turn.
+
+    /// THE TUNING NUMBER: max held-walk yaw rate while moving, rad/s.
+    /// .pi = 180 deg/s (90 deg in 0.5 s).
+    static let heldWalkMaxTurnRate: Double = .pi
+    /// The limit actually applied (tests set .infinity to check the raw mapping).
+    var heldWalkTurnRateLimit: Double = TapNavigationController.heldWalkMaxTurnRate
+    /// Yaw the finger is asking for / yaw the held walk has actually reached.
+    private(set) var heldSteeringTargetYaw: Double = 0
+    private var heldSteeringYaw: Double = 0
+
+    /// Move `current` toward `target` by at most `maxStep` (radians, >= 0).
+    /// Linear in unwrapped yaw -- never takes a "shortest way round".
+    static func rateLimitedYaw(current: Double, target: Double, maxStep: Double) -> Double {
+        let delta = target - current
+        guard abs(delta) > maxStep else { return target }
+        return current + (delta > 0 ? maxStep : -maxStep)
+    }
+
+    /// Per-frame step from the .freeMove loop.
+    private func stepHeldSteering(dt: Double, translating: Bool) {
+        guard heldSteeringActive, heldSteeringYaw != heldSteeringTargetYaw else { return }
+        let maxStep = translating ? heldWalkTurnRateLimit * dt : .infinity
+        heldSteeringYaw = Self.rateLimitedYaw(current: heldSteeringYaw, target: heldSteeringTargetYaw, maxStep: maxStep)
+        cameraNode.eulerAngles = SCNVector3(0, Float(heldSteeringYaw), 0)
+    }
+
+    // MARK: FREE-WALK unified held navigation (polish pass #2)
+    //
+    // X = TURN and Y = MOVE, at the same time, for the whole life of the
+    // held touch -- no axis lock, no modes. Y is a throttle measured from
+    // the same activation origin as X (UIKit y: positive = finger moved
+    // DOWN, matching the existing "drag down = forward" convention):
+    //   finger at origin (or below)  -> +1, today's hold-to-walk
+    //   ~60 pt UP from origin        -> 0, stand still (turn in place)
+    //   ~120 pt UP from origin       -> -1, back up at walking pace
+    // proportional in between, with a small dead band around the stop
+    // point. Translation is signed along the camera's ACTUAL yaw.
+
+    /// Signed translation throttle, -1...1, read by the .freeMove loop.
+    private(set) var heldThrottle: Double = 1
+    static let heldStopOffset: Double = 60   // pt of upward travel from origin to reach "stopped"
+    static let heldThrottleDeadZone: Double = 12
+
+    /// Throttle for a vertical finger offset from the held origin
+    /// (positive = finger moved down).
+    static func throttle(forVerticalOffset dy: Double) -> Double {
+        let s = dy + heldStopOffset // 60 at the origin, 0 at the stop point
+        guard abs(s) > heldThrottleDeadZone else { return 0 }
+        let t = (abs(s) - heldThrottleDeadZone) / (heldStopOffset - heldThrottleDeadZone)
+        return max(-1, min(1, s > 0 ? t : -t))
+    }
+
+    /// The held finger's location, both axes. The first call once a free
+    /// held walk is running only records the origin (this location + the
+    /// current yaw); nothing moves or turns. Later calls set yaw from X
+    /// (Free Look math) and the translation throttle from Y.
+    func updateHeldNavigation(fingerX: Double, fingerY: Double?, pointsPerQuarterTurn: Double) {
+        updateHeldWalkSteering(fingerX: fingerX, pointsPerQuarterTurn: pointsPerQuarterTurn)
+        guard heldSteeringActive, let fingerY else { return }
+        guard let originY = heldSteeringOriginY else {
+            heldSteeringOriginY = fingerY
+            return
+        }
+        heldThrottle = Self.throttle(forVerticalOffset: fingerY - originY)
+    }
+
+    /// True while a free held walk is running (moving or wall-blocked).
+    var freeHeldWalkActive: Bool { freeMoveHeld && walkingHeld && isAnimating && phase == .freeMove }
+
+    /// Feed the held finger's x. The first call once a free held walk is
+    /// running only records the origin (this finger x + the current yaw),
+    /// so pre-recognition drift never turns the camera. Later calls set
+    /// yaw = originYaw + (x - originX) / pointsPerQuarterTurn * pi/2.
+    /// No-op outside a free held walk (legacy holds keep HeldEndpointLook).
+    func updateHeldWalkSteering(fingerX: Double, pointsPerQuarterTurn: Double) {
+        guard freeHeldWalkActive, pointsPerQuarterTurn > 0 else { return }
+        guard heldSteeringActive else {
+            heldSteeringActive = true
+            heldSteeringOriginX = fingerX
+            heldSteeringOriginY = nil
+            heldSteeringOriginYaw = Double(cameraNode.eulerAngles.y)
+            heldSteeringTargetYaw = heldSteeringOriginYaw
+            heldSteeringYaw = heldSteeringOriginYaw
+            heldSteeringPointsPerQuarterTurn = pointsPerQuarterTurn
+            navLog("free walk steering origin x=\(String(format: "%.1f", fingerX)) yaw=\(String(format: "%.3f", heldSteeringOriginYaw))")
+            return
+        }
+        let fraction = (fingerX - heldSteeringOriginX) / heldSteeringPointsPerQuarterTurn
+        heldSteeringTargetYaw = heldSteeringOriginYaw + fraction * .pi / 2
+        // Standing still (neutral throttle), or no limit (.infinity = the old
+        // behaviour): turn immediately. Moving: the .freeMove loop turns
+        // toward the target at the limited rate.
+        if heldThrottle == 0 || !heldWalkTurnRateLimit.isFinite { stepHeldSteering(dt: 0, translating: false) }
+    }
+
     private var lastTime: TimeInterval = 0
 
     // A standalone rotate (left/right button, not part of a forward
@@ -733,16 +1657,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// this controller fresh; no register/unregister needed here.
     private let floorMapDirections: [GridCoordinate: Direction]
     private(set) var photoBoothCoords: Set<GridCoordinate>
-    private let ticTacToeTerminalCoords: Set<GridCoordinate>
-    private let shellGameStationCoords: Set<GridCoordinate>
-    private let rockPaperScissorsTerminalCoords: Set<GridCoordinate>
-    private let higherLowerTerminalCoords: Set<GridCoordinate>
-    private let fiveCardDrawTerminalCoords: Set<GridCoordinate>
-    private let simonTerminalCoords: Set<GridCoordinate>
-    private let hangmanTerminalCoords: Set<GridCoordinate>
-    private let connectFourTerminalCoords: Set<GridCoordinate>
-    private let checkersTerminalCoords: Set<GridCoordinate>
-    private let woidleTerminalCoords: Set<GridCoordinate>
+    private var ticTacToeTerminalCoords: Set<GridCoordinate>
+    private var shellGameStationCoords: Set<GridCoordinate>
+    private var rockPaperScissorsTerminalCoords: Set<GridCoordinate>
+    private var higherLowerTerminalCoords: Set<GridCoordinate>
+    private var fiveCardDrawTerminalCoords: Set<GridCoordinate>
+    private var simonTerminalCoords: Set<GridCoordinate>
+    private var hangmanTerminalCoords: Set<GridCoordinate>
+    private var connectFourTerminalCoords: Set<GridCoordinate>
+    private var checkersTerminalCoords: Set<GridCoordinate>
+    private var woidleTerminalCoords: Set<GridCoordinate>
     /// Which floor-map cells you've actually arrived at and stood in
     /// front of this run -- same "already handled, don't re-trigger"
     /// role as collectedCoords/deliveredCoords, except nothing ever
@@ -1384,6 +2308,114 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         photoBoothNodes[coord] = node
     }
 
+    /// Oct 1 (Decorator Games): a game placed live in Decorate joins the
+    /// SAME bookkeeping a build-time one gets from init (direction for the
+    /// face/lock-in checks, coord for the walk stop, node for the status
+    /// screen), so tapping it runs the existing game with no rebuild.
+    /// Oct 1 (game map markers): every cell holding a game fixture -- the
+    /// same coord sets the walk-stop uses, so live Decorate adds/deletes
+    /// (registerGame/unregisterGame) show on the map at once.
+    private var gameMapCells: Set<GridCoordinate> {
+        ticTacToeTerminalCoords.union(shellGameStationCoords).union(rockPaperScissorsTerminalCoords)
+            .union(higherLowerTerminalCoords).union(fiveCardDrawTerminalCoords).union(simonTerminalCoords)
+            .union(hangmanTerminalCoords).union(connectFourTerminalCoords).union(checkersTerminalCoords)
+            .union(woidleTerminalCoords)
+    }
+
+    func registerGame(_ kind: GameFixtureKind, direction: Direction, node: SCNNode, at coord: GridCoordinate) {
+        defer { refreshFloorMapTexture() }
+        switch kind {
+        case .ticTacToeTerminals:
+            ticTacToeDirections[coord] = direction
+            ticTacToeTerminalCoords.insert(coord)
+            ticTacToeTerminalNodes[coord] = node
+        case .shellGameStations:
+            shellGameDirections[coord] = direction
+            shellGameStationCoords.insert(coord)
+            shellGameStationNodes[coord] = node
+        case .rockPaperScissorsTerminals:
+            rockPaperScissorsDirections[coord] = direction
+            rockPaperScissorsTerminalCoords.insert(coord)
+            rockPaperScissorsTerminalNodes[coord] = node
+        case .higherLowerTerminals:
+            higherLowerDirections[coord] = direction
+            higherLowerTerminalCoords.insert(coord)
+            higherLowerTerminalNodes[coord] = node
+        case .fiveCardDrawTerminals:
+            fiveCardDrawDirections[coord] = direction
+            fiveCardDrawTerminalCoords.insert(coord)
+            fiveCardDrawTerminalNodes[coord] = node
+        case .hangmanTerminals:
+            hangmanDirections[coord] = direction
+            hangmanTerminalCoords.insert(coord)
+            hangmanTerminalNodes[coord] = node
+        case .simonTerminals:
+            simonDirections[coord] = direction
+            simonTerminalCoords.insert(coord)
+            simonTerminalNodes[coord] = node
+        case .connectFourTerminals:
+            connectFourDirections[coord] = direction
+            connectFourTerminalCoords.insert(coord)
+            connectFourTerminalNodes[coord] = node
+        case .checkersTerminals:
+            checkersDirections[coord] = direction
+            checkersTerminalCoords.insert(coord)
+            checkersTerminalNodes[coord] = node
+        case .woidleTerminals:
+            woidleDirections[coord] = direction
+            woidleTerminalCoords.insert(coord)
+            woidleTerminalNodes[coord] = node
+        }
+    }
+
+    /// Reverse of registerGame. Decorate can only select while no game
+    /// is active (canRotate), so there is never a live session to end.
+    func unregisterGame(_ kind: GameFixtureKind, at coord: GridCoordinate) {
+        defer { refreshFloorMapTexture() }
+        switch kind {
+        case .ticTacToeTerminals:
+            ticTacToeDirections.removeValue(forKey: coord)
+            ticTacToeTerminalCoords.remove(coord)
+            ticTacToeTerminalNodes.removeValue(forKey: coord)
+        case .shellGameStations:
+            shellGameDirections.removeValue(forKey: coord)
+            shellGameStationCoords.remove(coord)
+            shellGameStationNodes.removeValue(forKey: coord)
+        case .rockPaperScissorsTerminals:
+            rockPaperScissorsDirections.removeValue(forKey: coord)
+            rockPaperScissorsTerminalCoords.remove(coord)
+            rockPaperScissorsTerminalNodes.removeValue(forKey: coord)
+        case .higherLowerTerminals:
+            higherLowerDirections.removeValue(forKey: coord)
+            higherLowerTerminalCoords.remove(coord)
+            higherLowerTerminalNodes.removeValue(forKey: coord)
+        case .fiveCardDrawTerminals:
+            fiveCardDrawDirections.removeValue(forKey: coord)
+            fiveCardDrawTerminalCoords.remove(coord)
+            fiveCardDrawTerminalNodes.removeValue(forKey: coord)
+        case .hangmanTerminals:
+            hangmanDirections.removeValue(forKey: coord)
+            hangmanTerminalCoords.remove(coord)
+            hangmanTerminalNodes.removeValue(forKey: coord)
+        case .simonTerminals:
+            simonDirections.removeValue(forKey: coord)
+            simonTerminalCoords.remove(coord)
+            simonTerminalNodes.removeValue(forKey: coord)
+        case .connectFourTerminals:
+            connectFourDirections.removeValue(forKey: coord)
+            connectFourTerminalCoords.remove(coord)
+            connectFourTerminalNodes.removeValue(forKey: coord)
+        case .checkersTerminals:
+            checkersDirections.removeValue(forKey: coord)
+            checkersTerminalCoords.remove(coord)
+            checkersTerminalNodes.removeValue(forKey: coord)
+        case .woidleTerminals:
+            woidleDirections.removeValue(forKey: coord)
+            woidleTerminalCoords.remove(coord)
+            woidleTerminalNodes.removeValue(forKey: coord)
+        }
+    }
+
     /// Reverse of registerPhotoBooth above. If the booth was already
     /// completed it drops out of completedPhotoBooths to keep the mission
     /// equality (completedPhotoBooths == Set(photoBoothExpressions.keys))
@@ -1969,6 +3001,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         activeWoidleTerminal = nil
     }
 
+    /// Sept 28 (Your Height): moves the viewpoint to a new eye height
+    /// immediately, without a rebuild. Only Y changes -- the camera's X/Z,
+    /// grid cell, facing and pitch are untouched -- and every stored
+    /// position the controller later walks or snaps back to (drag origin,
+    /// in-progress segment endpoints, the elevator threshold's hallway
+    /// center) is lifted to the same Y so nothing drifts back to the old
+    /// height.
+    func setEyeHeight(_ height: Float) {
+        guard height.isFinite, height > 0, height != eyeHeight else { return }
+        eyeHeight = height
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        cameraNode.position.y = height
+        SCNTransaction.commit()
+        dragBasePosition.y = height
+        segmentStart.y = height
+        segmentTarget.y = height
+        elevatorEntryCellCenterPosition?.y = height
+    }
+
     private func worldPosition(for coord: GridCoordinate) -> SCNVector3 {
         SCNVector3(Float(coord.col) * Float(cellSize), eyeHeight, Float(coord.row) * Float(cellSize))
     }
@@ -2073,6 +3125,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             navLog("beginDragRotate() ignored -- canRotate=false")
             return
         }
+        cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
         dragBaseYaw = Double(cameraNode.eulerAngles.y)
         isDragRotating = true
         logNavSync("DRAG TURN BEGIN")
@@ -2086,7 +3139,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// turn no matter how far the finger drags.
     func updateDragRotate(fraction: Double) {
         guard isDragRotating else { return }
-        let clamped = max(-1, min(1, fraction))
+        // Free look: no one-gesture quarter-turn limit (same unclamped
+        // math the elevator ride's updateElevatorCameraDrag uses).
+        let clamped = freeLookEnabled ? fraction : max(-1, min(1, fraction))
         cameraNode.eulerAngles = SCNVector3(0, Float(dragBaseYaw + clamped * .pi / 2), 0)
     }
 
@@ -2130,6 +3185,54 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func endDragRotate(fraction: Double, velocityFraction: Double = 0) {
         guard isDragRotating else { return }
         isDragRotating = false
+        if freeLookEnabled {
+            // Free look: the camera stays exactly where the finger left it.
+            // Logical facing becomes the nearest cardinal to that yaw via
+            // the SAME standalone-pivot completion a snapped turn uses --
+            // just a zero-length pivot (start == target, already complete),
+            // so it finishes on the next frame without moving the camera,
+            // then runs the usual deferred facing update + booth/terminal
+            // activation.
+            // The release fraction is the finger's final position, which
+            // updateDragRotate has normally already applied -- set it again
+            // so the resting yaw always matches the release exactly. Flick
+            // velocity is deliberately ignored: no momentum, no commit.
+            let yaw = dragBaseYaw + fraction * .pi / 2
+            SCNTransaction.begin()
+            SCNTransaction.disableActions = true
+            cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+            SCNTransaction.commit()
+            let target = nearestCardinal(toYaw: yaw)
+            logNavSync("FREE LOOK RELEASE — yaw=\(yaw) facing=\(target)")
+            navLog("endDragRotate(free look) yaw=\(String(format: "%.3f", yaw)) -> facing=\(target)")
+            standaloneRotation = true
+            pendingRotationTarget = target
+            phase = .pivot
+            pivotStartYaw = yaw
+            pivotTargetYaw = yaw
+            segmentProgress = 1
+            // Magnetic cardinal snap: a committed turn away from the
+            // starting cardinal finishes at `target` exactly (animated by
+            // the ordinary pivot); a smaller look keeps the zero-length pivot.
+            if magneticSnapEnabled {
+                let startCardinal = nearestCardinal(toYaw: dragBaseYaw)
+                let signedTurn = shortestDelta(from: startCardinal.yaw, to: yaw)
+                let turnedDegrees = abs(signedTurn) * 180 / .pi
+                if turnedDegrees >= magneticSnapThresholdDegrees + magneticSnapDeadZoneDegrees {
+                    // Below 45 degrees the nearest cardinal is still the
+                    // starting one; the turn is toward the next one over
+                    // (positive yaw = turning left, as in updateDragRotate).
+                    let snapTarget = target != startCardinal ? target
+                        : (signedTurn > 0 ? startCardinal.left : startCardinal.right)
+                    pendingRotationTarget = snapTarget
+                    pivotTargetYaw = yaw + shortestDelta(from: yaw, to: snapTarget.yaw)
+                    segmentProgress = 0
+                    navLog("endDragRotate(free look) magnetic snap from \(startCardinal) turned=\(String(format: "%.1f", turnedDegrees))deg -> \(snapTarget)")
+                }
+            }
+            isAnimating = true
+            return
+        }
         let clamped = max(-1, min(1, fraction))
         let absFraction = abs(clamped)
         let projectedFraction = absFraction + abs(velocityFraction) * turnFlickProjectionSeconds
@@ -2176,6 +3279,84 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         navLog("cancelDragRotateForAxisHandoff() -- yaw snapped back to dragBaseYaw for vertical handoff")
     }
 
+    // MARK: - FREE-WALK one-finger 2-D pan (polish pass #3)
+    //
+    // In Free Walk an ordinary one-finger pan (the finger moved before the
+    // long press could recognize) has NO axis winner: for the whole life of
+    // the touch, X is Free Look yaw and Y is forward/back travel, both at
+    // once. X is absolute from touch-down with the existing Free Look math
+    // (updateDragRotate: pointsPerQuarterTurn pt = 90 degrees, unclamped).
+    // Y keeps the existing vertical-drag semantics -- positional, one cell
+    // of travel per pointsPerCell pt, finger down = forward -- but applied
+    // INCREMENTALLY along the camera's live yaw, so turning while moving
+    // curves the path. Release is the ordinary Free Look release: exact
+    // yaw, exact X/Z, logical facing = nearest cardinal. No align, no snap.
+
+    private(set) var isFreePanning = false
+    private var freePanLastDy: Double = 0
+    private var freePanForwardTravel: Double = 0
+
+    /// Starts a 2-D pan if Free Walk applies; false = use the legacy
+    /// axis-locked pan instead.
+    @discardableResult
+    func beginFreePan() -> Bool {
+        guard freeWalkApplies(held: false) else { return false }
+        beginDragRotate() // menus/terminals cancelled, canRotate check, base yaw
+        guard isDragRotating else { return false }
+        freeWalkGeometry = makeFreeWalkGeometry()
+        freeWalkCell = currentCell
+        freePanLastDy = 0
+        freePanForwardTravel = 0
+        isFreePanning = true
+        manualFootstepsFromAutoWalk = false // a pan from standing: silent
+        freePanLastDx = 0
+        resetPanFootstepWindow(at: ProcessInfo.processInfo.systemUptime)
+        logNavSync("FREE PAN BEGIN")
+        navLog("beginFreePan() at \(cameraNode.position) yaw=\(String(format: "%.3f", Double(cameraNode.eulerAngles.y)))")
+        return true
+    }
+
+    /// `dx`/`dy`: the finger's total displacement from touch-down (UIKit
+    /// points, dy positive = finger moved down = forward).
+    func updateFreePan(dx: Double, dy: Double, pointsPerQuarterTurn: Double, pointsPerCell: Double) {
+        guard isFreePanning, pointsPerQuarterTurn > 0, pointsPerCell > 0 else { return }
+        updateDragRotate(fraction: dx / pointsPerQuarterTurn)
+        let fingerDy = dy - freePanLastDy
+        let fingerDx = dx - freePanLastDx
+        freePanLastDx = dx
+        var step = (dy - freePanLastDy) / pointsPerCell * Double(cellSize)
+        freePanLastDy = dy
+        // DECORATE's one-cell forward cap, same as the drag-move scrub.
+        if decorateModeEnabled, step > 0 {
+            step = min(step, max(0, Double(cellSize) - freePanForwardTravel))
+        }
+        guard step != 0, let geometry = freeWalkGeometry else {
+            updateFreePanFootsteps(fingerDx: fingerDx, fingerDy: fingerDy, forwardTravel: 0) // pivot only
+            return
+        }
+        let forward = FreeWalkGeometry.forward(yaw: Double(cameraNode.eulerAngles.y))
+        let position = cameraNode.position
+        let next = geometry.slideEndpoint(from: position, dx: forward.x * step, dz: forward.z * step)
+        cameraNode.position = next
+        let moved = Double(hypotf(next.x - position.x, next.z - position.z))
+        freePanForwardTravel += step > 0 ? moved : -moved
+        freeWalkTrackCell(next)
+        // Oct 2: footsteps from the real forward-axis travel (see updateFreePanFootsteps).
+        let travel = Double(next.x - position.x) * forward.x + Double(next.z - position.z) * forward.z
+        updateFreePanFootsteps(fingerDx: fingerDx, fingerDy: fingerDy, forwardTravel: travel)
+    }
+
+    /// Finger lifted: keep the exact pose (the Free Look release).
+    func endFreePan(dx: Double, pointsPerQuarterTurn: Double) {
+        guard isFreePanning else { return }
+        isFreePanning = false
+        dragMoveFootstepToken &+= 1
+        manualFootstepsFromAutoWalk = false
+        setFreeWalkFootsteps(false)
+        endDragRotate(fraction: dx / max(pointsPerQuarterTurn, 0.001), velocityFraction: 0)
+        navLog("endFreePan() kept \(cameraNode.position) yaw=\(String(format: "%.3f", Double(cameraNode.eulerAngles.y)))")
+    }
+
     /// Positional counterpart of beginDragRotate() -- a vertical drag
     /// scrubs the player's POSITION along whatever direction they're
     /// currently facing, instead of scrubbing their orientation. Facing
@@ -2199,6 +3380,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// not a real grid cell, so dragging through it isn't meaningful --
     /// rotation is unaffected by it (canRotate alone), but a manual
     /// position drag is refused entirely until it clears.
+    /// PINCH TOWARD THE POINT YOU ARE PINCHING (pass #5): the horizontal
+    /// X/Z direction of the view ray through a screen point, from the two
+    /// ends of that ray (SceneKit unprojectPoint at z 0 and 1). Height is
+    /// dropped -- walking, not flying -- and for this yaw-only camera the
+    /// result depends only on the point's screen X (screen Y changes the
+    /// ray's pitch, not its heading). Screen center gives camera forward.
+    static func horizontalDirection(near: SCNVector3, far: SCNVector3) -> (x: Double, z: Double)? {
+        let dx = Double(far.x - near.x), dz = Double(far.z - near.z)
+        let length = (dx * dx + dz * dz).squareRoot()
+        guard length > 1e-6 else { return nil }
+        return (dx / length, dz / length)
+    }
+
+    /// Free Walk scrub along an explicit horizontal direction (pinch). Same
+    /// as beginDragMove() in every other respect; nil = camera forward.
+    func beginDragMove(travelDirection: (x: Double, z: Double)?) {
+        // Oct 2: a pinch during a tap-to-point walk takes ownership, exactly
+        // like a hold does -- the walk ends right here and this pinch then
+        // runs as if it began standing still.
+        if !takeOverFreeTapWalkForPinch() { manualFootstepsFromAutoWalk = false } // standing pinch: silent
+        pendingFreeDragDirection = travelDirection
+        beginDragMove()
+        pendingFreeDragDirection = nil
+    }
+    private var pendingFreeDragDirection: (x: Double, z: Double)?
+
     func beginDragMove() {
         if activePictureMenu != nil { cancelPictureMenu() }
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
@@ -2219,6 +3426,35 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         dragMoveFacing = facing
         dragBaseCell = currentCell
         dragBasePosition = cameraNode.position
+        // FREE-WALK: scrub along the camera's ACTUAL yaw from the exact
+        // current X/Z -- no align before, no settle-to-center after.
+        if freeWalkApplies(held: false) {
+            cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
+            freeDragMoveActive = true
+            freeDragBaseYaw = Double(cameraNode.eulerAngles.y)
+            freeDragDirection = pendingFreeDragDirection ?? FreeWalkGeometry.forward(yaw: freeDragBaseYaw)
+            freeWalkGeometry = makeFreeWalkGeometry()
+            freeWalkCell = currentCell
+            isDragMoving = true
+            dragMoveFootstepPosition = cameraNode.position
+            logNavSync("DRAG MOVE BEGIN (free)")
+            navLog("beginDragMove(free) at \(cameraNode.position) yaw=\(String(format: "%.3f", freeDragBaseYaw))")
+            return
+        }
+        freeDragMoveActive = false
+        // Free look: the scrub moves along `facing`, so turn the camera to
+        // face it. A short keyed rotate action, not the pivot phase: the
+        // drag-move scrub only ever writes position, so the two run side
+        // by side and the camera settles within ~0.18 s.
+        if freeLookEnabled {
+            let yaw = Double(cameraNode.eulerAngles.y)
+            let delta = shortestDelta(from: yaw, to: facing.yaw)
+            if abs(delta) > 0.001 {
+                let align = SCNAction.rotateTo(x: 0, y: CGFloat(yaw + delta), z: 0, duration: pivotDuration)
+                align.timingMode = .easeInEaseOut
+                cameraNode.runAction(align, forKey: Self.freeLookAlignActionKey)
+            }
+        }
         dragMoveMaxForwardCells = openRunLength(from: dragBaseCell, direction: dragMoveFacing)
         dragMoveMaxBackwardCells = openRunLength(from: dragBaseCell, direction: dragMoveFacing.opposite)
         isDragMoving = true
@@ -2260,6 +3496,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // spec are both about forward movement only.
     func updateDragMove(fraction: Double) {
         guard isDragMoving else { return }
+        if freeDragMoveActive, let geometry = freeWalkGeometry {
+            let f = decorateModeEnabled ? min(fraction, 1) : fraction
+            let forward = freeDragDirection
+            let d = f * Double(cellSize)
+            let next = geometry.slideEndpoint(from: dragBasePosition, dx: forward.x * d, dz: forward.z * d)
+            cameraNode.position = next
+            freeWalkTrackCell(next)
+            updateDragMoveFootsteps(at: next)
+            return
+        }
         let maxForward = decorateModeEnabled ? min(Double(dragMoveMaxForwardCells), 1) : Double(dragMoveMaxForwardCells)
         let maxBackward = Double(dragMoveMaxBackwardCells)
         let clamped = max(-maxBackward, min(maxForward, fraction))
@@ -2272,6 +3518,90 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             dragBasePosition.y,
             dragBasePosition.z + Float(clamped) * Float(delta.row) * Float(cellSize)
         )
+    }
+
+    // Oct 2 (directional footsteps for the Free Walk scrub -- pinch and the
+    // vertical drag-move; the one-finger free pan classifies its own, see
+    // updateFreePanFootsteps below): the loop follows the ACTUAL body movement. Each
+    // time the legal (post-collision) position has moved more than
+    // dragMoveFootstepMinStep from the last sample, the sign of that motion
+    // along the camera's facing picks forward/reverse (one swap per real
+    // direction change; finger noise below the step never flips it). No
+    // real movement for dragMoveFootstepIdle -- fingers still, or pressed
+    // against a wall -- and the loop stops; release stops it too.
+    private var dragMoveFootstepPosition = SCNVector3(0, 0, 0)
+    private var dragMoveFootstepToken = 0
+    static let dragMoveFootstepMinStep: Float = 0.004
+    static let dragMoveFootstepIdle: TimeInterval = 0.2
+
+    private func updateDragMoveFootsteps(at position: SCNVector3) {
+        guard manualFootstepsFromAutoWalk else { return } // Oct 2: standing pinch is silent
+        let dx = position.x - dragMoveFootstepPosition.x
+        let dz = position.z - dragMoveFootstepPosition.z
+        guard hypotf(dx, dz) > Self.dragMoveFootstepMinStep else { return }
+        dragMoveFootstepPosition = position
+        let forward = FreeWalkGeometry.forward(yaw: Double(cameraNode.eulerAngles.y))
+        let reverse = Double(dx) * forward.x + Double(dz) * forward.z < 0
+        setFreeWalkFootsteps(true, reverse: reverse)
+        scheduleDragMoveFootstepIdleStop()
+    }
+
+    /// No further qualifying movement for dragMoveFootstepIdle: silence.
+    private func scheduleDragMoveFootstepIdleStop() {
+        dragMoveFootstepToken &+= 1
+        let token = dragMoveFootstepToken
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.dragMoveFootstepIdle))
+            guard let self, self.dragMoveFootstepToken == token, self.freeDragMoveActive || self.isFreePanning else { return }
+            self.setFreeWalkFootsteps(false)
+        }
+    }
+
+    // Oct 2 (pan pivot != walking): the one-finger Free Walk pan turns with
+    // dx AND moves with dy at once, and a finger swiping sideways to pivot
+    // always drifts a little vertically -- each point of dy is ~2.5 cm of real
+    // translation. Footsteps mean TRANSLATIONAL walking, so the pan (only)
+    // classifies over a short window instead of per 4 mm:
+    //   - travel = the actual post-collision displacement projected on the
+    //     camera's forward axis (signed: + forward loop, - reverse loop);
+    //   - it must reach panFootstepMinTravel within panFootstepWindow
+    //     (slow incidental drift never accumulates into a "walk");
+    //   - and the finger's vertical motion in that window must be a real
+    //     share of its horizontal motion (panFootstepStartRatio to start,
+    //     the looser panFootstepKeepRatio to keep walking while steering).
+    // Pure pivot (dy == 0) moves nothing and is silent; wall-blocked travel
+    // projects to ~0 and goes silent after the usual idle delay.
+    private var panFootstepWindowStart: TimeInterval = 0
+    private var panFootstepTravel: Double = 0
+    private var panFootstepFingerDx: Double = 0
+    private var panFootstepFingerDy: Double = 0
+    private var freePanLastDx: Double = 0
+    static let panFootstepWindow: TimeInterval = 0.25
+    static let panFootstepMinTravel: Double = 0.06      // m, ~2.4 pt of finger dy
+    static let panFootstepStartRatio: Double = 0.35     // |dy| >= 0.35 |dx| (within ~70 deg of vertical)
+    static let panFootstepKeepRatio: Double = 0.15
+
+    private func resetPanFootstepWindow(at now: TimeInterval) {
+        panFootstepWindowStart = now
+        panFootstepTravel = 0
+        panFootstepFingerDx = 0
+        panFootstepFingerDy = 0
+    }
+
+    private func updateFreePanFootsteps(fingerDx: Double, fingerDy: Double, forwardTravel: Double) {
+        guard manualFootstepsFromAutoWalk else { return } // Oct 2: standing pan is silent
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - panFootstepWindowStart > Self.panFootstepWindow { resetPanFootstepWindow(at: now) }
+        panFootstepFingerDx += abs(fingerDx)
+        panFootstepFingerDy += abs(fingerDy)
+        panFootstepTravel += forwardTravel
+        let ratio = freeWalkFootstepsOn ? Self.panFootstepKeepRatio : Self.panFootstepStartRatio
+        guard abs(panFootstepTravel) >= Self.panFootstepMinTravel,
+              panFootstepFingerDy >= ratio * panFootstepFingerDx else { return }
+        let reverse = panFootstepTravel < 0
+        resetPanFootstepWindow(at: now)
+        setFreeWalkFootsteps(true, reverse: reverse)
+        scheduleDragMoveFootstepIdleStop()
     }
 
     // Named separately from turnCommitFraction/turnFlickProjectionSeconds/
@@ -2312,6 +3642,19 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func endDragMove(fraction: Double, velocityFraction: Double = 0) {
         guard isDragMoving else { return }
         isDragMoving = false
+        if freeDragMoveActive {
+            // FREE-WALK: the scrub already put the body where the finger
+            // left it. Stay exactly there: no flick projection, no glide to
+            // a cell center, no yaw change. Cell entry already ran through
+            // freeWalkTrackCell during the scrub.
+            freeDragMoveActive = false
+            dragMoveFootstepToken &+= 1
+            manualFootstepsFromAutoWalk = false
+            setFreeWalkFootsteps(false)
+            logNavSync("DRAG MOVE RELEASE (free) — stays at \(cameraNode.position)")
+            navLog("endDragMove(free) kept \(cameraNode.position) in \(currentCell) facing \(facing)")
+            return
+        }
         // Sept 22 (DECORATE one-cell drag/pinch fix): same cap as
         // updateDragMove's maxForward above, applied to the committed
         // distance too -- see that function's comment for why both
@@ -2413,11 +3756,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     func setWalkingHeld(_ held: Bool) {
         walkingHeld = held
+        heldSteeringActive = false
+        heldThrottle = 1
         if held {
             decorateHeldStepTaken = false
         } else {
             heldDistance = 0
             heldBlockedFireCoord = nil
+            manualFootstepsFromAutoWalk = false // the takeover hold (if any) is over
         }
         if !isAnimating {
             movementPace = 1
@@ -2452,20 +3798,39 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         navLog("[NAVDIAG] path=\(path) cell=\(currentCell) facing=\(facing) cameraYaw=\(String(format: "%.3f", Double(cameraNode.eulerAngles.y))) candidate=\(candidate) candidateOpen=\(cells.contains(candidate)) open=\(openDirections) canGoForward=\(canGoForward) canRotate=\(canRotate) isAnimating=\(isAnimating) isDragRotating=\(isDragRotating) elevatorInUse=\(elevatorInUse) chuteInUse=\(chuteInUse) extinguisherPickupInProgress=\(extinguisherPickupInProgress) extinguishingFires=\(extinguishingFireCoords) handheldMapVisible=\(handheldMapVisible) activePhotoBooth=\(String(describing: activePhotoBooth)) walkingHeld=\(walkingHeld) standaloneRotation=\(standaloneRotation) phase=\(phase)")
     }
 
-    func advanceWhileHeld() {
+    /// Returns true ONLY when this tick found the held walk at a genuine
+    /// endpoint: idle, no forward connection, and not exactly one side
+    /// exit to auto-turn into (i.e. a dead end, or two side exits that
+    /// still wait for the player). Every other outcome -- walking,
+    /// auto-turning an unambiguous L, busy animating, the DECORATE
+    /// one-step cap, standing in a just-arrived elevator -- returns
+    /// false, exactly as before this return value existed.
+    @discardableResult
+    func advanceWhileHeld() -> Bool {
         logNavAttempt(path: "HELD")
-        guard canRotate else { return }
+        // Oct 2 (auto-walk -> long-press handoff): a hold during a running
+        // tap-to-point walk takes manual control at once instead of being
+        // refused by canRotate below until the auto-walk ends.
+        if takeOverFreeTapWalkForHold() { return false }
+        guard canRotate else { return false }
+        // FREE-WALK EXPERIMENT: one continuous renderer-driven walk for the
+        // whole hold (never a chain of planned runs), so no stop cells, no
+        // intersection stops, no L-turns and no endpoint state.
+        if freeWalkApplies(held: true) {
+            beginFreeHeldWalk()
+            return false
+        }
         // Sept 22 (DECORATE one-cell hold fix): once this hold gesture
         // has already taken its one legal step, ignore further HELD
         // ticks from the timer entirely -- no forward advance, no
         // auto-turn-at-corner below -- until the finger lifts and a new
         // hold begins (setWalkingHeld(true) clears the flag). PLAY mode
         // (decorateModeEnabled == false) never hits this guard.
-        if decorateModeEnabled, decorateHeldStepTaken { return }
+        if decorateModeEnabled, decorateHeldStepTaken { return false }
         if canGoForward {
             advance(source: "HELD")
             if decorateModeEnabled { decorateHeldStepTaken = true }
-            return
+            return false
         }
         // Eddie, Sept 16 (remove automatic step-out): no auto-turn
         // fallback while still standing inside the just-arrived
@@ -2476,15 +3841,70 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // with the cab they're still standing in. Finding the doorway
         // is manual-only until performElevatorEntryWalkOut() clears
         // this.
-        guard elevatorAwaitingEntryDirection == nil else { return }
+        guard elevatorAwaitingEntryDirection == nil else { return false }
         let turns = [facing.left, facing.right].filter { openDirections.contains($0) }
         // Starting against a wall works just like arriving at one: exactly
         // one side exit is unambiguous, regardless of the passage behind us.
         // Two side exits wait for a swipe; never choose a U-turn automatically.
-        guard turns.count == 1 else { return }
+        guard turns.count == 1 else {
+            navLog("held walk reached its endpoint at \(currentCell) facing \(facing) (side exits: \(turns))")
+            return true
+        }
         logNavSync("HELD FORCED TURN — about to turn toward \(turns[0])")
         navLog("held walk turning at \(currentCell) from \(facing) toward \(turns[0])")
         rotate(toward: turns[0])
+        return false
+    }
+
+    // MARK: - Held-walk endpoint look (Sept 28)
+    //
+    // When a held walk reaches its endpoint (advanceWhileHeld() returns
+    // true) the SAME finger keeps working: horizontal movement drives the
+    // ordinary Free Look drag (beginDragRotate/updateDragRotate/
+    // endDragRotate -- no second rotation system). The finger's position
+    // at the stop becomes the new zero, so drift during the walk never
+    // turns the camera. The walk itself is over: nothing here ever walks,
+    // and a new walk needs a lift and a new gesture.
+
+    /// True from the endpoint until the finger lifts (or a reset).
+    private(set) var heldEndpointLookActive = false
+    private var heldEndpointOriginX: Double = 0
+    private var heldEndpointPointsPerQuarterTurn: Double = 140
+
+    /// Enters endpoint look with `fingerX` as the horizontal origin and
+    /// the camera's current yaw as the base. Ends the held walk (no more
+    /// walking this gesture). Returns false if a look drag can't start.
+    @discardableResult
+    func beginHeldEndpointLook(fingerX: Double, pointsPerQuarterTurn: Double) -> Bool {
+        guard !heldEndpointLookActive, pointsPerQuarterTurn > 0 else { return false }
+        beginDragRotate()
+        guard isDragRotating else { return false }
+        heldEndpointLookActive = true
+        heldEndpointOriginX = fingerX
+        heldEndpointPointsPerQuarterTurn = pointsPerQuarterTurn
+        setWalkingHeld(false)
+        navLog("held endpoint look began at x=\(String(format: "%.1f", fingerX)) yaw=\(String(format: "%.3f", Double(cameraNode.eulerAngles.y)))")
+        return true
+    }
+
+    /// Horizontal finger movement since the endpoint, as the same
+    /// quarter-turn fraction an ordinary horizontal drag uses.
+    private func heldEndpointFraction(_ fingerX: Double) -> Double {
+        (fingerX - heldEndpointOriginX) / heldEndpointPointsPerQuarterTurn
+    }
+
+    func updateHeldEndpointLook(fingerX: Double) {
+        guard heldEndpointLookActive else { return }
+        updateDragRotate(fraction: heldEndpointFraction(fingerX))
+    }
+
+    /// Finger lifted: the ordinary Free Look release (camera stays at the
+    /// final yaw, logical facing = nearest cardinal). No flick velocity.
+    func endHeldEndpointLook(fingerX: Double) {
+        guard heldEndpointLookActive else { return }
+        heldEndpointLookActive = false
+        endDragRotate(fraction: heldEndpointFraction(fingerX), velocityFraction: 0)
+        navLog("held endpoint look ended")
     }
 
     /// The forward D-pad button (and a bare tap): walks from currentCell
@@ -2494,8 +3914,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// so every existing call site (the tap gesture, the D-pad button)
     /// is unaffected; advanceWhileHeld() is the only caller that passes
     /// "HELD", when its own forward check already succeeded.
-    func advance(source: String = "TAP") {
+    /// `travelDirection` (TAP WHERE YOU WANT TO GO, Sept 30): the horizontal
+    /// bearing of the tapped screen point; nil = camera forward (as before).
+    /// `travelDistance` (TAP A PLACE -> GO THERE, Sept 30): horizontal metres
+    /// to the tapped world point; nil = the one-cell tap (fallback).
+    /// `finalYaw` (Oct 1, tap-to-approach): the exact yaw to finish facing,
+    /// turned to over the usual tap-turn time; nil = face the travel bearing.
+    func advance(source: String = "TAP", travelDirection: (x: Double, z: Double)? = nil, travelDistance: Double? = nil, finalYaw: Double? = nil) {
         logNavAttempt(path: source)
+        // FREE-WALK EXPERIMENT: an ordinary tap walks along the camera's
+        // actual yaw instead of the cardinal grid planner below.
+        if source == "TAP", freeWalkApplies(held: false) {
+            beginFreeWalkTap(travelDirection: travelDirection, travelDistance: travelDistance, finalYaw: finalYaw)
+            return
+        }
         guard canGoForward else {
             if forwardIsBlockedByWall { SoundEffects.playHitWall() }
             navLog("advance() ignored -- canGoForward=false (isAnimating=\(isAnimating), isDragRotating=\(isDragRotating), elevatorInUse=\(elevatorInUse), facing=\(facing), open=\(openDirections))")
@@ -2964,6 +4396,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             translateDurationScale = 1.7
         }
         phase = .translate
+        // Free look: straighten to `facing` first if looking elsewhere.
+        alignCameraToFacingBeforeTranslate()
         isAnimating = true
         // Eddie, Sept 9: "use 'walking.mp3' for normal walking down
         // hallway. so its only when there is forward movement."
@@ -2993,6 +4427,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         segmentTarget = worldPosition(for: target)
         segmentProgress = 0
         phase = .translate
+        // Free look: straighten to `facing` first (backing up keeps facing).
+        alignCameraToFacingBeforeTranslate()
         isAnimating = true
     }
 
@@ -3008,6 +4444,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func reset() {
         defer { refreshElevatorMissionSign() }
         setWalkingHeld(false)
+        heldEndpointLookActive = false
+        freeDragMoveActive = false
+        isFreePanning = false
         movementPace = 1
         SoundEffects.setWalkingPace(1)
         handheldMapVisible = false
@@ -3522,9 +4961,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         return currentCell
     }
 
+    /// Preserve legacy nearby taps, and also reach a fire from its freeform
+    /// stand-off pose. A small tolerance covers SceneKit float rounding.
+    func canReachFire(at coord: GridCoordinate) -> Bool {
+        if canReachFireFixture(at: coord) { return true }
+        guard let fire = fireNodes[coord], fire.parent != nil else { return false }
+        let player = cameraNode.worldPosition, target = fire.worldPosition
+        let dx = Double(target.x - player.x), dz = Double(target.z - player.z)
+        guard hypot(dx, dz) <= Double(cellSize) + 0.02 else { return false }
+        // Test the physical line without requiring the player's whole body
+        // to fit along the spray ray; closed walls/doors still block it.
+        var geometry = makeFreeWalkGeometry()
+        geometry.wallMargin = 0.05
+        guard geometry.isLegal(x: Double(player.x), z: Double(player.z)) else { return false }
+        let end = geometry.legalEndpoint(from: player, to: SCNVector3(target.x, player.y, target.z))
+        return hypot(Double(end.x - target.x), Double(end.z - target.z)) < 0.02
+    }
+
     @discardableResult
     func extinguishFire(at coord: GridCoordinate) -> Bool {
-        guard canRotate, canReachFireFixture(at: coord),
+        guard canRotate, canReachFire(at: coord),
               fireCoords.contains(coord), !extinguishedFireCoords.contains(coord),
               let fire = fireNodes[coord], fire.parent != nil else { return false }
         guard carryingExtinguisher else {
@@ -4285,7 +5741,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let exitSignFaces: Set<WallFace> = includeWallObjectIndicators
             ? Set(exitSignDirections.map { WallFace(coord: $0.key, direction: $0.value) })
             : []
-        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, fireCells: activeFireCells, extinguisherCells: Array(availableExtinguisherCells), photoBoothCells: Array(photoBoothCoords), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil, backgroundOpacity: backgroundOpacity, simplified: simplified, wallObjectFaces: wallObjectFaces, doorFaces: doorFaces, exitSignFaces: exitSignFaces)
+        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, headingYaw: Double(cameraNode.eulerAngles.y), missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, fireCells: activeFireCells, extinguisherCells: Array(availableExtinguisherCells), photoBoothCells: Array(photoBoothCoords), gameCells: Array(gameMapCells), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil, backgroundOpacity: backgroundOpacity, simplified: simplified, wallObjectFaces: wallObjectFaces, doorFaces: doorFaces, exitSignFaces: exitSignFaces)
     }
 
     private var applyingArrival = false
@@ -4489,6 +5945,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // completion firing at all -- see playElevatorRide's own
         // comment on the separate, decoupled wait that replaced it.
         cameraNode.removeAction(forKey: Self.elevatorAutoSpinActionKey)
+        cameraNode.removeAction(forKey: Self.elevatorEntryAlignActionKey)   // Oct 2: player beats the straighten-up turn too
+        if !playerHasTakenElevatorCameraControl { diag("elevator.manualCameraControlTaken") }
         playerHasTakenElevatorCameraControl = true
         elevatorCameraDragBaseYaw = Double(cameraNode.eulerAngles.y)
         isDraggingElevatorCamera = true
@@ -4594,6 +6052,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard let direction = elevatorMountDirection,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
               let leftClosed = elevatorLeftClosedPosition, let rightClosed = elevatorRightClosedPosition else {
+            diag("arrival.presentInsideElevator.guardFailed", ["hasDirection": elevatorMountDirection != nil,
+                  "hasDoors": elevatorLeftDoor != nil && elevatorRightDoor != nil,
+                  "hasClosedPositions": elevatorLeftClosedPosition != nil && elevatorRightClosedPosition != nil])
             return
         }
 
@@ -4727,7 +6188,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// they're looking the other way -- with no dependency on the
     /// camera being centered on them at all.
     func playControlledArrivalDoorOpen() {
-        guard arrivedElevatorDoorOpen, !controlledArrivalDoorsOpened else { return }
+        guard arrivedElevatorDoorOpen, !controlledArrivalDoorsOpened else {
+            elevatorLog("controlled arrival door-open skipped -- arrivedElevatorDoorOpen=\(arrivedElevatorDoorOpen) alreadyOpened=\(controlledArrivalDoorsOpened)")
+            return
+        }
+        elevatorLog("controlled arrival doors opening")
         guard let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
               let direction = elevatorMountDirection else {
             return
@@ -4854,12 +6319,31 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
 
     func openElevator() {
+        // Oct 2: flight recorder (logging only -- every guard unchanged).
+        diag("elevator.tapped", ["floor": floorNumber, "next": nextFloorNumber, "atEndCell": currentCell == endCell,
+                                 "elevatorInUse": elevatorInUse, "chuteInUse": chuteInUse,
+                                 "awaitingEntryDirection": elevatorAwaitingEntryDirection != nil,
+                                 "missionComplete": isMissionComplete])
         guard elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") == nil,
-              elevatorRightDoor?.action(forKey: "arrivalCloseBehind") == nil else { return }
+              elevatorRightDoor?.action(forKey: "arrivalCloseBehind") == nil else {
+            diag("elevator.refused", ["reason": "arrival doors still closing behind player"]); return
+        }
         guard currentCell == endCell, !elevatorInUse, !chuteInUse, elevatorAwaitingEntryDirection == nil,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
-              let direction = elevatorMountDirection else { return }
+              let direction = elevatorMountDirection else {
+            diag("elevator.refused", ["reason": "not at elevator / elevator or chute busy / awaiting entry / no doors"]); return
+        }
+        // Oct 2, Build 6 fail-safe (root cause fixed in MazeLibrary.
+        // repairProgression): never begin a ride whose destination is this
+        // same floor -- it can't arrive, and used to strand the player
+        // behind the curtain with elevatorInUse stuck true.
+        if let next = nextFloorNumber, next == floorNumber {
+            diag("elevator.refused", ["reason": "destination equals current floor", "floor": floorNumber, "next": next])
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return
+        }
         guard isMissionComplete else {
+            diag("elevator.refused", ["reason": "mission incomplete"])
             // Keep the existing rejection feedback. The persistent system
             // sign already explains the mission; no door-mounted notice.
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -4870,6 +6354,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
         refreshElevatorMissionSign()
         elevatorInUse = true
+        diag("elevator.accepted", ["floor": floorNumber, "next": nextFloorNumber])
         // Eddie, Sept 15 (elevator camera control): a fresh ride
         // starts with auto-spin back in play by default -- only a
         // beginElevatorCameraDrag() call during THIS ride flips it
@@ -4912,7 +6397,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         SoundEffects.playElevatorArrival()
         let arrivalDelay = SoundEffects.elevatorDoorOpeningDelay
         leftDoor.runAction(.sequence([.wait(duration: arrivalDelay), openLeft]))
+        diag("elevator.departureDoors.opening")
         rightDoor.runAction(.sequence([.wait(duration: arrivalDelay), openRight])) { [weak self] in
+            diag("elevator.departureDoors.open")
             // Eddie, Sept 7: "you step into the elevator, then the box
             // youre in automatically spins 180 degrees in your view...
             // then the animation showing the floor change, then the
@@ -4926,6 +6413,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if let next = self.nextFloorNumber,
                let targetButton = self.elevatorButtonNodes[next] {
                 DispatchQueue.main.async {
+                    diag("elevator.rideStart", ["from": self.floorNumber, "to": next])
                     self.playElevatorRide(leftDoor: leftDoor, rightDoor: rightDoor, alongWallX: alongWallX, alongWallZ: alongWallZ, forwardX: forwardX, forwardZ: forwardZ, slide: slide, elevatorSlideDuration: elevatorSlideDuration, targetButton: targetButton, next: next)
                 }
             } else {
@@ -4944,6 +6432,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     rightDoor.runAction(closeRight) { [weak self] in
                         DispatchQueue.main.async {
                             navLog("elevator: closed -- advancing floor")
+                            diag("elevator.handoff.fired", ["mode": "passive-noNextButton"])
                             self?.onReachedEnd?()
                         }
                     }
@@ -5017,8 +6506,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // Scale duration with distance to preserve the existing entry speed/easing.
         let elevatorGeometry = HallwayScene.ElevatorGeometry(cellSize: cellSize)
         let dollyDistance = elevatorGeometry.entryDistance
-        let dolly = SCNAction.move(by: SCNVector3(Float(forwardX * dollyDistance), 0, Float(forwardZ * dollyDistance)), duration: elevatorGeometry.entryDuration)
-        dolly.timingMode = .easeInEaseOut
+        // Oct 2 (centering experiment): the carry-in used to be a RELATIVE
+        // move(by:) of entryDistance along the mount direction -- correct
+        // only when the ride began at the elevator cell's center (always
+        // true under grid navigation). Free Walk can commit from anywhere
+        // in that cell (hugging a side wall, part-way forward), and the
+        // relative move carried that offset straight into the cab. Now an
+        // ABSOLUTE move(to:) to the canonical cab center -- the same point
+        // presentArrivalInsideElevator places an arriving player at (cell
+        // center + mount direction * entryDistance) -- with the same
+        // duration and easing, so the correction rides inside the existing
+        // motion. Height is the camera's own; yaw is not touched.
+        let cellCenter = worldPosition(for: endCell)
+        let cabCenterX = cellCenter.x + Float(forwardX * dollyDistance)
+        let cabCenterZ = cellCenter.z + Float(forwardZ * dollyDistance)
+        func makeCarryIn() -> SCNAction {
+            let action = SCNAction.move(to: SCNVector3(cabCenterX, cameraNode.position.y, cabCenterZ),
+                                        duration: elevatorGeometry.entryDuration)
+            action.timingMode = .easeInEaseOut
+            return action
+        }
         // Eddie, Sept 12: "Slow ONLY that turnaround animation by
         // approximately 25%... determine the current duration and
         // increase it by approximately 25%, rather than replacing the
@@ -5048,6 +6555,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
         func closeDoorsNow() {
             navLog("elevator: closing (ride)")
+            diag("elevator.departureDoors.closing")
             // Eddie, Sept 8, looking at the doors-closed frame:
             // "you can totally get rid of the 2 1 (floor numbers)
             // at the top of the elevator... its perfect just with
@@ -5061,7 +6569,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             closeLeft.timingMode = .easeInEaseOut
             closeRight.timingMode = .easeInEaseOut
             leftDoor.runAction(closeLeft)
-            rightDoor.runAction(closeRight)
+            // Completion is logging-only (Oct 2 flight recorder).
+            rightDoor.runAction(closeRight) { diag("elevator.departureDoors.closed") }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -5105,8 +6614,41 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             self.headlampLight?.intensity = 10
             self.ambientLight?.intensity = 130
             SCNTransaction.commit()
-            self.cameraNode.runAction(dolly) { [weak self] in
-                guard let self else { return }
+            let carryStart = self.cameraNode.position
+            // Oct 2 (yaw-normalization experiment): Free Walk can commit a
+            // ride while looking well off the doors, and nothing before
+            // this point straightens the view -- the later auto-turn is a
+            // RELATIVE rotateBy(.pi), so an off-angle entry became an
+            // equally off-angle door view on arrival. Alongside the
+            // position carry-in (same start, duration and easing), turn the
+            // short way to the canonical heading straight at the cab's back
+            // wall: the mount direction's own yaw (the doors are on that
+            // side of the elevator cell, the back wall beyond them). Keyed,
+            // so a manual camera grab cancels it (beginElevatorCameraDrag)
+            // and the player wins; skipped if they already took control.
+            let startYaw = Double(self.cameraNode.eulerAngles.y)
+            let backWallYaw = self.elevatorMountDirection?.yaw ?? startYaw
+            let yawCorrection = self.shortestDelta(from: startYaw, to: backWallYaw)
+            let manualBeforeCarryIn = self.playerHasTakenElevatorCameraControl
+            diag("elevator.carryIn.start", ["from": String(format: "(%.3f, %.3f)", carryStart.x, carryStart.z),
+                                            "cabCenter": String(format: "(%.3f, %.3f)", cabCenterX, cabCenterZ),
+                                            "startYaw": startYaw, "backWallYaw": backWallYaw,
+                                            "yawCorrection": yawCorrection, "manualAlready": manualBeforeCarryIn])
+            if !manualBeforeCarryIn, abs(yawCorrection) > 0.0001 {
+                let align = SCNAction.rotateBy(x: 0, y: CGFloat(yawCorrection), z: 0, duration: elevatorGeometry.entryDuration)
+                align.timingMode = .easeInEaseOut
+                self.cameraNode.runAction(align, forKey: Self.elevatorEntryAlignActionKey)
+            }
+            self.cameraNode.runAction(makeCarryIn()) { [weak self] in
+                guard let self else { diag("elevator.carryIn.done"); return }
+                let end = self.cameraNode.presentation.position
+                let endYaw = Double(self.cameraNode.presentation.eulerAngles.y)
+                let manual = self.playerHasTakenElevatorCameraControl
+                diag("elevator.carryIn.done", ["at": String(format: "(%.3f, %.3f)", end.x, end.z),
+                                               "offCenter": Double(hypotf(end.x - cabCenterX, end.z - cabCenterZ)),
+                                               "yaw": endYaw,
+                                               "yawError": (manual ? nil : Optional(self.shortestDelta(from: endYaw, to: backWallYaw))) as Double?,
+                                               "manualControlTaken": manual])
                 // Doors start closing here, the instant you're facing
                 // the back wall -- elevatorSlideDuration (1.6s) fits
                 // comfortably inside the 2-second dwell below, so
@@ -5126,8 +6668,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     // above (long since finished; dolly and rotate
                     // are strictly sequential, never concurrent).
                     if !self.playerHasTakenElevatorCameraControl {
+                        diag("elevator.autoTurn.started")
                         self.cameraNode.runAction(rotate, forKey: Self.elevatorAutoSpinActionKey)
+                    } else {
+                        diag("elevator.autoTurn.skipped", ["reason": "player took camera control"])
                     }
+                    diag("elevator.handoff.scheduled", ["inSeconds": rotate.duration + 0.3])
                     // Eddie, Sept 12, 2nd follow-up: "after the 180-
                     // degree turn completes, I now sit looking at the
                     // closed elevator doors for noticeably too long
@@ -5167,6 +6713,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     DispatchQueue.main.asyncAfter(deadline: .now() + rotate.duration + 0.3) { [weak self] in
                         guard let self else { return }
                         navLog("elevator: ride done -- requesting floor transition")
+                        diag("elevator.handoff.fired", ["mode": self.playerHasTakenElevatorCameraControl ? "controlled" : "passive",
+                                                        "from": self.floorNumber, "to": self.nextFloorNumber])
                         // Eddie, Sept 8: "i guess you need to
                         // keep tweaking until you nail the same
                         // exact lighting conditions?" Not
@@ -5424,7 +6972,15 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         return .init(headline: "MISSION IN PROGRESS", instruction: instruction, status: status)
     }
 
+    /// Oct 2 flight recorder: last mission-complete value logged (logging only).
+    private var diagLastMissionComplete: Bool?
+
     private func refreshElevatorMissionSign() {
+        let missionDone = isMissionComplete
+        if diagLastMissionComplete != missionDone {
+            diag(missionDone ? "mission.completed" : "mission.notComplete", ["floor": floorNumber])
+            diagLastMissionComplete = missionDone
+        }
         guard !arrivedElevatorDoorOpen, !isMissionComplete, let content = elevatorMissionWarningContent,
               let scene, let left = elevatorLeftDoor, let right = elevatorRightDoor,
               let leftClosed = elevatorLeftClosedPosition, let rightClosed = elevatorRightClosedPosition,
@@ -5546,6 +7102,63 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         switch phase {
         case .awaitingTurnCommit, .scriptedWalkOut:
             return
+
+        case .freeMove:
+            guard let geometry = freeWalkGeometry else { finishFreeMove(); return }
+            if freeMoveHeld {
+                // Released: stop right here. No completion, no snap.
+                guard walkingHeld else { finishFreeMove(); return }
+                // Signed Y throttle (see updateHeldNavigation): stopping or
+                // backing up ends a "sustained forward" run, so the
+                // 3-cell -> 1.5x acceleration starts over.
+                let throttle = heldThrottle
+                if throttle <= 0 { heldDistance = 0 }
+                let targetPace = throttle > 0 && heldDistance >= 3 * Double(cellSize) ? 1.5 : 1.0
+                movementPace += (targetPace - movementPace) * (1 - exp(-dt / 0.3))
+                SoundEffects.setWalkingPace(Float(movementPace))
+                // Turn toward the finger's target yaw, rate-limited while moving.
+                stepHeldSteering(dt: dt, translating: throttle != 0)
+                // Heading sampled every frame from the camera itself.
+                let forward = FreeWalkGeometry.forward(yaw: Double(cameraNode.eulerAngles.y))
+                let step = travelSpeed * movementPace * throttle * dt
+                let position = cameraNode.position
+                let next = geometry.slideEndpoint(from: SCNVector3(position.x, eyeHeight, position.z),
+                                                  dx: forward.x * step, dz: forward.z * step)
+                let moved = Double(hypotf(next.x - position.x, next.z - position.z))
+                cameraNode.position = next
+                if throttle > 0 { heldDistance += moved }
+                // Silent while pressed against a wall; silent altogether unless
+                // this hold took over an auto-walk (manualFootstepsFromAutoWalk).
+                setFreeWalkFootsteps(manualFootstepsFromAutoWalk && moved > 0.0005, reverse: throttle < 0)
+                freeWalkTrackCell(next)
+            } else {
+                // Tap-to-stop: end right here -- this position, this yaw.
+                if freeTapStopRequested {
+                    freeTapStopRequested = false
+                    finishFreeMove()
+                    break
+                }
+                segmentProgress += dt / max(freeTapDuration, 0.001)
+                let t = min(1.0, segmentProgress)
+                let length = freeTapArc.last ?? 0
+                let travelled: Double
+                if freeTapRampTime > 0 {
+                    travelled = Self.tapWalkDistance(elapsed: t * freeTapDuration, length: length,
+                                                     speed: travelSpeed, ramp: freeTapRampTime)
+                } else {
+                    travelled = t * t * (3 - 2 * t) * length
+                }
+                let position = t >= 1.0 ? segmentTarget : freeTapPosition(atDistance: travelled)
+                cameraNode.position = position
+                if freeTapEndYaw != freeTapStartYaw { // tapped off-centre: turn toward it
+                    let u = min(1.0, t * freeTapDuration / max(freeTapTurnDuration, 0.001))
+                    let turn = u * u * (3 - 2 * u)
+                    let yaw = u >= 1.0 ? freeTapEndYaw : freeTapStartYaw + (freeTapEndYaw - freeTapStartYaw) * turn
+                    cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+                }
+                freeWalkTrackCell(position)
+                if t >= 1.0 { finishFreeMove() }
+            }
 
         case .pivot:
             segmentProgress += dt / pivotDuration
@@ -5707,5 +7320,190 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             guard t >= 1.0 else { return }
             cameraNode.position = segmentTarget
         }
+    }
+}
+
+// MARK: - FREE-WALK EXPERIMENT geometry (Sept 29)
+
+/// The building's walkable floor for free (non-centered) walking, derived
+/// from the authored grid: a point is legal when its containing cell is an
+/// open cell and it keeps `wallMargin` clear of every CLOSED side of that
+/// cell (a wall, a missing neighbour, or a closed door -- `openEdges`) and
+/// of the wall corner where two open sides meet a missing diagonal cell.
+/// Same idea as HallwayScene's walkableRects (which keep their own 0.4 m inset
+/// for the legacy free-roam path), but door-aware, with its own body clearance
+/// (playerClearance). No furniture, no props, no physics.
+struct FreeWalkGeometry {
+    struct Edge: Hashable {
+        let cell: GridCoordinate
+        let direction: Direction
+    }
+
+    let cells: Set<GridCoordinate>
+    let openEdges: Set<Edge>
+    let cellSize: Double
+    /// EDDIE HAS A BODY (polish pass #6): minimum distance from the player's
+    /// X/Z (= the camera, the eyes) to the logical cell boundary of any
+    /// closed side. Wall panels are 0.1 m boxes CENTRED on that boundary,
+    /// so the visible wallpaper is 0.05 m nearer: eye-to-wallpaper
+    /// clearance = playerClearance - 0.05 (was 0.4 -> 0.35 m, now 0.45 m).
+    static let playerClearance: Double = 1.4
+    var wallMargin: Double = FreeWalkGeometry.playerClearance
+    /// A position must be this far into a neighbouring cell before the
+    /// containing cell changes (kills flip-flopping on a boundary line).
+    var hysteresis: Double = 0.05
+    /// Collision sampling step along a movement segment.
+    var sampleStep: Double = 0.02
+
+    /// Camera forward on the floor plane for a SceneKit yaw (0 = north = -z,
+    /// +pi/2 = west), matching Direction.yaw.
+    static func forward(yaw: Double) -> (x: Double, z: Double) {
+        (-sin(yaw), -cos(yaw))
+    }
+
+    /// The grid cell whose square contains (x, z). The ONE implementation.
+    static func containingCell(x: Double, z: Double, cellSize: Double) -> GridCoordinate {
+        GridCoordinate(row: Int((z / cellSize).rounded()), col: Int((x / cellSize).rounded()))
+    }
+
+    /// Containing cell, but staying in `previous` until the point is
+    /// `hysteresis` beyond its edge.
+    func containingCell(x: Double, z: Double, previous: GridCoordinate?) -> GridCoordinate {
+        if let previous {
+            let half = cellSize / 2 + hysteresis
+            if abs(x - Double(previous.col) * cellSize) <= half, abs(z - Double(previous.row) * cellSize) <= half {
+                return previous
+            }
+        }
+        return Self.containingCell(x: x, z: z, cellSize: cellSize)
+    }
+
+    func isLegal(x: Double, z: Double) -> Bool {
+        let cell = Self.containingCell(x: x, z: z, cellSize: cellSize)
+        guard cells.contains(cell) else { return false }
+        let dx = x - Double(cell.col) * cellSize
+        let dz = z - Double(cell.row) * cellSize
+        let limit = cellSize / 2 - wallMargin
+        func isOpen(_ d: Direction) -> Bool { openEdges.contains(Edge(cell: cell, direction: d)) }
+        if dx > limit, !isOpen(.east) { return false }
+        if dx < -limit, !isOpen(.west) { return false }
+        if dz > limit, !isOpen(.south) { return false }
+        if dz < -limit, !isOpen(.north) { return false }
+        // Inner wall corner: both sides open but the diagonal cell isn't.
+        // ROUNDED CORNER (Sept 30): the body keeps wallMargin from the corner
+        // POINT itself (a round body's clearance), instead of from a square
+        // that stuck out ~0.21 m further on the diagonal. Wall faces and
+        // every other clearance are unchanged; only that square tip is legal.
+        if abs(dx) > limit, abs(dz) > limit {
+            let diagonal = GridCoordinate(row: cell.row + (dz > 0 ? 1 : -1), col: cell.col + (dx > 0 ? 1 : -1))
+            if !cells.contains(diagonal) {
+                let px = cellSize / 2 - abs(dx), pz = cellSize / 2 - abs(dz)
+                if px * px + pz * pz < wallMargin * wallMargin { return false }
+            }
+        }
+        return true
+    }
+
+    /// The wall corner point (x, z) whose rounded clearance covers (x, z):
+    /// the point is in the corner zone of its cell, both of those sides are
+    /// open and the diagonal cell is missing. nil everywhere else.
+    func innerCornerPost(x: Double, z: Double) -> (x: Double, z: Double)? {
+        let cell = Self.containingCell(x: x, z: z, cellSize: cellSize)
+        guard cells.contains(cell) else { return nil }
+        let dx = x - Double(cell.col) * cellSize
+        let dz = z - Double(cell.row) * cellSize
+        let limit = cellSize / 2 - wallMargin
+        guard abs(dx) > limit, abs(dz) > limit else { return nil }
+        let sx = dx > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1
+        guard openEdges.contains(Edge(cell: cell, direction: sx > 0 ? .east : .west)),
+              openEdges.contains(Edge(cell: cell, direction: sz > 0 ? .south : .north)),
+              !cells.contains(GridCoordinate(row: cell.row + sz, col: cell.col + sx)) else { return nil }
+        return (Double(cell.col) * cellSize + Double(sx) * cellSize / 2,
+                Double(cell.row) * cellSize + Double(sz) * cellSize / 2)
+    }
+
+    /// CORNER SLIDE (Sept 30): a sub-step blocked by a rounded wall corner
+    /// keeps its component along the corner's tangent (the same "drop only
+    /// the into-wall part" rule as a straight wall, where the tangent simply
+    /// is the X or Z axis). Never longer than the request, never changes
+    /// yaw, never chooses a hallway; nil (-> the old X/Z rule) when there is
+    /// no corner, no tangential part (dead-on) or the result isn't legal.
+    func cornerSlideStep(x: Double, z: Double, sx: Double, sz: Double) -> (dx: Double, dz: Double)? {
+        guard let post = innerCornerPost(x: x + sx, z: z + sz) else { return nil }
+        let nx = x - post.x, nz = z - post.z
+        let d = (nx * nx + nz * nz).squareRoot()
+        guard d > 1e-9 else { return nil }
+        let tx = -nz / d, tz = nx / d
+        let along = sx * tx + sz * tz
+        guard abs(along) > 1e-9 else { return nil }
+        let step = (dx: tx * along, dz: tz * along)
+        return isLegal(x: x + step.dx, z: z + step.dz) ? step : nil
+    }
+
+    /// Walks the straight segment from `start` toward `end` and returns the
+    /// last legal point before the building blocks it (or `end`). Never
+    /// redirects, never slides. A start that is already outside the legal
+    /// floor (e.g. left there by a scripted move) only has to stay inside
+    /// open cells, so the player can never be trapped.
+    /// WALL SLIDING (polish pass #4). Walks the requested displacement in
+    /// sampleStep sub-steps. A sub-step the building allows is taken as is.
+    /// A blocked one keeps only its X or its Z component -- whichever is
+    /// still legal (the larger one if both are, e.g. rubbing a corner post)
+    /// -- and drops the component that would enter the building. Neither
+    /// legal: stop there (dead-on wall, corner). Uses isLegal, so walls,
+    /// missing cells, closed doors and the 0.4 m margin stay exactly as
+    /// solid as before; it only ever DROPS part of the request, never
+    /// redirects, turns, or looks ahead. A start already off the legal
+    /// floor (left by a scripted move) keeps the old straight-line rule.
+    /// Returns every position visited, start first.
+    func slidePath(from start: SCNVector3, dx: Double, dz: Double) -> [SCNVector3] {
+        let length = (dx * dx + dz * dz).squareRoot()
+        guard length > 0 else { return [start] }
+        guard isLegal(x: Double(start.x), z: Double(start.z)) else {
+            let end = SCNVector3(start.x + Float(dx), start.y, start.z + Float(dz))
+            return [start, legalEndpoint(from: start, to: end)]
+        }
+        let count = max(1, Int((length / sampleStep).rounded(.up)))
+        let sx = dx / Double(count), sz = dz / Double(count)
+        var x = Double(start.x), z = Double(start.z)
+        var path = [start]
+        for _ in 0..<count {
+            if isLegal(x: x + sx, z: z + sz) {
+                x += sx; z += sz
+            } else if let corner = cornerSlideStep(x: x, z: z, sx: sx, sz: sz) {
+                x += corner.dx; z += corner.dz
+            } else {
+                let xOK = abs(sx) > 1e-9 && isLegal(x: x + sx, z: z)
+                let zOK = abs(sz) > 1e-9 && isLegal(x: x, z: z + sz)
+                if xOK, !zOK || abs(sx) >= abs(sz) { x += sx }
+                else if zOK { z += sz }
+                else { break }
+            }
+            path.append(SCNVector3(Float(x), start.y, Float(z)))
+        }
+        return path
+    }
+
+    /// Where a requested displacement ends after wall sliding.
+    func slideEndpoint(from start: SCNVector3, dx: Double, dz: Double) -> SCNVector3 {
+        slidePath(from: start, dx: dx, dz: dz).last ?? start
+    }
+
+    func legalEndpoint(from start: SCNVector3, to end: SCNVector3) -> SCNVector3 {
+        let dx = Double(end.x - start.x), dz = Double(end.z - start.z)
+        let length = (dx * dx + dz * dz).squareRoot()
+        guard length > 0 else { return start }
+        let strict = isLegal(x: Double(start.x), z: Double(start.z))
+        let count = max(1, Int((length / sampleStep).rounded(.up)))
+        var last = start
+        for i in 1...count {
+            let f = Double(i) / Double(count)
+            let x = Double(start.x) + dx * f, z = Double(start.z) + dz * f
+            let ok = strict ? isLegal(x: x, z: z)
+                            : cells.contains(Self.containingCell(x: x, z: z, cellSize: cellSize))
+            guard ok else { return last }
+            last = SCNVector3(Float(x), end.y, Float(z))
+        }
+        return end
     }
 }

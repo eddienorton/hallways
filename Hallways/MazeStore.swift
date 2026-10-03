@@ -65,6 +65,272 @@ struct FirePlacement: Codable, Hashable {
     var coord: GridCoordinate
 }
 
+/// Sept 28 (first furniture proof of concept): a Table standing in one
+/// cell, pushed against the LEFT or RIGHT side of that cell's own
+/// authored hallway axis (the same FloorPosition/FluorescentOrientation
+/// vocabulary trash cans use -- but never CENTER, which is the player's
+/// walking line). Deliberately NOT an ObjectKind and never in
+/// MazeStore.objects: every ObjectKind is a pickup that stops walks,
+/// collects, and can count toward missions, and a table is none of
+/// those. Pure scenery today, kept in its own `tables` collection so
+/// future behavior (e.g. a plant-watering mission) can attach to these
+/// same persisted objects without migrating them out of the pickup
+/// system.
+///
+/// The Potted Plant belongs to its table for this first pass (hasPlant)
+/// -- rendered as a child of the table node, so it follows the table
+/// and disappears with it, and no orphan plant state can exist.
+struct FurnitureTable: Codable, Equatable {
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+    var hasPlant: Bool = false
+
+    /// CENTER is never a valid table position -- anything that isn't
+    /// .right resolves to .left.
+    var sanitized: FurnitureTable {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        return copy
+    }
+}
+
+/// One Table as persisted: its cell plus its FurnitureTable state.
+struct TablePlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+    var hasPlant: Bool
+}
+
+/// Sept 28 (second furniture object): an office Desk standing in one
+/// cell, LEFT or RIGHT along its authored hallway axis -- same placement
+/// vocabulary and same "never an ObjectKind, never in MazeStore.objects"
+/// reasoning as FurnitureTable, in its own `desks` collection. Scenery
+/// today; kept as a real persisted object so behavior can attach later.
+struct FurnitureDesk: Codable, Equatable {
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+
+    /// CENTER is never a valid desk position -- anything that isn't
+    /// .right resolves to .left.
+    var sanitized: FurnitureDesk {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        return copy
+    }
+}
+
+/// One Desk as persisted: its cell plus its FurnitureDesk state.
+struct DeskPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+}
+
+/// Sept 28 (third furniture object): an office Water Cooler parked
+/// against the LEFT or RIGHT side of one cell along its authored hallway
+/// axis -- same placement vocabulary and same "never an ObjectKind,
+/// never in MazeStore.objects" reasoning as FurnitureTable/FurnitureDesk,
+/// in its own `waterCoolers` collection. Scenery today; a real persisted
+/// object so behavior can attach later.
+struct FurnitureWaterCooler: Codable, Equatable {
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+
+    /// CENTER is never a valid position -- anything that isn't .right
+    /// resolves to .left.
+    var sanitized: FurnitureWaterCooler {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        return copy
+    }
+}
+
+/// One Water Cooler as persisted: its cell plus its state.
+struct WaterCoolerPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+}
+
+/// Sept 28 (fourth furniture object): an Office Chair on the LEFT or
+/// RIGHT side of one cell along its authored hallway axis -- NOT against
+/// the wall like Table/Desk/Water Cooler, but pulled up to that side's
+/// wall-side work area, facing it. Same "never an ObjectKind, never in
+/// MazeStore.objects" reasoning as the other furniture, in its own
+/// `officeChairs` collection. The first furniture allowed to share a cell
+/// with another piece (one Desk) -- as two fully independent records,
+/// with no attachment between them.
+struct FurnitureOfficeChair: Codable, Equatable {
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+
+    /// CENTER is never a valid position -- anything that isn't .right
+    /// resolves to .left.
+    var sanitized: FurnitureOfficeChair {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        return copy
+    }
+}
+
+/// One Office Chair as persisted: its cell plus its state.
+struct OfficeChairPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+}
+
+/// Sept 28 (fifth furniture object): a Floor Lamp standing near the LEFT
+/// or RIGHT wall of one cell -- the first furniture whose job is to light
+/// the space around it. It carries its own local SCNLight, switched by
+/// `isOn` (Play-mode tap or the Decorator panel). Same "never an
+/// ObjectKind, never in MazeStore.objects" reasoning as the other
+/// furniture, in its own `floorLamps` collection; not part of the
+/// authored ceiling/wall light systems (lightBrightness etc.).
+struct FurnitureFloorLamp: Codable, Equatable {
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+    var isOn: Bool = true
+    /// Brightness when ON, in the same 1...5 authored-level vocabulary
+    /// (and default 3) Hallways' wall lights, fire and picture lights use
+    /// (AuthoredLightKind.levelRange). Independent of isOn: OFF is always
+    /// dark, and switching back ON restores this level.
+    var brightness: Int = FurnitureFloorLamp.defaultBrightness
+
+    static let brightnessRange = 1...5
+    static let defaultBrightness = 3
+
+    /// CENTER is never a valid position -- anything that isn't .right
+    /// resolves to .left. Brightness is clamped to its range.
+    var sanitized: FurnitureFloorLamp {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        copy.brightness = min(Self.brightnessRange.upperBound, max(Self.brightnessRange.lowerBound, copy.brightness))
+        return copy
+    }
+}
+
+/// Sept 28 (sixth furniture object): a freestanding Aquarium on its
+/// stand, against the LEFT or RIGHT wall of one cell, display side facing
+/// the cell center. Same "never an ObjectKind, never in MazeStore.objects"
+/// reasoning as the other furniture, in its own `aquariums` collection.
+/// Its fish animation and tank light are built with the node, never
+/// stored.
+struct FurnitureAquarium: Codable, Equatable {
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+
+    /// CENTER is never a valid position -- anything that isn't .right
+    /// resolves to .left.
+    var sanitized: FurnitureAquarium {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        return copy
+    }
+}
+
+/// Sept 28 (seventh furniture object): a three-drawer office Filing
+/// Cabinet against the LEFT or RIGHT wall of one cell, drawer fronts
+/// facing the cell center. Same "never an ObjectKind, never in
+/// MazeStore.objects" reasoning as the other furniture, in its own
+/// `filingCabinets` collection. The drawers really open (Play-mode tap),
+/// one at a time; which one is open is the only drawer state kept.
+/// The drawers are empty -- there are no contents to store.
+struct FurnitureFilingCabinet: Codable, Equatable {
+    static let drawerCount = 3
+
+    var position: FloorPosition = .left
+    var orientation: FluorescentOrientation = .northSouth
+    /// The one open drawer (0 = top ... 2 = bottom), or nil = all closed.
+    var openDrawerIndex: Int? = nil
+
+    /// CENTER is never a valid position -- anything that isn't .right
+    /// resolves to .left. An out-of-range drawer index means all closed.
+    var sanitized: FurnitureFilingCabinet {
+        var copy = self
+        if copy.position == .center { copy.position = .left }
+        if let index = copy.openDrawerIndex, !(0..<Self.drawerCount).contains(index) { copy.openDrawerIndex = nil }
+        return copy
+    }
+}
+
+/// One Filing Cabinet as persisted: its cell plus its state.
+/// `openDrawerIndex` is optional, so records without it load all-closed.
+/// Oct 1 (cell-surface overrides): one cell's optional texture overrides.
+/// nil = "Use Floor Default" -- true inheritance of the floor's CURRENT
+/// resolved wall/floor/ceiling texture, never a copy of it. One wall value
+/// per cell: it applies to every ordinary cell-owned wall piece of that cell
+/// (the `cellWall-<row>-<col>` panels and backfill strips).
+struct CellSurfaceOverride: Codable, Hashable {
+    var wallTexture: String?
+    var floorTexture: String?
+    var ceilingTexture: String?
+    var isEmpty: Bool { wallTexture == nil && floorTexture == nil && ceilingTexture == nil }
+}
+
+/// Which of a cell's surfaces an override edit targets.
+enum CellSurfaceKind: String, CaseIterable, Identifiable {
+    case wall, floor, ceiling
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .wall: return "Walls"
+        case .floor: return "Floor"
+        case .ceiling: return "Ceiling"
+        }
+    }
+}
+
+/// Persisted form (floor JSON key `cellSurfaces`, written only when non-empty).
+struct CellSurfacePlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var wallTexture: String?
+    var floorTexture: String?
+    var ceilingTexture: String?
+}
+
+/// Oct 3 EXPERIMENT 1 (authored sequence cue): one repeating floor-glow
+/// sequence -- while this floor is active, each listed floor cell in order
+/// briefly glows with its own floor texture, `stepDelay` seconds after the
+/// previous one starts, for `glowDuration` seconds, then returns to exactly
+/// how it looked; the whole run restarts every `repeatInterval` seconds.
+/// Floor JSON key `floorGlowSequences` (written only when non-empty).
+/// Authored data only -- no editor UI. See HallwayScene.installFloorGlowSequences.
+struct FloorGlowSequence: Codable, Hashable {
+    var cells: [GridCoordinate]
+    var stepDelay: Double
+    var glowDuration: Double
+    var repeatInterval: Double
+}
+
+struct FilingCabinetPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+    var openDrawerIndex: Int? = nil
+}
+
+/// One Aquarium as persisted: its cell plus its state.
+struct AquariumPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+}
+
+/// One Floor Lamp as persisted: its cell plus its state.
+struct FloorLampPlacement: Codable, Hashable {
+    var coord: GridCoordinate
+    var position: FloorPosition
+    var orientation: FluorescentOrientation
+    var isOn: Bool
+    /// Optional so a lamp saved before brightness existed decodes as nil
+    /// and loads at the default level 3. The stored value is the UI level
+    /// (1...5); what intensity a level produces lives only in
+    /// HallwayScene.floorLampIntensity(brightness:).
+    var brightness: Int? = nil
+}
+
 struct ExtinguisherPlacement: Codable, Hashable {
     var coord: GridCoordinate
     var direction: Direction
@@ -619,6 +885,32 @@ private struct MazeRecord {
     /// name "WOIDLE / WEIRDLE").
     var woidleTerminals: [PicturePlacement] = []
     var fires: [FirePlacement] = []
+    /// Sept 28: decorative Tables (see FurnitureTable). Optional on
+    /// disk -- older records with no `tables` key decode as empty, and
+    /// the key is only written when a floor actually has a table.
+    var tables: [TablePlacement] = []
+    /// Sept 28: decorative Desks (see FurnitureDesk) -- same optional,
+    /// written-only-when-non-empty treatment as `tables`.
+    var desks: [DeskPlacement] = []
+    /// Sept 28: decorative Water Coolers (see FurnitureWaterCooler) --
+    /// same optional, written-only-when-non-empty treatment as `tables`.
+    var waterCoolers: [WaterCoolerPlacement] = []
+    /// Sept 28: decorative Office Chairs (see FurnitureOfficeChair) --
+    /// same optional, written-only-when-non-empty treatment as `tables`.
+    var officeChairs: [OfficeChairPlacement] = []
+    /// Sept 28: decorative Floor Lamps (see FurnitureFloorLamp) -- same
+    /// optional, written-only-when-non-empty treatment as `tables`.
+    var floorLamps: [FloorLampPlacement] = []
+    /// Sept 28: decorative Aquariums (see FurnitureAquarium) -- same
+    /// optional, written-only-when-non-empty treatment as `tables`.
+    var aquariums: [AquariumPlacement] = []
+    /// Sept 28: decorative Filing Cabinets (see FurnitureFilingCabinet) --
+    /// same optional, written-only-when-non-empty treatment as `tables`.
+    var filingCabinets: [FilingCabinetPlacement] = []
+    /// Oct 1: per-cell surface overrides (see CellSurfaceOverride).
+    var cellSurfaces: [CellSurfacePlacement] = []
+    /// Oct 3 EXPERIMENT 1: authored floor-glow sequences (see FloorGlowSequence).
+    var floorGlowSequences: [FloorGlowSequence] = []
     var extinguishers: [ExtinguisherPlacement] = []
     var photoBooths: [PhotoBoothPlacement] = []
     var roomDoors: [RoomDoorPlacement] = []
@@ -655,11 +947,16 @@ private struct MazeRecord {
     var wallTexture: String?
     var floorTexture: String?
     var ceilingTexture: String?
+    /// BUILDING-WIDE, not per floor: the portable default elevator cab
+    /// decoration (see ElevatorCabDecoration.portable). Only ever read or
+    /// written on the Floor 1 record, and only written by the building
+    /// export -- nil everywhere else and in every older JSON file.
+    var elevatorCab: ElevatorCabDecoration? = nil
 }
 
 extension MazeRecord: Codable {
     enum CodingKeys: String, CodingKey {
-        case lobbyPicturesIntegrated, fluorescentLights, pictureLights, lightBrightness, pictureImageSelections, mirrors, wallLights, bathroomDoors, windowRooms, roomEntranceDoors, fires, extinguishers, photoBooths, ticTacToeTerminals, shellGameStations, rockPaperScissorsTerminals, higherLowerTerminals, fiveCardDrawTerminals, simonTerminals, hangmanTerminals, connectFourTerminals, checkersTerminals, woidleTerminals, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, ceilingVisibleFixture, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, wallTexture, floorTexture, ceilingTexture, roomDoors, itemRooms, mailAddresses
+        case lobbyPicturesIntegrated, fluorescentLights, pictureLights, lightBrightness, pictureImageSelections, mirrors, wallLights, bathroomDoors, windowRooms, roomEntranceDoors, fires, tables, desks, waterCoolers, officeChairs, floorLamps, aquariums, filingCabinets, cellSurfaces, floorGlowSequences, extinguishers, photoBooths, ticTacToeTerminals, shellGameStations, rockPaperScissorsTerminals, higherLowerTerminals, fiveCardDrawTerminals, simonTerminals, hangmanTerminals, connectFourTerminals, checkersTerminals, woidleTerminals, id, cells, nextMazeID, objects, objectCells, destinations, exitSigns, floorMaps, spotlights, ceilingVisibleFixture, missionSigns, pictures, picturesUseCameraRoll, missionHeading, missionBody, missionObjectKind, wallTexture, floorTexture, ceilingTexture, roomDoors, itemRooms, mailAddresses, elevatorCab
     }
 
     // Hand-written so older mazes.json shapes still load cleanly
@@ -713,6 +1010,15 @@ extension MazeRecord: Codable {
         checkersTerminals = try container.decodeIfPresent([PicturePlacement].self, forKey: .checkersTerminals) ?? []
         woidleTerminals = try container.decodeIfPresent([PicturePlacement].self, forKey: .woidleTerminals) ?? []
         fires = try container.decodeIfPresent([FirePlacement].self, forKey: .fires) ?? []
+        tables = try container.decodeIfPresent([TablePlacement].self, forKey: .tables) ?? []
+        desks = try container.decodeIfPresent([DeskPlacement].self, forKey: .desks) ?? []
+        waterCoolers = try container.decodeIfPresent([WaterCoolerPlacement].self, forKey: .waterCoolers) ?? []
+        officeChairs = try container.decodeIfPresent([OfficeChairPlacement].self, forKey: .officeChairs) ?? []
+        floorLamps = try container.decodeIfPresent([FloorLampPlacement].self, forKey: .floorLamps) ?? []
+        aquariums = try container.decodeIfPresent([AquariumPlacement].self, forKey: .aquariums) ?? []
+        filingCabinets = try container.decodeIfPresent([FilingCabinetPlacement].self, forKey: .filingCabinets) ?? []
+        cellSurfaces = try container.decodeIfPresent([CellSurfacePlacement].self, forKey: .cellSurfaces) ?? []
+        floorGlowSequences = try container.decodeIfPresent([FloorGlowSequence].self, forKey: .floorGlowSequences) ?? []
         extinguishers = try container.decodeIfPresent([ExtinguisherPlacement].self, forKey: .extinguishers) ?? []
         photoBooths = try container.decodeIfPresent([PhotoBoothPlacement].self, forKey: .photoBooths) ?? []
         pictures = try container.decodeIfPresent([PictureSizePlacement].self, forKey: .pictures) ?? []
@@ -727,6 +1033,8 @@ extension MazeRecord: Codable {
         floorTexture = try container.decodeIfPresent(String.self, forKey: .floorTexture)
         ceilingTexture = try container.decodeIfPresent(String.self, forKey: .ceilingTexture)
         lobbyPicturesIntegrated = try container.decodeIfPresent(Bool.self, forKey: .lobbyPicturesIntegrated) ?? false
+        // Building-wide cab default rides on Floor 1 only; absent in older files.
+        elevatorCab = id == 1 ? try container.decodeIfPresent(ElevatorCabDecoration.self, forKey: .elevatorCab) : nil
         integrateLegacyLobbyPictures()
     }
 
@@ -814,6 +1122,33 @@ extension MazeRecord: Codable {
         try container.encode(checkersTerminals, forKey: .checkersTerminals)
         try container.encode(woidleTerminals, forKey: .woidleTerminals)
         try container.encode(fires, forKey: .fires)
+        if !tables.isEmpty {
+            try container.encode(tables, forKey: .tables)
+        }
+        if !desks.isEmpty {
+            try container.encode(desks, forKey: .desks)
+        }
+        if !waterCoolers.isEmpty {
+            try container.encode(waterCoolers, forKey: .waterCoolers)
+        }
+        if !officeChairs.isEmpty {
+            try container.encode(officeChairs, forKey: .officeChairs)
+        }
+        if !floorLamps.isEmpty {
+            try container.encode(floorLamps, forKey: .floorLamps)
+        }
+        if !aquariums.isEmpty {
+            try container.encode(aquariums, forKey: .aquariums)
+        }
+        if !filingCabinets.isEmpty {
+            try container.encode(filingCabinets, forKey: .filingCabinets)
+        }
+        if !cellSurfaces.isEmpty {
+            try container.encode(cellSurfaces, forKey: .cellSurfaces)
+        }
+        if !floorGlowSequences.isEmpty {
+            try container.encode(floorGlowSequences, forKey: .floorGlowSequences)
+        }
         try container.encode(extinguishers, forKey: .extinguishers)
         try container.encode(photoBooths, forKey: .photoBooths)
         try container.encode(pictures, forKey: .pictures)
@@ -826,6 +1161,7 @@ extension MazeRecord: Codable {
         try container.encodeIfPresent(wallTexture, forKey: .wallTexture)
         try container.encodeIfPresent(floorTexture, forKey: .floorTexture)
         try container.encodeIfPresent(ceilingTexture, forKey: .ceilingTexture)
+        if id == 1 { try container.encodeIfPresent(elevatorCab, forKey: .elevatorCab) }
     }
 }
 
@@ -922,7 +1258,39 @@ private enum MazeLibrary {
             }
             print("[Maps] Applied \(overrideIDs.count) explicitly-saved local floor override(s)")
         }
+        repairProgression(&merged, bundled: bundled, overrideIDs: overrideIDs)
         return merged
+    }
+
+    /// Oct 2, Build 6 (Carol: Floor 2's elevator rode to Floor 2 and
+    /// stranded her). A local override replaces a floor's WHOLE record,
+    /// exit (nextMazeID) included, and that exit can only ever be changed
+    /// by the Grid Editor's Exit stepper -- reachable by testers in early
+    /// betas, DEBUG-only since. A stale override whose exit points back at
+    /// its own floor makes advanceToNextMaze() a no-op (switchTo ignores
+    /// the current id), so the destination floor never builds and the
+    /// player is left behind the curtain with elevatorInUse = true.
+    ///
+    /// Release builds: floor progression is authored game data, so every
+    /// bundled floor uses the bundle's exit -- an override still supplies
+    /// everything else on the floor (decorations etc.). DEBUG builds keep
+    /// authored exits (that's how Eddie edits them) but never a self-loop.
+    static func repairProgression(_ merged: inout [Int: MazeRecord], bundled: [Int: MazeRecord], overrideIDs: Set<Int>) {
+        for id in overrideIDs {
+            guard let record = merged[id] else { continue }
+            let bundledNext = bundled[id]?.nextMazeID
+            #if DEBUG
+            let repair = record.nextMazeID == id
+            #else
+            let repair = bundled[id] != nil && record.nextMazeID != bundledNext
+            #endif
+            guard repair else { continue }
+            print("[Maps] Floor \(id) override exit \(String(describing: record.nextMazeID)) replaced with bundled exit \(String(describing: bundledNext))")
+            diag("progression.repaired", ["floor": id, "overrideNext": record.nextMazeID, "bundledNext": bundledNext])
+            merged[id]?.nextMazeID = bundledNext
+        }
+        diag("progression.table", ["exits": merged.keys.sorted().map { "\($0)->\(merged[$0]?.nextMazeID.map(String.init) ?? "none")" }.joined(separator: " "),
+                                   "overrides": overrideIDs.sorted().map(String.init).joined(separator: ",")])
     }
 
     /// The floor's definition exactly as shipped in DefaultMazes.json,
@@ -933,6 +1301,20 @@ private enum MazeLibrary {
         guard let url = Bundle.main.url(forResource: "DefaultMazes", withExtension: "json"),
               let bundled = readMaps(at: url) else { return nil }
         return bundled[id]
+    }
+
+    /// The building-wide elevator cab default from a building JSON (the
+    /// Floor 1 record's `elevatorCab`), or nil for older JSON without it.
+    static func elevatorCabDefault(inLibraryJSON data: Data) -> ElevatorCabDecoration? {
+        guard let records = try? JSONDecoder().decode([MazeRecord].self, from: data) else { return nil }
+        return records.first { $0.id == 1 }?.elevatorCab?.portable
+    }
+
+    /// The bundled DefaultMazes.json's cab default, if it has one.
+    static func bundledElevatorCabDefault() -> ElevatorCabDecoration? {
+        guard let url = Bundle.main.url(forResource: "DefaultMazes", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return elevatorCabDefault(inLibraryJSON: data)
     }
 
     static func saveAll(_ library: [Int: MazeRecord]) {
@@ -1179,6 +1561,36 @@ final class MazeStore: ObservableObject {
     @Published private(set) var checkersTerminals: [GridCoordinate: Direction] = [:]
     @Published private(set) var woidleTerminals: [GridCoordinate: Direction] = [:]
     @Published private(set) var fires: Set<GridCoordinate> = []
+    /// Sept 28: this floor's decorative Tables -- see FurnitureTable.
+    /// Never part of `objects`, never handed to TapNavigationController.
+    @Published private(set) var tables: [GridCoordinate: FurnitureTable] = [:]
+    /// Sept 28: this floor's decorative Desks -- see FurnitureDesk.
+    /// Never part of `objects`, never handed to TapNavigationController.
+    @Published private(set) var desks: [GridCoordinate: FurnitureDesk] = [:]
+    /// Sept 28: this floor's decorative Water Coolers -- see
+    /// FurnitureWaterCooler. Never part of `objects`, never handed to
+    /// TapNavigationController.
+    @Published private(set) var waterCoolers: [GridCoordinate: FurnitureWaterCooler] = [:]
+    /// Sept 28: this floor's decorative Office Chairs -- see
+    /// FurnitureOfficeChair. Never part of `objects`, never handed to
+    /// TapNavigationController. May share a cell with one Desk.
+    @Published private(set) var officeChairs: [GridCoordinate: FurnitureOfficeChair] = [:]
+    /// Sept 28: this floor's Floor Lamps -- see FurnitureFloorLamp. Never
+    /// part of `objects`, never handed to TapNavigationController.
+    @Published private(set) var floorLamps: [GridCoordinate: FurnitureFloorLamp] = [:]
+    /// Sept 28: this floor's Aquariums -- see FurnitureAquarium. Never part
+    /// of `objects`, never handed to TapNavigationController.
+    @Published private(set) var aquariums: [GridCoordinate: FurnitureAquarium] = [:]
+    /// Sept 28: this floor's Filing Cabinets -- see FurnitureFilingCabinet.
+    /// Never part of `objects`, never handed to TapNavigationController.
+    @Published private(set) var filingCabinets: [GridCoordinate: FurnitureFilingCabinet] = [:]
+    /// Oct 1: per-cell surface overrides; absent coord = fully inherits the floor.
+    @Published private(set) var cellSurfaces: [GridCoordinate: CellSurfaceOverride] = [:]
+    /// Oct 3 EXPERIMENT 1: the current floor's authored floor-glow
+    /// sequences, read straight from its record (no editor UI). Not
+    /// @Published: they only change with the floor itself, and every floor
+    /// change already rebuilds the scene.
+    private(set) var floorGlowSequences: [FloorGlowSequence] = []
     @Published private(set) var extinguishers: [GridCoordinate: Direction] = [:]
     @Published private(set) var photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:]
     /// Sept 21 (Picture Size): same tuple-value shape as photoBooths
@@ -1307,14 +1719,26 @@ final class MazeStore: ObservableObject {
     /// World-space size of one cell — matches the corridor width feel
     /// from Prototype 2, just squared off into rooms instead of a fixed
     /// hallway. Same for every floor for now.
-    let cellSize: CGFloat = 3.2
+    let cellSize: CGFloat = 3.52
     let wallHeight: CGFloat = 3.0
 
     private var library: [Int: MazeRecord]
 
-    /// Shared cab decoration is deliberately outside MazeRecord / floor SAVE and RESET.
+    /// Shared cab decoration is deliberately outside per-floor SAVE and
+    /// single-floor RESET. Runtime truth is this value, persisted in this
+    /// device's UserDefaults. The building default travels on the Floor 1
+    /// record of DefaultMazes.json: it seeds a device that has never saved
+    /// a cab value, is written by the building export, and is restored by
+    /// Reset All Floors.
     @Published private(set) var elevatorCabDecoration: ElevatorCabDecoration
     private let cabDecorationDefaults: UserDefaults
+    private let bundledElevatorCab: () -> ElevatorCabDecoration?
+
+    /// Decodes the building-wide cab default from building JSON (Floor 1's
+    /// `elevatorCab`). nil when the JSON predates the field.
+    static func elevatorCabDefault(inLibraryJSON data: Data) -> ElevatorCabDecoration? {
+        MazeLibrary.elevatorCabDefault(inLibraryJSON: data)
+    }
 
     func setElevatorCabDecoration(_ decoration: ElevatorCabDecoration) {
         elevatorCabDecoration = decoration
@@ -1406,9 +1830,21 @@ final class MazeStore: ObservableObject {
         currentElevatorSideRightIdentity = selection
     }
 
-    init(cabDecorationDefaults: UserDefaults = .standard) {
+    /// `bundledElevatorCab` is the building default (tests inject one);
+    /// by default it is read from the bundled DefaultMazes.json.
+    init(cabDecorationDefaults: UserDefaults = .standard,
+         bundledElevatorCab: (() -> ElevatorCabDecoration?)? = nil) {
         self.cabDecorationDefaults = cabDecorationDefaults
-        self.elevatorCabDecoration = ElevatorCabDecoration.load(from: cabDecorationDefaults)
+        let bundledElevatorCab = bundledElevatorCab ?? { MazeLibrary.bundledElevatorCabDefault() }
+        self.bundledElevatorCab = bundledElevatorCab
+        // A device's own saved cab state always wins. Only a device that has
+        // never saved one starts from the building default (not written back,
+        // so it keeps tracking the bundle until the first real edit).
+        if ElevatorCabDecoration.hasSavedValue(in: cabDecorationDefaults) {
+            self.elevatorCabDecoration = ElevatorCabDecoration.load(from: cabDecorationDefaults)
+        } else {
+            self.elevatorCabDecoration = bundledElevatorCab() ?? ElevatorCabDecoration()
+        }
         let loaded = MazeLibrary.loadAll()
         if let firstID = loaded.keys.min() {
             library = loaded
@@ -1462,6 +1898,15 @@ final class MazeStore: ObservableObject {
                 pictureImageSelections = Self.wallFacedPictureImageSelections(record.pictureImageSelections, pictures: record.pictures)
             }
             fires = Set((loaded[startID]?.fires ?? []).map(\.coord))
+            tables = Self.tableDictionary(loaded[startID]?.tables ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            desks = Self.deskDictionary(loaded[startID]?.desks ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            waterCoolers = Self.waterCoolerDictionary(loaded[startID]?.waterCoolers ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            officeChairs = Self.officeChairDictionary(loaded[startID]?.officeChairs ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            floorLamps = Self.floorLampDictionary(loaded[startID]?.floorLamps ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            aquariums = Self.aquariumDictionary(loaded[startID]?.aquariums ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            filingCabinets = Self.filingCabinetDictionary(loaded[startID]?.filingCabinets ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            cellSurfaces = Self.cellSurfaceDictionary(loaded[startID]?.cellSurfaces ?? [], cells: Set(loaded[startID]?.cells ?? []))
+            floorGlowSequences = loaded[startID]?.floorGlowSequences ?? []
             extinguishers = Dictionary(uniqueKeysWithValues: (loaded[startID]?.extinguishers ?? []).map { ($0.coord, $0.direction) })
             photoBooths = Dictionary(uniqueKeysWithValues: (loaded[startID]?.photoBooths ?? []).map { ($0.coord, ($0.direction, $0.expression)) })
             roomDoors = Dictionary(uniqueKeysWithValues: (loaded[startID]?.roomDoors ?? []).map { ($0.coord, $0) })
@@ -1512,6 +1957,15 @@ final class MazeStore: ObservableObject {
             checkersTerminals = [:]
             woidleTerminals = [:]
             fires = []
+            tables = [:]
+            desks = [:]
+            waterCoolers = [:]
+            officeChairs = [:]
+            floorLamps = [:]
+            aquariums = [:]
+            filingCabinets = [:]
+            cellSurfaces = [:]
+            floorGlowSequences = []
             extinguishers = [:]
             photoBooths = [:]
             roomDoors = [:]
@@ -2206,6 +2660,66 @@ final class MazeStore: ObservableObject {
 
     func extinguisherDirection(at coord: GridCoordinate) -> Direction? { extinguishers[coord] }
 
+    // MARK: Oct 1 (Decorator Games) -- the ten existing game fixtures,
+    // authored through the SAME per-game dictionaries DefaultMazes.json
+    // already persists (ticTacToeTerminals, shellGameStations, ...).
+    // No new schema: one game per cell, one wall face, like every other
+    // wall fixture. Deletion stays deleteContent([kind.editorContentKind]).
+
+    private func gameDirections(_ kind: GameFixtureKind) -> [GridCoordinate: Direction] {
+        switch kind {
+        case .ticTacToeTerminals: return ticTacToeTerminals
+        case .shellGameStations: return shellGameStations
+        case .rockPaperScissorsTerminals: return rockPaperScissorsTerminals
+        case .higherLowerTerminals: return higherLowerTerminals
+        case .fiveCardDrawTerminals: return fiveCardDrawTerminals
+        case .hangmanTerminals: return hangmanTerminals
+        case .simonTerminals: return simonTerminals
+        case .connectFourTerminals: return connectFourTerminals
+        case .checkersTerminals: return checkersTerminals
+        case .woidleTerminals: return woidleTerminals
+        }
+    }
+
+    /// The game (if any) authored in `coord`, and the wall it faces.
+    func gameFixture(at coord: GridCoordinate) -> (kind: GameFixtureKind, direction: Direction)? {
+        for kind in GameFixtureKind.allCases {
+            if let direction = gameDirections(kind)[coord] { return (kind, direction) }
+        }
+        return nil
+    }
+
+    /// Same face-specific wall rules as canPlaceExtinguisher, plus: no
+    /// game already in this cell, and nothing else wall-mounted on this
+    /// face (extinguisher, photo booth, doors).
+    func canPlaceGame(_ direction: Direction, at coord: GridCoordinate) -> Bool {
+        let neighbor = GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col)
+        return cells.contains(coord) && !cells.contains(neighbor) &&
+            !isElevatorDoorFace(direction, at: coord) && roomDoors[coord]?.direction != direction &&
+            !hasPicture(direction, at: coord) && floorMaps[coord] != direction && destinations[coord] == nil &&
+            mirrors[coord] != direction && wallLights[coord] != direction && missionSigns[coord] != direction &&
+            photoBooths[coord]?.direction != direction && extinguishers[coord] != direction &&
+            bathroomDoors[coord] != direction && roomEntranceDoors[coord]?.direction != direction &&
+            gameFixture(at: coord) == nil
+    }
+
+    func placeGame(_ kind: GameFixtureKind, direction: Direction, at coord: GridCoordinate) {
+        guard canPlaceGame(direction, at: coord) else { return }
+        switch kind {
+        case .ticTacToeTerminals: ticTacToeTerminals[coord] = direction
+        case .shellGameStations: shellGameStations[coord] = direction
+        case .rockPaperScissorsTerminals: rockPaperScissorsTerminals[coord] = direction
+        case .higherLowerTerminals: higherLowerTerminals[coord] = direction
+        case .fiveCardDrawTerminals: fiveCardDrawTerminals[coord] = direction
+        case .hangmanTerminals: hangmanTerminals[coord] = direction
+        case .simonTerminals: simonTerminals[coord] = direction
+        case .connectFourTerminals: connectFourTerminals[coord] = direction
+        case .checkersTerminals: checkersTerminals[coord] = direction
+        case .woidleTerminals: woidleTerminals[coord] = direction
+        }
+        version += 1
+    }
+
     /// Sept 21 (3D Decorator wall authoring, live Picture ADD). The
     /// full occupancy/legality check the OTHER wall-mounted types
     /// already have (canPlaceMirror/canPlaceWallLight/
@@ -2380,6 +2894,352 @@ final class MazeStore: ObservableObject {
         fires.contains(coord)
     }
 
+    // MARK: - Tables (Sept 28, first furniture proof of concept)
+
+    /// Loads persisted TablePlacements into the store's per-cell shape:
+    /// only open cells, CENTER sanitized to LEFT, and a duplicate coord
+    /// (never written by this app) resolved to the last entry rather
+    /// than trapping.
+    /// Oct 1: persisted -> live, dropping off-floor cells and empty records.
+    fileprivate static func cellSurfaceDictionary(_ placements: [CellSurfacePlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: CellSurfaceOverride] {
+        var result: [GridCoordinate: CellSurfaceOverride] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            let value = CellSurfaceOverride(wallTexture: placement.wallTexture, floorTexture: placement.floorTexture, ceilingTexture: placement.ceilingTexture)
+            if !value.isEmpty { result[placement.coord] = value }
+        }
+        return result
+    }
+
+    /// The override texture for one surface of one cell; nil = inherits the floor.
+    func cellSurfaceTexture(_ surface: CellSurfaceKind, at coord: GridCoordinate) -> String? {
+        switch surface {
+        case .wall: return cellSurfaces[coord]?.wallTexture
+        case .floor: return cellSurfaces[coord]?.floorTexture
+        case .ceiling: return cellSurfaces[coord]?.ceilingTexture
+        }
+    }
+
+    /// Sets (name) or removes (nil = Use Floor Default) one surface's override
+    /// for one open cell. A record with nothing left is removed entirely.
+    func setCellSurfaceTexture(_ name: String?, for surface: CellSurfaceKind, at coord: GridCoordinate) {
+        guard cells.contains(coord), cellSurfaceTexture(surface, at: coord) != name else { return }
+        var value = cellSurfaces[coord] ?? CellSurfaceOverride()
+        switch surface {
+        case .wall: value.wallTexture = name
+        case .floor: value.floorTexture = name
+        case .ceiling: value.ceilingTexture = name
+        }
+        if value.isEmpty { cellSurfaces.removeValue(forKey: coord) } else { cellSurfaces[coord] = value }
+        version += 1
+    }
+
+    fileprivate static func tableDictionary(_ placements: [TablePlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureTable] {
+        var result: [GridCoordinate: FurnitureTable] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureTable(position: placement.position, orientation: placement.orientation, hasPlant: placement.hasPlant).sanitized
+        }
+        return result
+    }
+
+    /// A Table needs an open cell with no table, desk, water cooler or office chair already, no pickup/floor
+    /// gameplay object (MazeStore.objects), and no Fire. Ceiling fixtures
+    /// and wall-mounted content are fine -- different heights/surfaces.
+    func canPlaceTable(at coord: GridCoordinate) -> Bool {
+        cells.contains(coord) && tables[coord] == nil && desks[coord] == nil && waterCoolers[coord] == nil && officeChairs[coord] == nil && objects[coord] == nil && !fires.contains(coord) && floorLamps[coord] == nil && aquariums[coord] == nil && filingCabinets[coord] == nil
+    }
+
+    func placeTable(_ table: FurnitureTable, at coord: GridCoordinate) {
+        guard canPlaceTable(at: coord) else { return }
+        tables[coord] = table.sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING table's state (position, axis, plant) --
+    /// never creates one.
+    func updateTable(_ table: FurnitureTable, at coord: GridCoordinate) {
+        let sanitized = table.sanitized
+        guard let current = tables[coord], current != sanitized else { return }
+        tables[coord] = sanitized
+        version += 1
+    }
+
+    /// Removes the table AND, by construction, its plant.
+    func removeTable(at coord: GridCoordinate) {
+        guard tables[coord] != nil else { return }
+        tables.removeValue(forKey: coord)
+        version += 1
+    }
+
+    // MARK: - Desks (Sept 28, second furniture object)
+
+    /// Same load shape as tableDictionary: open cells only, CENTER
+    /// sanitized to LEFT, a duplicate coord resolved to the last entry.
+    fileprivate static func deskDictionary(_ placements: [DeskPlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureDesk] {
+        var result: [GridCoordinate: FurnitureDesk] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureDesk(position: placement.position, orientation: placement.orientation).sanitized
+        }
+        return result
+    }
+
+    /// A Desk needs an open cell with no Desk, Table or Water Cooler already (one
+    /// piece of furniture per cell for now), no pickup/floor gameplay
+    /// object, and no Fire. An Office Chair does NOT block it -- Desk +
+    /// Chair is the one allowed pairing (placeDesk requires the chair's
+    /// side).
+    func canPlaceDesk(at coord: GridCoordinate) -> Bool {
+        cells.contains(coord) && desks[coord] == nil && tables[coord] == nil && waterCoolers[coord] == nil && objects[coord] == nil && !fires.contains(coord) && floorLamps[coord] == nil && aquariums[coord] == nil && filingCabinets[coord] == nil
+    }
+
+    func placeDesk(_ desk: FurnitureDesk, at coord: GridCoordinate) {
+        guard canPlaceDesk(at: coord) else { return }
+        // Sept 28 (Desk + Office Chair): a desk joining a cell that
+        // already has a chair must go on the chair's side.
+        if let chair = officeChairs[coord], chair.position != desk.sanitized.position { return }
+        desks[coord] = desk.sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING desk's state (position, axis) -- never
+    /// creates one.
+    func updateDesk(_ desk: FurnitureDesk, at coord: GridCoordinate) {
+        let sanitized = desk.sanitized
+        guard let current = desks[coord], current != sanitized else { return }
+        desks[coord] = sanitized
+        version += 1
+    }
+
+    func removeDesk(at coord: GridCoordinate) {
+        guard desks[coord] != nil else { return }
+        desks.removeValue(forKey: coord)
+        version += 1
+    }
+
+    // MARK: - Water Coolers (Sept 28, third furniture object)
+
+    /// Same load shape as tableDictionary/deskDictionary.
+    fileprivate static func waterCoolerDictionary(_ placements: [WaterCoolerPlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureWaterCooler] {
+        var result: [GridCoordinate: FurnitureWaterCooler] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureWaterCooler(position: placement.position, orientation: placement.orientation).sanitized
+        }
+        return result
+    }
+
+    /// A Water Cooler needs an open cell with no Water Cooler, Table,
+    /// Desk or Office Chair already (one piece of furniture per cell for now), no
+    /// pickup/floor gameplay object, and no Fire.
+    func canPlaceWaterCooler(at coord: GridCoordinate) -> Bool {
+        cells.contains(coord) && waterCoolers[coord] == nil && tables[coord] == nil && desks[coord] == nil && officeChairs[coord] == nil && objects[coord] == nil && !fires.contains(coord) && floorLamps[coord] == nil && aquariums[coord] == nil && filingCabinets[coord] == nil
+    }
+
+    func placeWaterCooler(_ cooler: FurnitureWaterCooler, at coord: GridCoordinate) {
+        guard canPlaceWaterCooler(at: coord) else { return }
+        waterCoolers[coord] = cooler.sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING water cooler's state (position, axis) --
+    /// never creates one.
+    func updateWaterCooler(_ cooler: FurnitureWaterCooler, at coord: GridCoordinate) {
+        let sanitized = cooler.sanitized
+        guard let current = waterCoolers[coord], current != sanitized else { return }
+        waterCoolers[coord] = sanitized
+        version += 1
+    }
+
+    func removeWaterCooler(at coord: GridCoordinate) {
+        guard waterCoolers[coord] != nil else { return }
+        waterCoolers.removeValue(forKey: coord)
+        version += 1
+    }
+
+    // MARK: - Office Chairs (Sept 28, fourth furniture object)
+
+    /// Same load shape as tableDictionary/deskDictionary.
+    fileprivate static func officeChairDictionary(_ placements: [OfficeChairPlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureOfficeChair] {
+        var result: [GridCoordinate: FurnitureOfficeChair] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureOfficeChair(position: placement.position, orientation: placement.orientation).sanitized
+        }
+        return result
+    }
+
+    /// An Office Chair needs an open cell with no chair, Table or Water
+    /// Cooler, no pickup/floor gameplay object, and no Fire. A Desk is
+    /// the one narrow exception: a chair may join a cell with one Desk
+    /// (placeOfficeChair then requires the desk's side).
+    func canPlaceOfficeChair(at coord: GridCoordinate) -> Bool {
+        cells.contains(coord) && officeChairs[coord] == nil && tables[coord] == nil && waterCoolers[coord] == nil && objects[coord] == nil && !fires.contains(coord) && floorLamps[coord] == nil && aquariums[coord] == nil && filingCabinets[coord] == nil
+    }
+
+    func placeOfficeChair(_ chair: FurnitureOfficeChair, at coord: GridCoordinate) {
+        guard canPlaceOfficeChair(at: coord) else { return }
+        let sanitized = chair.sanitized
+        if let desk = desks[coord], desk.position != sanitized.position { return }
+        officeChairs[coord] = sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING chair's state (position, axis) -- never
+    /// creates one. Deliberately no side check against a Desk here:
+    /// once both exist they are independent, and a mismatched
+    /// arrangement is allowed (it's evidence for future placement rules).
+    func updateOfficeChair(_ chair: FurnitureOfficeChair, at coord: GridCoordinate) {
+        let sanitized = chair.sanitized
+        guard let current = officeChairs[coord], current != sanitized else { return }
+        officeChairs[coord] = sanitized
+        version += 1
+    }
+
+    func removeOfficeChair(at coord: GridCoordinate) {
+        guard officeChairs[coord] != nil else { return }
+        officeChairs.removeValue(forKey: coord)
+        version += 1
+    }
+
+    // MARK: - Floor Lamps (Sept 28, fifth furniture object)
+
+    fileprivate static func floorLampDictionary(_ placements: [FloorLampPlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureFloorLamp] {
+        var result: [GridCoordinate: FurnitureFloorLamp] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureFloorLamp(position: placement.position, orientation: placement.orientation, isOn: placement.isOn, brightness: placement.brightness ?? FurnitureFloorLamp.defaultBrightness).sanitized
+        }
+        return result
+    }
+
+    /// The LEFT/RIGHT sides of a cell already taken by other furniture
+    /// (Table, Desk, Water Cooler, Office Chair). A lamp may stand on the
+    /// OTHER side of such a cell -- every one of them hugs (or serves)
+    /// its own side, well clear of the opposite wall -- but never on the
+    /// same side.
+    func furnitureSides(at coord: GridCoordinate) -> Set<FloorPosition> {
+        var sides: Set<FloorPosition> = []
+        if let table = tables[coord] { sides.insert(table.position) }
+        if let desk = desks[coord] { sides.insert(desk.position) }
+        if let cooler = waterCoolers[coord] { sides.insert(cooler.position) }
+        if let chair = officeChairs[coord] { sides.insert(chair.position) }
+        return sides
+    }
+
+    /// Whether a lamp can go on this specific side of this cell: open
+    /// cell, no lamp yet, no Fire, no pickup/floor gameplay object, and
+    /// no other furniture on that side.
+    func canPlaceFloorLamp(at coord: GridCoordinate, side: FloorPosition) -> Bool {
+        cells.contains(coord) && floorLamps[coord] == nil && aquariums[coord] == nil && filingCabinets[coord] == nil && objects[coord] == nil && !fires.contains(coord)
+            && side != .center && !furnitureSides(at: coord).contains(side)
+    }
+
+    /// Whether a lamp can go on EITHER side of this cell.
+    func canPlaceFloorLamp(at coord: GridCoordinate) -> Bool {
+        canPlaceFloorLamp(at: coord, side: .left) || canPlaceFloorLamp(at: coord, side: .right)
+    }
+
+    func placeFloorLamp(_ lamp: FurnitureFloorLamp, at coord: GridCoordinate) {
+        let sanitized = lamp.sanitized
+        guard canPlaceFloorLamp(at: coord, side: sanitized.position) else { return }
+        floorLamps[coord] = sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING lamp's state (side, axis, on/off) -- never
+    /// creates one. Refuses to move it onto a side other furniture holds.
+    func updateFloorLamp(_ lamp: FurnitureFloorLamp, at coord: GridCoordinate) {
+        let sanitized = lamp.sanitized
+        guard let current = floorLamps[coord], current != sanitized,
+              sanitized.position == current.position || !furnitureSides(at: coord).contains(sanitized.position) else { return }
+        floorLamps[coord] = sanitized
+        version += 1
+    }
+
+    // MARK: - Filing Cabinets (Sept 28, seventh furniture object)
+
+    fileprivate static func filingCabinetDictionary(_ placements: [FilingCabinetPlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureFilingCabinet] {
+        var result: [GridCoordinate: FurnitureFilingCabinet] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureFilingCabinet(position: placement.position, orientation: placement.orientation,
+                                                             openDrawerIndex: placement.openDrawerIndex).sanitized
+        }
+        return result
+    }
+
+    /// Conservative, same as the Aquarium: a Filing Cabinet needs a cell
+    /// with no other furniture at all, no pickup/floor gameplay object,
+    /// and no Fire. Every other piece of furniture is likewise kept out
+    /// of a filing cabinet's cell.
+    func canPlaceFilingCabinet(at coord: GridCoordinate) -> Bool {
+        cells.contains(coord) && filingCabinets[coord] == nil && aquariums[coord] == nil && tables[coord] == nil
+            && desks[coord] == nil && waterCoolers[coord] == nil && officeChairs[coord] == nil
+            && floorLamps[coord] == nil && objects[coord] == nil && !fires.contains(coord)
+    }
+
+    func placeFilingCabinet(_ cabinet: FurnitureFilingCabinet, at coord: GridCoordinate) {
+        guard canPlaceFilingCabinet(at: coord) else { return }
+        filingCabinets[coord] = cabinet.sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING cabinet's state (side, axis, open drawer) --
+    /// never creates one.
+    func updateFilingCabinet(_ cabinet: FurnitureFilingCabinet, at coord: GridCoordinate) {
+        let sanitized = cabinet.sanitized
+        guard let current = filingCabinets[coord], current != sanitized else { return }
+        filingCabinets[coord] = sanitized
+        version += 1
+    }
+
+    func removeFilingCabinet(at coord: GridCoordinate) {
+        guard filingCabinets[coord] != nil else { return }
+        filingCabinets.removeValue(forKey: coord)
+        version += 1
+    }
+
+    // MARK: - Aquariums (Sept 28, sixth furniture object)
+
+    fileprivate static func aquariumDictionary(_ placements: [AquariumPlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureAquarium] {
+        var result: [GridCoordinate: FurnitureAquarium] = [:]
+        for placement in placements where cells.contains(placement.coord) {
+            result[placement.coord] = FurnitureAquarium(position: placement.position, orientation: placement.orientation).sanitized
+        }
+        return result
+    }
+
+    /// Conservative: an Aquarium needs a cell with no other furniture at
+    /// all (Table, Desk, Water Cooler, Office Chair, Floor Lamp, another
+    /// Aquarium), no pickup/floor gameplay object, and no Fire. Every
+    /// other piece of furniture is likewise kept out of an aquarium's cell.
+    func canPlaceAquarium(at coord: GridCoordinate) -> Bool {
+        cells.contains(coord) && aquariums[coord] == nil && tables[coord] == nil && desks[coord] == nil
+            && waterCoolers[coord] == nil && officeChairs[coord] == nil && floorLamps[coord] == nil
+            && filingCabinets[coord] == nil && objects[coord] == nil && !fires.contains(coord)
+    }
+
+    func placeAquarium(_ aquarium: FurnitureAquarium, at coord: GridCoordinate) {
+        guard canPlaceAquarium(at: coord) else { return }
+        aquariums[coord] = aquarium.sanitized
+        version += 1
+    }
+
+    /// Replaces an EXISTING aquarium's state (side, axis) -- never creates one.
+    func updateAquarium(_ aquarium: FurnitureAquarium, at coord: GridCoordinate) {
+        let sanitized = aquarium.sanitized
+        guard let current = aquariums[coord], current != sanitized else { return }
+        aquariums[coord] = sanitized
+        version += 1
+    }
+
+    func removeAquarium(at coord: GridCoordinate) {
+        guard aquariums[coord] != nil else { return }
+        aquariums.removeValue(forKey: coord)
+        version += 1
+    }
+
+    func removeFloorLamp(at coord: GridCoordinate) {
+        guard floorLamps[coord] != nil else { return }
+        floorLamps.removeValue(forKey: coord)
+        version += 1
+    }
+
     func setOpen(_ coord: GridCoordinate) {
         guard !cells.contains(coord) else { return }
         cells.insert(coord)
@@ -2396,6 +3256,14 @@ final class MazeStore: ObservableObject {
         floorMaps.removeValue(forKey: coord)
         spotlights.remove(coord)
         fires.remove(coord)
+        tables.removeValue(forKey: coord)
+        desks.removeValue(forKey: coord)
+        waterCoolers.removeValue(forKey: coord)
+        officeChairs.removeValue(forKey: coord)
+        floorLamps.removeValue(forKey: coord)
+        aquariums.removeValue(forKey: coord)
+        filingCabinets.removeValue(forKey: coord)
+        cellSurfaces.removeValue(forKey: coord)
         missionSigns.removeValue(forKey: coord)
         // Sept 22 (wall-face authoring expansion): pictures/pictureLights
         // are keyed by WallFace now, so a plain removeValue(forKey: coord)
@@ -2421,6 +3289,9 @@ final class MazeStore: ObservableObject {
     /// "leaving the floor" moment to hang a save off of the way cell
     /// edits get one via the grid editor's dismiss.
     func setNextMazeID(_ id: Int?) {
+        // Oct 2, Build 6: a floor's exit can never be the floor itself
+        // (the elevator would "ride" nowhere and strand the player).
+        guard id != currentMazeID else { return }
         guard id != nextMazeID else { return }
         nextMazeID = id
         // Sept 20 (autosave pass): was plain save() -- this doesn't
@@ -2603,6 +3474,31 @@ final class MazeStore: ObservableObject {
         record.ceilingVisibleFixture = ceilingVisibleFixture.map { CeilingVisibleFixturePlacement(coord: $0.key, kind: $0.value) }
         record.pictureLights = pictureLights.map { PicturePlacement(coord: $0.coord, direction: $0.direction) }
         record.lightBrightness = lightBrightness
+        record.tables = tables.filter { cells.contains($0.key) }
+            .map { TablePlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation, hasPlant: $0.value.hasPlant) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.desks = desks.filter { cells.contains($0.key) }
+            .map { DeskPlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.waterCoolers = waterCoolers.filter { cells.contains($0.key) }
+            .map { WaterCoolerPlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.officeChairs = officeChairs.filter { cells.contains($0.key) }
+            .map { OfficeChairPlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.floorLamps = floorLamps.filter { cells.contains($0.key) }
+            .map { FloorLampPlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation, isOn: $0.value.isOn, brightness: $0.value.brightness) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.aquariums = aquariums.filter { cells.contains($0.key) }
+            .map { AquariumPlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.filingCabinets = filingCabinets.filter { cells.contains($0.key) }
+            .map { FilingCabinetPlacement(coord: $0.key, position: $0.value.position, orientation: $0.value.orientation, openDrawerIndex: $0.value.openDrawerIndex) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
+        record.floorGlowSequences = floorGlowSequences
+        record.cellSurfaces = cellSurfaces.filter { cells.contains($0.key) && !$0.value.isEmpty }
+            .map { CellSurfacePlacement(coord: $0.key, wallTexture: $0.value.wallTexture, floorTexture: $0.value.floorTexture, ceilingTexture: $0.value.ceilingTexture) }
+            .sorted { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }
         record.pictureImageSelections = pictureImageSelections.map { PictureSelectionPlacement(coord: $0.key.coord, selection: $0.value, direction: $0.key.direction) }
         library[currentMazeID] = record
         MazeLibrary.saveAll(library)
@@ -2669,6 +3565,15 @@ final class MazeStore: ObservableObject {
         checkersTerminals = Dictionary(uniqueKeysWithValues: record.checkersTerminals.map { ($0.coord, $0.direction) })
         woidleTerminals = Dictionary(uniqueKeysWithValues: record.woidleTerminals.map { ($0.coord, $0.direction) })
         fires = Set(record.fires.map(\.coord))
+        tables = Self.tableDictionary(record.tables, cells: cells)
+        desks = Self.deskDictionary(record.desks, cells: cells)
+        waterCoolers = Self.waterCoolerDictionary(record.waterCoolers, cells: cells)
+        officeChairs = Self.officeChairDictionary(record.officeChairs, cells: cells)
+        floorLamps = Self.floorLampDictionary(record.floorLamps, cells: cells)
+        aquariums = Self.aquariumDictionary(record.aquariums, cells: cells)
+        filingCabinets = Self.filingCabinetDictionary(record.filingCabinets, cells: cells)
+        cellSurfaces = Self.cellSurfaceDictionary(record.cellSurfaces, cells: cells)
+        floorGlowSequences = record.floorGlowSequences
         extinguishers = Dictionary(uniqueKeysWithValues: record.extinguishers.map { ($0.coord, $0.direction) })
         photoBooths = Dictionary(uniqueKeysWithValues: record.photoBooths.map { ($0.coord, ($0.direction, $0.expression)) })
         pictures = Dictionary(uniqueKeysWithValues: record.pictures.map { (WallFace(coord: $0.coord, direction: $0.direction), $0.size ?? .standard) })
@@ -2731,6 +3636,10 @@ final class MazeStore: ObservableObject {
         }
         MazeLibrary.clearAllSaved()
         resetCurrentFloorToDefault()
+        // Restore the BUILDING: the cab decoration comes back to the bundled
+        // default (empty if the bundle predates it). After the floor reset's
+        // undo snapshot, so Undo restores the previous cab as well.
+        setElevatorCabDecoration(bundledElevatorCab() ?? ElevatorCabDecoration())
     }
 
     /// Eddie, Sept 8: "the output from that map save button should be
@@ -2752,7 +3661,13 @@ final class MazeStore: ObservableObject {
         save()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let records = library.values.sorted { $0.id < $1.id }
+        // The building-wide cab decoration rides on Floor 1 only (portable
+        // part: no device-specific camera-roll references).
+        let records = library.values.sorted { $0.id < $1.id }.map { record -> MazeRecord in
+            var record = record
+            record.elevatorCab = record.id == 1 ? elevatorCabDecoration.portable : nil
+            return record
+        }
         guard let data = try? encoder.encode(records) else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -2821,6 +3736,15 @@ final class MazeStore: ObservableObject {
             checkersTerminals = Dictionary(uniqueKeysWithValues: record.checkersTerminals.map { ($0.coord, $0.direction) })
             woidleTerminals = Dictionary(uniqueKeysWithValues: record.woidleTerminals.map { ($0.coord, $0.direction) })
             fires = Set(record.fires.map(\.coord))
+            tables = Self.tableDictionary(record.tables, cells: cells)
+            desks = Self.deskDictionary(record.desks, cells: cells)
+            waterCoolers = Self.waterCoolerDictionary(record.waterCoolers, cells: cells)
+            officeChairs = Self.officeChairDictionary(record.officeChairs, cells: cells)
+            floorLamps = Self.floorLampDictionary(record.floorLamps, cells: cells)
+            aquariums = Self.aquariumDictionary(record.aquariums, cells: cells)
+            filingCabinets = Self.filingCabinetDictionary(record.filingCabinets, cells: cells)
+            cellSurfaces = Self.cellSurfaceDictionary(record.cellSurfaces, cells: cells)
+            floorGlowSequences = record.floorGlowSequences
             extinguishers = Dictionary(uniqueKeysWithValues: record.extinguishers.map { ($0.coord, $0.direction) })
             photoBooths = Dictionary(uniqueKeysWithValues: record.photoBooths.map { ($0.coord, ($0.direction, $0.expression)) })
             pictures = Dictionary(uniqueKeysWithValues: record.pictures.map { (WallFace(coord: $0.coord, direction: $0.direction), $0.size ?? .standard) })
@@ -2868,6 +3792,15 @@ final class MazeStore: ObservableObject {
             checkersTerminals = [:]
             woidleTerminals = [:]
             fires = []
+            tables = [:]
+            desks = [:]
+            waterCoolers = [:]
+            officeChairs = [:]
+            floorLamps = [:]
+            aquariums = [:]
+            filingCabinets = [:]
+            cellSurfaces = [:]
+            floorGlowSequences = []
             extinguishers = [:]
             photoBooths = [:]
             roomDoors = [:]
@@ -2916,7 +3849,8 @@ final class MazeStore: ObservableObject {
     /// floor authored without a next-floor link just quietly stays on
     /// the existing "You made it!" screen instead of going anywhere.
     func advanceToNextMaze() {
-        guard let next = nextMazeID else { return }
+        guard let next = nextMazeID else { diag("maze.advanceToNextMaze", ["from": currentMazeID, "next": "none"]); return }
+        diag("maze.advanceToNextMaze", ["from": currentMazeID, "next": next])
         switchTo(id: next)
     }
 
@@ -2932,7 +3866,7 @@ final class MazeStore: ObservableObject {
     /// together so undo works correctly no matter which mode (wall
     /// painting or object placing) the stroke was in.
     func snapshotForUndo() {
-        undoStack.append((elevatorCabDecoration: elevatorCabDecoration, fluorescentLights: fluorescentLights, autoGeneratedFluorescentCoords: autoGeneratedFluorescentCoords, ceilingVisibleFixture: ceilingVisibleFixture, pictureLights: pictureLights, additionalContent: EditorAdditionalUndoState(bathroomDoors: bathroomDoors, extinguishers: extinguishers, ticTacToeTerminals: ticTacToeTerminals, shellGameStations: shellGameStations, rockPaperScissorsTerminals: rockPaperScissorsTerminals, higherLowerTerminals: higherLowerTerminals, fiveCardDrawTerminals: fiveCardDrawTerminals, simonTerminals: simonTerminals, hangmanTerminals: hangmanTerminals, connectFourTerminals: connectFourTerminals, checkersTerminals: checkersTerminals, woidleTerminals: woidleTerminals, photoBooths: photoBooths), lightBrightness: lightBrightness, cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, mirrors: mirrors, wallLights: wallLights, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms, windowRooms: windowRooms, roomEntranceDoors: roomEntranceDoors, fires: fires, pictureImageSelections: pictureImageSelections))
+        undoStack.append((elevatorCabDecoration: elevatorCabDecoration, fluorescentLights: fluorescentLights, autoGeneratedFluorescentCoords: autoGeneratedFluorescentCoords, ceilingVisibleFixture: ceilingVisibleFixture, pictureLights: pictureLights, additionalContent: EditorAdditionalUndoState(bathroomDoors: bathroomDoors, extinguishers: extinguishers, ticTacToeTerminals: ticTacToeTerminals, shellGameStations: shellGameStations, rockPaperScissorsTerminals: rockPaperScissorsTerminals, higherLowerTerminals: higherLowerTerminals, fiveCardDrawTerminals: fiveCardDrawTerminals, simonTerminals: simonTerminals, hangmanTerminals: hangmanTerminals, connectFourTerminals: connectFourTerminals, checkersTerminals: checkersTerminals, woidleTerminals: woidleTerminals, photoBooths: photoBooths, tables: tables, desks: desks, waterCoolers: waterCoolers, officeChairs: officeChairs, floorLamps: floorLamps, aquariums: aquariums, filingCabinets: filingCabinets, cellSurfaces: cellSurfaces), lightBrightness: lightBrightness, cells: cells, objects: objects, destinations: destinations, exitSigns: exitSigns, floorMaps: floorMaps, spotlights: spotlights, missionSigns: missionSigns, pictures: pictures, mirrors: mirrors, wallLights: wallLights, picturesUseCameraRoll: picturesUseCameraRoll, roomDoors: roomDoors, itemRooms: itemRooms, windowRooms: windowRooms, roomEntranceDoors: roomEntranceDoors, fires: fires, pictureImageSelections: pictureImageSelections))
         if undoStack.count > maxUndoDepth {
             undoStack.removeFirst()
         }
@@ -2957,6 +3891,14 @@ final class MazeStore: ObservableObject {
         checkersTerminals = previous.additionalContent.checkersTerminals
         woidleTerminals = previous.additionalContent.woidleTerminals
         photoBooths = previous.additionalContent.photoBooths
+        tables = previous.additionalContent.tables
+        desks = previous.additionalContent.desks
+        waterCoolers = previous.additionalContent.waterCoolers
+        officeChairs = previous.additionalContent.officeChairs
+        floorLamps = previous.additionalContent.floorLamps
+        aquariums = previous.additionalContent.aquariums
+        filingCabinets = previous.additionalContent.filingCabinets
+        cellSurfaces = previous.additionalContent.cellSurfaces
         objects = previous.objects
         destinations = previous.destinations
         exitSigns = previous.exitSigns
@@ -3024,6 +3966,15 @@ final class MazeStore: ObservableObject {
         checkersTerminals = [:]
         woidleTerminals = [:]
         fires = []
+        tables = [:]
+        desks = [:]
+        waterCoolers = [:]
+        officeChairs = [:]
+        floorLamps = [:]
+        aquariums = [:]
+        filingCabinets = [:]
+        cellSurfaces = [:]
+        floorGlowSequences = []
         extinguishers = [:]
         photoBooths = [:]
         roomDoors = [:]
@@ -3148,6 +4099,14 @@ private struct EditorAdditionalUndoState {
     let checkersTerminals: [GridCoordinate: Direction]
     let woidleTerminals: [GridCoordinate: Direction]
     let photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)]
+    let tables: [GridCoordinate: FurnitureTable]
+    let desks: [GridCoordinate: FurnitureDesk]
+    let waterCoolers: [GridCoordinate: FurnitureWaterCooler]
+    let officeChairs: [GridCoordinate: FurnitureOfficeChair]
+    let floorLamps: [GridCoordinate: FurnitureFloorLamp]
+    let aquariums: [GridCoordinate: FurnitureAquarium]
+    let filingCabinets: [GridCoordinate: FurnitureFilingCabinet]
+    let cellSurfaces: [GridCoordinate: CellSurfaceOverride]
 }
 
 extension MazeStore {

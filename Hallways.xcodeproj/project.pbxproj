@@ -106,7 +106,9 @@
 				"Hallways-Assets/audio/street1.mp3",
 				"Hallways-Assets/audio/trash-chute-close.mp3",
 				"Hallways-Assets/audio/trash-chute-open.mp3",
-				"Hallways-Assets/audio/walk-heigh-heels.mp3",
+				"Hallways-Assets/audio/walk-high-heels-reverse.mp3",
+				"Hallways-Assets/audio/walk-high-heels.mp3",
+				"Hallways-Assets/audio/walk-man-reverse.mp3",
 				"Hallways-Assets/audio/walk-man.mp3",
 				"Hallways-Assets/audio/warning-buzz.mp3",
 				"Hallways-Assets/audio/womp2.wav",
@@ -588,7 +590,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 84N24333QH;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -623,7 +625,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 84N24333QH;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;

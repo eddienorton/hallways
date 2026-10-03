@@ -23,7 +23,7 @@ enum SoundEffects {
     /// Resolve lazy audio players while the title screen is visible, without playing.
     static func prepareForGameplay() async {
         let loaders: [() -> AVAudioPlayer?] = [
-            { walkingPlayer }, { elevatorArrivalPlayer }, { elevatorMusicPlayer },
+            { walkingPlayer }, { reverseWalkingPlayer }, { elevatorArrivalPlayer }, { elevatorMusicPlayer },
             { cashPickupPlayer }, { intersectionLockPlayer }, { alarmPlayer },
             { trashPickup1Player }, { trashPickup2Player }, { trashChuteOpenPlayer }, { trashChuteClosePlayer },
             { mailPickupPlayer }, { mailDeliveryPlayer }, { extinguisherSprayPlayer }, { extinguisherGrabPlayer },
@@ -94,6 +94,7 @@ enum SoundEffects {
     static func setWalkingPace(_ pace: Float) {
         walkingRate = min(1.6, max(1, pace))
         walkingPlayer?.rate = walkingRate
+        reverseWalkingPlayer?.rate = walkingRate
     }
 
     static func playCashPickup() {
@@ -135,31 +136,43 @@ enum SoundEffects {
     }
 
     /// Eddie, Sept 9, wiring up the first real music/sfx from
-    // One existing footstep loop; the preference changes only its source file.
+    // The footstep loop: one forward and one backward (Oct 2) player for the
+    // selected feet. The preference changes only their source files. At
+    // most one of the two ever plays -- starting one pauses the other.
     private static var loadedFeet = PlayerFeet.current
-    private static var walkingPlayer: AVAudioPlayer? = makeWalkingPlayer(loadedFeet)
+    private static var walkingPlayer: AVAudioPlayer? = makeWalkingPlayer(loadedFeet, reverse: false)
+    private static var reverseWalkingPlayer: AVAudioPlayer? = makeWalkingPlayer(loadedFeet, reverse: true)
+    /// Which loop startWalking last selected (false = forward).
+    private(set) static var walkingReverse = false
 
-    private static func makeWalkingPlayer(_ feet: PlayerFeet) -> AVAudioPlayer? {
-        let player = loadPlayer(feet.filename)
+    private static func makeWalkingPlayer(_ feet: PlayerFeet, reverse: Bool) -> AVAudioPlayer? {
+        let player = loadPlayer(feet.walkingFilename(reverse: reverse))
         player?.numberOfLoops = -1
         player?.enableRate = true
         return player
     }
 
-    static func startWalking() {
+    /// Plays the forward (or, `reverse`, the backward) footstep loop. Already
+    /// playing that loop: no restart. The other loop is paused first, so the
+    /// two never overlap.
+    static func startWalking(reverse: Bool = false) {
         let selected = PlayerFeet.current
         if selected != loadedFeet {
-            walkingPlayer?.pause()
-            walkingPlayer = makeWalkingPlayer(selected)
+            stopWalking()
+            walkingPlayer = makeWalkingPlayer(selected, reverse: false)
+            reverseWalkingPlayer = makeWalkingPlayer(selected, reverse: true)
             loadedFeet = selected
         }
-        guard let player = walkingPlayer, !player.isPlaying else { return }
+        walkingReverse = reverse
+        (reverse ? walkingPlayer : reverseWalkingPlayer)?.pause()
+        guard let player = reverse ? reverseWalkingPlayer : walkingPlayer, !player.isPlaying else { return }
         player.rate = walkingRate
         player.play()
     }
 
     static func stopWalking() {
         walkingPlayer?.pause()
+        reverseWalkingPlayer?.pause()
     }
 
     /// Both entry and arrival use the same chime before the doors move.
@@ -190,13 +203,16 @@ enum SoundEffects {
     private static let elevatorMusicPlayer = loadPlayer("elevator-music.mp3")
 
     static func playElevatorMusic() {
-        guard let player = elevatorMusicPlayer else { return }
+        guard let player = elevatorMusicPlayer else { diag("audio.elevatorMusic.play", ["loaded": false]); return }
         player.currentTime = 0
-        player.play()
+        let started = player.play()
+        diag("audio.elevatorMusic.play", ["started": started, "duration": player.duration, "loops": player.numberOfLoops])
     }
 
     static func stopElevatorMusic() {
+        diag("audio.elevatorMusic.stopRequested", ["wasPlaying": elevatorMusicPlayer?.isPlaying])
         elevatorMusicPlayer?.pause()
+        diag("audio.elevatorMusic.stopped", ["isPlaying": elevatorMusicPlayer?.isPlaying])
     }
 
     /// Eddie, Sept 18: street/city ambience for the building-exterior

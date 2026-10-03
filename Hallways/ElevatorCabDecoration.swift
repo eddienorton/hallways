@@ -61,6 +61,33 @@ struct ElevatorCabDecoration: Codable, Equatable {
         return Self(ceilingFixture: fixture, backArtwork: decoded.backArtwork, sideArtwork: decoded.sideArtwork, sideRightArtwork: decoded.sideRightArtwork)
     }
 
+    /// Whether this device has EVER saved its own cab decoration. A device
+    /// with no saved value is seeded from the bundled building default.
+    static func hasSavedValue(in defaults: UserDefaults) -> Bool {
+        defaults.data(forKey: storageKey) != nil
+    }
+
+    /// The part of the cab decoration that means the same thing on any
+    /// device, for the building-default JSON: the ceiling fixture (kind,
+    /// brightness, orientation) and built-in / bundled poster images.
+    /// Camera-roll poster choices are PHAsset identifiers that only exist
+    /// in THIS device's photo library, so they are left out (nil) -- a
+    /// device loading the default then shows its ordinary fallback poster
+    /// for that wall, exactly as with no choice made. The exporting
+    /// device's own local choice is untouched.
+    var portable: ElevatorCabDecoration {
+        func portable(_ selection: PictureImageSelection?) -> PictureImageSelection? {
+            switch selection {
+            case .builtIn?, .lobbyDefault?: return selection
+            case .cameraRoll?, nil: return nil
+            }
+        }
+        return ElevatorCabDecoration(
+            ceilingFixture: ceilingFixture.map { Fixture(kind: $0.kind, brightness: $0.brightness, orientation: $0.orientation) },
+            backArtwork: portable(backArtwork), sideArtwork: portable(sideArtwork),
+            sideRightArtwork: portable(sideRightArtwork))
+    }
+
     func save(to defaults: UserDefaults) {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.storageKey)

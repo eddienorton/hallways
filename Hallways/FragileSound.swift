@@ -36,6 +36,7 @@ enum FragileSound {
         players.removeAll { !$0.isPlaying }
         guard players.count < 24, let player = try? AVAudioPlayer(data: data) else { return }
         player.volume = volume
+        HallwaysAudio.shared.manage(player)          // Oct 8: the mute switch
         player.pan = max(-1, min(1, pan))
         player.prepareToPlay()
         player.play()

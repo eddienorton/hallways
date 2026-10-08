@@ -35,7 +35,7 @@ struct DecoratorTarget: Equatable {
     /// it gets its own small set of methods (floorPosition/
     /// changeFloorPosition/floorObjectOrientation/changeFloorOrientation)
     /// further down in this file.
-    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth, roomEntranceDoor, table, desk, waterCooler, officeChair, floorLamp, aquarium, filingCabinet, game }
+    enum Kind: String { case ceilingSurface, ceiling, fluorescent, picture, wallSurface, missionSign, floorMap, floorObject, exitSign, fire, roomDoor, mirror, extinguisher, photoBooth, roomEntranceDoor, table, desk, waterCooler, officeChair, floorLamp, aquarium, filingCabinet, game, clock }
     let floor: Int
     /// Sept 26 (Decorate-mode elevator pictures): identifies WHICH of
     /// the elevator cab's 3 built-in posters a target refers to -- back
@@ -168,6 +168,8 @@ struct DecoratorTarget: Equatable {
         // Floor-5 mission pickup (MazeStore.extinguishers), now
         // authorable on any unclaimed solid wall (Wall chooser).
         case .extinguisher: return "Fire Extinguisher"
+        // Oct 8: a real-time analog wall clock (MazeStore.clocks, WallClock).
+        case .clock: return "Clock"
         // Sept 25 (Designer wall authoring): Photo Booth -- the Floor-6
         // mission fixture (MazeStore.photoBooths), now authorable on
         // any unclaimed solid wall (Wall chooser).
@@ -221,7 +223,13 @@ struct DecoratorTarget: Equatable {
 /// the source of truth; no parallel light values or scene-rebuild token.
 final class DecoratorState: ObservableObject {
     @Published var enabled = false {
-        didSet { selection = nil; if enabled { stopWalking?() } }
+        didSet {
+            // Oct 8 (Developer/Release separation): Decorator mode can
+            // never turn on in Release. Implementation and stored
+            // decoration data are untouched -- only unreachable.
+            if enabled && !BuildMode.developerTools { enabled = false; return }
+            selection = nil; if enabled { stopWalking?() }
+        }
     }
     @Published var selection: DecoratorTarget?
     /// Sept 28 (Decorator availability staleness fix): the player's
@@ -436,7 +444,7 @@ final class DecoratorState: ObservableObject {
     }
 
     func select(at point: CGPoint, in view: SCNView) -> Bool {
-        guard enabled, view.scene === scene, store?.currentMazeID == floor else { return false }
+        guard BuildMode.developerTools, enabled, view.scene === scene, store?.currentMazeID == floor else { return false }
         // Only the nearest visible geometry counts. Never select through walls.
         guard let hit = view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue,
                                                        .ignoreHiddenNodes: true]).first else { return false }
@@ -479,6 +487,7 @@ final class DecoratorState: ObservableObject {
             case .roomDoor: return false // no Room Door in the elevator cab
             case .mirror: return false // no Mirror in the elevator cab
             case .extinguisher: return false // no Fire Extinguisher in the elevator cab
+            case .clock: return false // no Clock in the elevator cab
             case .photoBooth: return false // no Photo Booth in the elevator cab
             case .roomEntranceDoor: return false // no Room Entrance door in the elevator cab
             case .table: return false // no Table in the elevator cab
@@ -531,6 +540,10 @@ final class DecoratorState: ObservableObject {
         case .extinguisher:
             guard let direction = target.direction else { return false }
             return store.extinguishers[coord] == direction
+        // Oct 8: wall clocks -- face-keyed, any number per floor.
+        case .clock:
+            guard let direction = target.direction else { return false }
+            return store.hasClock(direction, at: coord)
         case .photoBooth:
             guard let direction = target.direction else { return false }
             return store.photoBooths[coord]?.direction == direction
@@ -1493,6 +1506,41 @@ final class DecoratorState: ObservableObject {
         unregisterLiveExtinguisher(coord)
         for node in liveNodes { node.removeFromParentNode() }
         selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: target.direction)
+        save(target)
+    }
+
+    /// Oct 8: ADD -> Clock on a tapped empty wall (MazeStore.canPlaceClock).
+    func canAddClock(_ target: DecoratorTarget) -> Bool {
+        guard enabled, target.kind == .wallSurface, let store, let coord = target.coord, let direction = target.direction else { return false }
+        return store.canPlaceClock(direction, at: coord)
+    }
+
+    /// Oct 8: places a real-time WallClock on the tapped wall (the same
+    /// node the build loop makes), over the kept wall panel like addMirror.
+    func addClock() {
+        guard enabled, let target = selection, target.kind == .wallSurface,
+              let coord = target.coord, let direction = target.direction,
+              canAddClock(target), let store, let scene else { return }
+        store.snapshotForUndo()
+        store.placeClock(direction, at: coord)
+        let node = WallClock.makeWallNode(at: WallFace(coord: coord, direction: direction), cellSize: store.cellSize)
+        scene.rootNode.addChildNode(node)
+        DecoratorTarget(floor: floor, coord: coord, kind: .clock, direction: direction).tag(node)
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .clock, direction: direction)
+        save(target)
+    }
+
+    /// Oct 8: the reverse of addClock; the wall reads "Empty Wall" again.
+    func deleteClock() {
+        guard enabled, let target = selection, target.kind == .clock,
+              exists(target), let coord = target.coord, let direction = target.direction,
+              let store else { return }
+        let liveNodes = nodes(for: target)
+        guard !liveNodes.isEmpty else { return }
+        store.snapshotForUndo()
+        store.removeClock(direction, at: coord)
+        for node in liveNodes { node.removeFromParentNode() }
+        selection = DecoratorTarget(floor: floor, coord: coord, kind: .wallSurface, direction: direction)
         save(target)
     }
 
@@ -3056,7 +3104,9 @@ struct DecoratorOverlay: View {
             // object already here).
             WallChooserItem(title: "Mirror", isEnabled: state.canAddMirror(target)) { state.addMirror() },
             WallChooserItem(title: "Fire Extinguisher", isEnabled: state.canAddExtinguisher(target)) { state.addExtinguisher() },
-            WallChooserItem(title: "Photo Booth", isEnabled: state.canAddPhotoBooth(target)) { state.addPhotoBooth() }
+            WallChooserItem(title: "Photo Booth", isEnabled: state.canAddPhotoBooth(target)) { state.addPhotoBooth() },
+            // Oct 8: a real-time analog wall clock.
+            WallChooserItem(title: "Clock", isEnabled: state.canAddClock(target)) { state.addClock() }
         ]
     }
 
@@ -3597,6 +3647,9 @@ struct DecoratorOverlay: View {
                         // is removal (deregisters the pickup bookkeeping,
                         // including dropping it if carried).
                         Button("Delete Fire Extinguisher", role: .destructive) { state.deleteExtinguisher() }
+                    } else if target.kind == .clock {
+                        // Oct 8: a wall clock's only authoring affordance is removal.
+                        Button("Delete Clock", role: .destructive) { state.deleteClock() }
                     } else if target.kind == .photoBooth {
                         // Sept 25 (Designer wall authoring): a placed
                         // Photo Booth's only authoring affordance is

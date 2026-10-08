@@ -44,7 +44,7 @@
         }
       },
       "ceilingFixture" : {
-        "brightness" : 3,
+        "brightness" : 5,
         "kind" : "fluorescent",
         "orientation" : "northSouth"
       },

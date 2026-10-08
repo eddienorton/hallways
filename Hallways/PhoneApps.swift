@@ -74,6 +74,15 @@ final class PhoneApps: ObservableObject {
         ChatStore.shared.deliverDue()
     }
 
+    /// Open mail `id` on the phone: exactly what the computer does when a
+    /// message is opened -- mark it read in the shared store and record the
+    /// fact (on the floor the player is on).
+    func showMail(_ id: String, floor: Int) {
+        mailMessage = id
+        MailStore.shared.markRead(id)
+        PlayerHistory.shared.record(.mailMessageRead, subject: id, floor: floor, detail: ["device": "phone"])
+    }
+
     func resetGPSView() {
         gpsZoom = 1; gpsZoomBase = 1
         gpsPan = .zero; gpsPanBase = .zero
@@ -383,7 +392,6 @@ struct PhoneHomeScreen: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            ForEach(phone.notifications) { note in notificationCard(note) }
             LazyVGrid(columns: Self.columns, spacing: 18) {
                 appIcon(.buildingGPS, "Building GPS", art: .gps, unread: 0)
                 appIcon(.hallChat, "HallChat", art: .chat, unread: chat.unreadCount)
@@ -422,27 +430,52 @@ struct PhoneHomeScreen: View {
         .frame(maxWidth: .infinity)
         .phoneTap { phone.open(app) }
     }
+}
 
-    private func notificationCard(_ note: PhoneNotification) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "building.2.fill").font(.system(size: 10, weight: .bold))
-                    .frame(width: 18, height: 18)
-                    .background(Color.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                Text(note.source).font(.system(size: 12, weight: .semibold, design: .rounded))
-                Spacer()
-            }
-            .foregroundStyle(.white.opacity(0.85))
-            Text(note.text)
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
+// MARK: - Notifications on the screen
+
+/// Compact notifications across the top of whatever the phone is showing.
+/// Tapping one opens what it announces (for mail: Mail, with that message
+/// open and read); ignored, it goes away by itself after a while
+/// (HallPhone.notificationLifetime) -- the message stays in its app.
+struct PhoneNotificationBanners: View {
+    @ObservedObject var phone: HallPhone
+    let mazeStore: MazeStore
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(Array(phone.notifications.prefix(2))) { note in banner(note) }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.18), lineWidth: 1))
-        .phoneTap { phone.dismiss(note.id) }
+        .padding(.horizontal, 10)
+        .padding(.top, 38)
+    }
+
+    private func banner(_ note: PhoneNotification) -> some View {
+        HStack(spacing: 10) {
+            PhoneAppIcon(art: .mail).frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(note.source).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text(note.title).font(.system(size: 14, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1).minimumScaleFactor(0.85)
+            }
+            Spacer(minLength: 4)
+            Text("now").font(.system(size: 11, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.6))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Color(red: 0.1, green: 0.12, blue: 0.17).opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .phoneTap {
+            phone.dismiss(note.id)
+            switch note.opens {
+            case .mail(let id):
+                PhoneApps.shared.showMail(id, floor: mazeStore.currentMazeID)
+                phone.open(.mail)
+            case nil:
+                break
+            }
+        }
     }
 }
 
@@ -782,13 +815,7 @@ struct PhoneMailApp: View {
         .padding(.bottom, PhoneStyle.handClearance)
     }
 
-    /// Exactly what the computer does when a message is opened: mark it read
-    /// in the shared store and record the fact (on the floor the player is on).
-    private func open(_ id: String) {
-        apps.mailMessage = id
-        store.markRead(id)
-        PlayerHistory.shared.record(.mailMessageRead, subject: id, floor: mazeStore.currentMazeID, detail: ["device": "phone"])
-    }
+    private func open(_ id: String) { apps.showMail(id, floor: mazeStore.currentMazeID) }
 
     @ViewBuilder
     private var list: some View {

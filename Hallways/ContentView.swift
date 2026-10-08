@@ -248,6 +248,27 @@ private struct FallingTrashPiece: Identifiable {
     let scale: CGFloat
 }
 
+/// Oct 8: speaker on / speaker off for all of Hallways' own audio
+/// (HallwaysAudio). Same chip style as its neighbours.
+struct HallwaysMuteButton: View {
+    @ObservedObject private var audio = HallwaysAudio.shared
+
+    var body: some View {
+        Button {
+            audio.toggle()
+        } label: {
+            Image(systemName: audio.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 20)       // both glyphs, same footprint
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel(audio.isMuted ? "Sound off" : "Sound on")
+        .accessibilityHint("Mutes or restores all Hallways sound")
+    }
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var tuning = TuningParams()
@@ -258,6 +279,8 @@ struct ContentView: View {
     @StateObject private var mirrorComments = MirrorCommentState()
     @StateObject private var themeStore = WallThemeStore()
     @State private var showGridEditor = false
+    /// Oct 8: the Debug HUD's START OVER confirmation (Settings has its own).
+    @State private var showStartOverConfirmation = false
 
     // Eddie, Sept 7: "we want the intro screen (probably the building
     // with some text instruction on it, copyright, etc)." A one-time
@@ -473,40 +496,49 @@ struct ContentView: View {
         .background(Color.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 20))
     }
 
-    #if DEBUG
-    /// Oct 5 -- DEV: RESET ONBOARDING / NEW PLAYER. Puts back exactly the
-    /// prologue state a fresh install has (proved on device by delete +
-    /// reinstall), without touching anything else: maps, Decorator work,
-    /// player height/feet, elevator cab decoration, dev toggles are kept.
-    /// The caller then returns to Floor 1, rebuilds its scene (so the
-    /// onboarding gates re-evaluate) and raises the exterior opening screen.
-    /// No relaunch needed. Normal launches never call this.
-    private func resetOnboardingForNewPlayer() {
-        let hadEmployeeID = EmployeeID.number != nil
-        Admission.isCompleted = false                       // admission.completed
-        Admission.isPrologueCompleted = false               // prologue.completed
-        hasCompletedInitialEntrance = false                 // first front-door entrance
-        navBridge.controller?.hasCompletedInitialEntrance = false
-        hasSeenNavGestureHint = false                       // first-launch gesture hint (shows next launch)
-        EmployeeID.reset()                                  // number + saved Hallways portrait
-        AdministrationIDTerminal.acceptedPhoto = nil        // in-memory accepted mugshot
-        Posse.records = [:]                                 // Freddy met / following / home (in memory)
-        OfficeComputer.shared.forceClose(reason: "newPlayerReset")
-        OfficeComputer.shared.discardAllGames()             // Oct 7: no games in progress for a new hire
-        PlayerHistory.shared.resetForNewPlayer()            // Oct 7: the fact ledger (PlayerHistory.json)
-        MailStore.shared.resetForNewPlayer()                // Oct 7: delivered/read mail
-        HallPhone.shared.resetForNewPlayer()                // Oct 8: phone low, nothing waiting on it
-        UserDefaults.standard.removeObject(forKey: TinCanRat.enabledKey)   // Noodle back to the fresh default
-        diag("dev.resetNewPlayer", ["fromFloor": mazeStore.currentMazeID, "hadEmployeeID": hadEmployeeID])
+    /// Oct 8 -- START OVER (Debug AND Release). The shared story reset
+    /// (StartOver.clearStoryProgress), then the ContentView half: this
+    /// view's own copies of the onboarding flags, back to Floor 1, a scene
+    /// rebuild (so the onboarding gates re-evaluate) and the exterior
+    /// opening screen -- ready for the original entrance sequence. Called
+    /// from Settings > Start Over and the Debug workshop's Start Over.
+    private func startOver(source: String) {
+        navLog("[LIGHTBUILD] rebuild trigger: Start Over (\(source)) -- leaving floor \(mazeStore.currentMazeID), switching to floor 1")
+        clearStoryState(source: source)
+        mazeStore.switchTo(id: 1)
+        runtime.requestReset()
+        runtime.requestSceneRebuild()
+        withAnimation(.easeOut(duration: 0.3)) {
+            showIntroScreen = true
+        }
     }
 
-    /// Oct 5 -- DEV: FAST ADMINISTRATION TEST. The same New Player reset,
-    /// then straight onto Floor 2 through the existing dev floor jump (its
-    /// normal start position), rebuilt fresh even if already there -- no
-    /// exterior, lobby or elevator ride. Called from the grid editor's
+    /// The story reset itself plus this view's in-memory mirrors of it.
+    private func clearStoryState(source: String) {
+        StartOver.clearStoryProgress(source: source)
+        mazeStore.resetMoneyForNewEmployee()                // a new employee starts with $0
+        hasCompletedInitialEntrance = false                 // @AppStorage mirror
+        navBridge.controller?.hasCompletedInitialEntrance = false
+        hasSeenNavGestureHint = false                       // @AppStorage mirror
+    }
+
+    #if DEBUG
+    /// Oct 8 -- DEV: RETURN TO LOBBY. Back to Floor 1's start without
+    /// touching the story. No exterior screen.
+    private func devReturnToLobby() {
+        navLog("[LIGHTBUILD] rebuild trigger: dev Return to Lobby -- leaving floor \(mazeStore.currentMazeID), switching to floor 1")
+        diag("dev.returnToLobby", ["fromFloor": mazeStore.currentMazeID])
+        mazeStore.switchTo(id: 1)
+        runtime.requestReset()
+    }
+
+    /// Oct 5 -- DEV: FAST ADMINISTRATION TEST. The shared Start Over story
+    /// reset, then straight onto Floor 2 through the existing dev floor jump
+    /// (its normal start position), rebuilt fresh even if already there --
+    /// no exterior, lobby or elevator ride. Called from the grid editor's
     /// Jump to Floor menu.
     private func jumpToAdministrationAsNewEmployee() {
-        resetOnboardingForNewPlayer()
+        clearStoryState(source: "devFastAdministration")
         if showIntroScreen {
             SoundEffects.stopStreetAudio()
             showIntroScreen = false
@@ -656,7 +688,10 @@ struct ContentView: View {
                 // "must not appear on the intro" set; PlayerSettingsButton
                 // wasn't reported affected and isn't part of that set,
                 // so it stays outside this gate, unchanged.
-                if !showIntroScreen {
+                // Oct 8 (Developer/Release separation): the Decorator is a
+                // developer-workshop tool, never a player feature -- the
+                // DECORATE pill and + ADD menu don't exist in Release.
+                if !showIntroScreen && BuildMode.developerTools {
                     DecoratorOverlay(state: decorator, store: mazeStore)
                         .zIndex(36)
                         // Sept 28: re-render the Decorator's "+" menu
@@ -670,7 +705,7 @@ struct ContentView: View {
                     // pill and DECORATE layout), the controller's handheld-map API
                     // and the floor-map renderer are all kept for that.
                 }
-                PlayerSettingsButton(store: mazeStore)
+                PlayerSettingsButton(store: mazeStore, onStartOver: { startOver(source: "settings") })
             }
 
             // Unconditional, unlike the overlays above -- it has to
@@ -775,43 +810,34 @@ struct ContentView: View {
                     }
                     Spacer(minLength: 0)
                     HStack(spacing: 8) {
-                        Button {
-                            navLog("[LIGHTBUILD] rebuild trigger: Reset/\"Start From Beginning\" button pressed -- leaving floor \(mazeStore.currentMazeID), switching to floor 1")
-                            #if DEBUG
-                            // Oct 5: in development builds this button is RESET
-                            // ONBOARDING / NEW PLAYER (see resetOnboardingForNewPlayer).
-                            resetOnboardingForNewPlayer()
-                            #endif
-                            mazeStore.switchTo(id: 1)
-                            runtime.requestReset()
-                            #if DEBUG
-                            runtime.requestSceneRebuild()
-                            #endif
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                showIntroScreen = true
+                        // Oct 8: the permanent player control. The labeled
+                        // controls beside it are the Debug workshop's.
+                        HallwaysMuteButton()
+                        // Oct 8 (Developer/Release separation): three distinct,
+                        // labeled developer actions -- no single ambiguous Reset.
+                        //   START OVER  the shared story reset (same as Settings)
+                        //   LOBBY       back to Floor 1, story untouched
+                        //   DEV MAP     the grid editor: floor transport + editing
+                        // None of them exist in Release.
+                        #if DEBUG
+                        if BuildMode.developerTools {
+                            DevHUDButton(systemImage: "arrow.counterclockwise", caption: "START OVER") {
+                                showStartOverConfirmation = true
                             }
-                        } label: {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
+                            .alert(StartOver.confirmationTitle, isPresented: $showStartOverConfirmation) {
+                                Button("Cancel", role: .cancel) {}
+                                Button(StartOver.confirmButtonTitle, role: .destructive) { startOver(source: "devHUD") }
+                            } message: {
+                                Text(StartOver.confirmationMessage)
+                            }
+                            DevHUDButton(systemImage: "arrow.down.to.line", caption: "LOBBY") {
+                                devReturnToLobby()
+                            }
+                            DevHUDButton(systemImage: "map", caption: "DEV MAP") {
+                                showGridEditor = true
+                            }
                         }
-                        Button {
-                            showGridEditor = true
-                        } label: {
-                            // A folded-map icon, not a grid icon — this is how a
-                            // player should think of this screen: a map they
-                            // check, not "the editor." (Still called
-                            // GridEditorView internally, since that name
-                            // describes what the code does, not what a player
-                            // calls it — only the player-facing icon changed.)
-                            Image(systemName: "map")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
-                        }
+                        #endif
                     }
                     .fixedSize()
                     .layoutPriority(2)
@@ -830,6 +856,8 @@ struct ContentView: View {
             moneyHUDFrame = frame
         }
         .onChange(of: showGridEditor) { showing in
+            // Release: the grid editor / floor transport is unreachable.
+            if showing && !BuildMode.developerTools { showGridEditor = false; return }
             if showing { decorator.enabled = false }
         }
         .fullScreenCover(isPresented: $showGridEditor, onDismiss: {
@@ -1904,7 +1932,7 @@ struct HallwaySceneView: UIViewRepresentable {
             let worldMissionSigns = TapNavigationController.missionPlaquesInWorld ? c.missionSigns : [:]
             let buildStarted = Date()
             let reports = staged.reports
-            let result = HallwayScene.build(fromMaze: c.cells, cellSize: cellSize, wallHeight: wallHeight, objects: c.objects, destinations: c.destinations, exitSigns: c.exitSigns, floorMaps: c.floorMaps, spotlights: c.spotlights, missionSigns: worldMissionSigns, pictures: c.pictures, mirrors: c.mirrors, wallLights: c.wallLights, bathroomDoors: c.bathroomDoors, windowRooms: c.windowRooms, roomEntranceDoors: c.roomEntranceDoors, fires: c.fires, extinguishers: c.extinguishers, photoBooths: c.photoBooths, ticTacToeTerminals: c.ticTacToeTerminals, shellGameStations: c.shellGameStations, rockPaperScissorsTerminals: c.rockPaperScissorsTerminals, higherLowerTerminals: c.higherLowerTerminals, fiveCardDrawTerminals: c.fiveCardDrawTerminals, simonTerminals: c.simonTerminals, hangmanTerminals: c.hangmanTerminals, connectFourTerminals: c.connectFourTerminals, checkersTerminals: c.checkersTerminals, woidleTerminals: c.woidleTerminals, picturesUseCameraRoll: c.picturesUseCameraRoll, roomDoors: c.roomDoors, itemRooms: c.itemRooms, missionHeading: c.missionHeading, missionBody: c.missionBody, missionObjectKind: c.missionObjectKind, floorNumber: floor, totalFloors: totalFloors, playerStart: start, playerEnd: end, theme: theme, wallTexture: c.wallTexture, floorTexture: c.floorTexture, ceilingTexture: c.ceilingTexture, elevatorArtwork: sourceArtwork, fluorescentLights: c.fluorescentLights, ceilingVisibleFixture: c.ceilingVisibleFixture, pictureLights: c.pictureLights, lightBrightness: c.lightBrightness, pictureImageSelections: c.pictureImageSelections, elevatorCabDecoration: cabDecoration, floorObjectPlacements: c.floorObjectPlacements, tables: c.tables, desks: c.desks, waterCoolers: c.waterCoolers, officeChairs: c.officeChairs, floorLamps: c.floorLamps, aquariums: c.aquariums, filingCabinets: c.filingCabinets, cellSurfaces: c.cellSurfaces, reportPictureIdentity: { face, selection in reports.report { $0.reportCurrentPictureIdentity(selection, at: face) } }, reportElevatorBackIdentity: { selection in reports.report { $0.reportCurrentElevatorBackIdentity(selection) } }, reportElevatorSideIdentity: { selection in reports.report { $0.reportCurrentElevatorSideIdentity(selection) } }, reportElevatorSideRightIdentity: { selection in reports.report { $0.reportCurrentElevatorSideRightIdentity(selection) } })
+            let result = HallwayScene.build(fromMaze: c.cells, cellSize: cellSize, wallHeight: wallHeight, objects: c.objects, destinations: c.destinations, exitSigns: c.exitSigns, floorMaps: c.floorMaps, spotlights: c.spotlights, missionSigns: worldMissionSigns, pictures: c.pictures, mirrors: c.mirrors, wallLights: c.wallLights, bathroomDoors: c.bathroomDoors, windowRooms: c.windowRooms, roomEntranceDoors: c.roomEntranceDoors, fires: c.fires, extinguishers: c.extinguishers, photoBooths: c.photoBooths, ticTacToeTerminals: c.ticTacToeTerminals, shellGameStations: c.shellGameStations, rockPaperScissorsTerminals: c.rockPaperScissorsTerminals, higherLowerTerminals: c.higherLowerTerminals, fiveCardDrawTerminals: c.fiveCardDrawTerminals, simonTerminals: c.simonTerminals, hangmanTerminals: c.hangmanTerminals, connectFourTerminals: c.connectFourTerminals, checkersTerminals: c.checkersTerminals, woidleTerminals: c.woidleTerminals, picturesUseCameraRoll: c.picturesUseCameraRoll, roomDoors: c.roomDoors, itemRooms: c.itemRooms, missionHeading: c.missionHeading, missionBody: c.missionBody, missionObjectKind: c.missionObjectKind, floorNumber: floor, totalFloors: totalFloors, playerStart: start, playerEnd: end, theme: theme, wallTexture: c.wallTexture, floorTexture: c.floorTexture, ceilingTexture: c.ceilingTexture, elevatorArtwork: sourceArtwork, fluorescentLights: c.fluorescentLights, ceilingVisibleFixture: c.ceilingVisibleFixture, pictureLights: c.pictureLights, lightBrightness: c.lightBrightness, pictureImageSelections: c.pictureImageSelections, elevatorCabDecoration: cabDecoration, floorObjectPlacements: c.floorObjectPlacements, tables: c.tables, desks: c.desks, waterCoolers: c.waterCoolers, officeChairs: c.officeChairs, floorLamps: c.floorLamps, aquariums: c.aquariums, filingCabinets: c.filingCabinets, cellSurfaces: c.cellSurfaces, clocks: c.clocks, reportPictureIdentity: { face, selection in reports.report { $0.reportCurrentPictureIdentity(selection, at: face) } }, reportElevatorBackIdentity: { selection in reports.report { $0.reportCurrentElevatorBackIdentity(selection) } }, reportElevatorSideIdentity: { selection in reports.report { $0.reportCurrentElevatorSideIdentity(selection) } }, reportElevatorSideRightIdentity: { selection in reports.report { $0.reportCurrentElevatorSideRightIdentity(selection) } })
             HallwayScene.installFloorGlowSequences(c.floorGlowSequences, cells: c.cells, root: result.scene.rootNode)
             if floor == AdministrationReception.floor {
                 AdministrationReception.install(into: result.scene.rootNode, cellSize: cellSize, cells: c.cells)
@@ -2061,11 +2089,30 @@ struct HallwaySceneView: UIViewRepresentable {
                 stagedArrival.activate()
                 ElevatorArrivalTrace.shared.event("HallwayScene.build.staged", "sincePressMs=\(stagedArrival.ms(since: stagedArrival.pressedAt))")
             } else {
-                hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: worldMissionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, tables: mazeStore.tables, desks: mazeStore.desks, waterCoolers: mazeStore.waterCoolers, officeChairs: mazeStore.officeChairs, floorLamps: mazeStore.floorLamps, aquariums: mazeStore.aquariums, filingCabinets: mazeStore.filingCabinets, cellSurfaces: mazeStore.cellSurfaces, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
+                hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: worldMissionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, tables: mazeStore.tables, desks: mazeStore.desks, waterCoolers: mazeStore.waterCoolers, officeChairs: mazeStore.officeChairs, floorLamps: mazeStore.floorLamps, aquariums: mazeStore.aquariums, filingCabinets: mazeStore.filingCabinets, cellSurfaces: mazeStore.cellSurfaces, clocks: mazeStore.clocks, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
             }
             ElevatorArrivalTrace.shared.event("HallwayScene.build.end")
             navBridge.pendingElevatorArtwork = [:]
             let (scene, cameraNode, _, wallMaterials, floorMaterial, ceilingMaterial, objectNodes, destinationNodes, fireNodes, extinguisherNodes, photoBoothNodes, ticTacToeTerminalNodes, shellGameStationNodes, rockPaperScissorsTerminalNodes, higherLowerTerminalNodes, fiveCardDrawTerminalNodes, simonTerminalNodes, hangmanTerminalNodes, connectFourTerminalNodes, checkersTerminalNodes, woidleTerminalNodes, elevatorDoors, _, floorMapPlaneNodes, pictureMaterials) = hallwaySceneBuildResult
+            // Oct 8 (Floor 1 elevator return): an elevator arrival enters at
+            // the elevator. `start` stays the floor's own spawn for the BUILD
+            // (on Floor 1 it also places the front doors' inside face), but
+            // the player -- camera, current cell, followers -- starts at the
+            // elevator cell, exactly as on every other floor (where the two
+            // are the same cell). Before this, a lobby return opened the cab
+            // around the front-door cell, so the doors, the exit walk and the
+            // turn-to-doors all pointed at the entrance.
+            let playerStart = mazeStore.spawnCoordinate(arrivingByElevator: navBridge.pendingElevatorArrival) ?? start
+            let playerFacing = playerStart == start ? facing : startingFacing(at: playerStart, cells: mazeStore.cells)
+            if playerStart != start {
+                SCNTransaction.begin()
+                SCNTransaction.disableActions = true
+                cameraNode.position = SCNVector3(Float(CGFloat(playerStart.col) * mazeStore.cellSize), cameraNode.position.y,
+                                                 Float(CGFloat(playerStart.row) * mazeStore.cellSize))
+                cameraNode.eulerAngles = SCNVector3(0, Float(playerFacing.yaw), 0)
+                SCNTransaction.commit()
+                diag("arrival.spawnAtElevator", ["floor": mazeStore.currentMazeID, "spawn": playerStart, "floorStart": start])
+            }
             if controlledArrival { ElevatorArrivalTrace.shared.registerScene(scene) }
             ElevatorArrivalTrace.shared.event("SCNView.sceneAssign.begin")
             view.scene = scene
@@ -2322,6 +2369,11 @@ struct HallwaySceneView: UIViewRepresentable {
                 diag("arrival.presentInsideElevator.begin", ["controlled": preservedYaw != nil])
                 let preservedOffset = navBridge.pendingArrivalOffset
                 navBridge.pendingArrivalOffset = nil
+                // Oct 8: on Floor 1 the walk-in start is the front door, not
+                // the elevator -- stand the player in the elevator cell first.
+                // (startCell stays the front door: reset and the entrance-door
+                // "back outside" tap keep their meaning.)
+                if playerStart != start { navController.enterAtElevatorCell() }
                 navController.presentArrivalInsideElevator(preservedYaw: preservedYaw, offset: preservedOffset)
                 diag("arrival.presentInsideElevator.end")
                 elevatorLog("destination scene ready -- floor \(mazeStore.currentMazeID), \(preservedYaw == nil ? "passive" : "controlled")")
@@ -2346,7 +2398,7 @@ struct HallwaySceneView: UIViewRepresentable {
             // out this floor's fires through the controller's own fire state.
             let tracePosse = ElevatorArrivalTrace.shared.beginPhase("install.Posse")
             Posse.installFloor(view: view, scene: scene, playerCamera: cameraNode, floor: mazeStore.currentMazeID,
-                               cells: mazeStore.cells, cellSize: mazeStore.cellSize, start: start, end: end,
+                               cells: mazeStore.cells, cellSize: mazeStore.cellSize, start: playerStart, end: end,
                                fires: fireNodes, allowFirstMeetings: !admissionAtAdministration
                                    && mazeStore.currentMazeID != Admission.administrationFloor,
                                allowMembers: !onboardingQuiet) { [weak navController] coord in
@@ -2377,9 +2429,33 @@ struct HallwaySceneView: UIViewRepresentable {
             navController.activeTouchGesture = { [weak coordinator = context.coordinator] in
                 coordinator?.activeTouchGestureDescription()
             }
+            // Oct 8 (Juanita diagnostics): Floor 2's admission/prologue state at
+            // install, and the otherwise-silent case where the reception can't
+            // be wired because the floor's layout no longer matches.
+            if mazeStore.currentMazeID == AdministrationReception.floor {
+                let receptionFits = AdministrationReception.expectedCells.isSubset(of: mazeStore.cells)
+                diag("juanita.floorState", ["admission": Admission.isCompleted,
+                                            "prologue": Admission.isPrologueCompleted,
+                                            "target": AdministrationReception.directionsTarget?.rawValue ?? "none",
+                                            "hasEmployeeID": EmployeeID.number != nil,
+                                            "receptionWired": receptionFits])
+                if !receptionFits {
+                    diag("juanita.noResponse", ["reason": "floorLayoutMismatch"])
+                }
+            }
             // Oct 5 (Administration): the visitor's position at the reception counter.
             if mazeStore.currentMazeID == AdministrationReception.floor,
                AdministrationReception.expectedCells.isSubset(of: mazeStore.cells) {
+                // Oct 7: Juanita's patience runs only while the visitor stays
+                // at the counter (the desk landing's cell).
+                AdministrationReception.isVisitorAtDesk = { [weak navController] in
+                    navController?.currentCell == AdministrationReception.deskLanding.coord
+                }
+                navController.onCellChanged = { cell in
+                    if cell != AdministrationReception.deskLanding.coord {
+                        AdministrationReception.cancelPatienceTimer()
+                    }
+                }
                 navController.landingSpots = [
                     // After the desk landing, the Administrator acknowledges you
                     // and points to the ID terminal (once per visit).
@@ -2576,6 +2652,11 @@ struct HallwaySceneView: UIViewRepresentable {
 
             if !context.coordinator.didInstallPersistentGestures {
                 context.coordinator.didInstallPersistentGestures = true
+                // Oct 8 flight recorder: state snapshots (periodic / before a
+                // shared report) read whichever floor's controller is current.
+                DiagnosticRecorder.shared.snapshotProvider = { [weak coordinator = context.coordinator] reason in
+                    coordinator?.navigationController?.diagStateSnapshot(reason)
+                }
                 let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
                 view.addGestureRecognizer(tap)
 
@@ -2587,9 +2668,12 @@ struct HallwaySceneView: UIViewRepresentable {
                 view.addGestureRecognizer(twoFingerTap)
 
                 // Oct 3 TIN CAN RAT prototype 1: temporary A/B control.
-                let threeFingerTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleThreeFingerTap(_:)))
-                threeFingerTap.numberOfTouchesRequired = 3
-                view.addGestureRecognizer(threeFingerTap)
+                // Oct 8: a testing shortcut -- Debug workshop only.
+                if BuildMode.developerTools {
+                    let threeFingerTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleThreeFingerTap(_:)))
+                    threeFingerTap.numberOfTouchesRequired = 3
+                    view.addGestureRecognizer(threeFingerTap)
+                }
 
                 // Left/right turning is drag-controlled, not a discrete
                 // flick: dragging pivots the camera live, one-to-one with
@@ -2639,6 +2723,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 let tracePublish = ElevatorArrivalTrace.shared.beginPhase("controller.publish")
                 diag("scene.publishControllerHop", ["floor": navController.currentFloorNumber])
                 navBridge.controller = navController
+                navController.diagStateSnapshot("floorInstalled")              // Oct 8 flight recorder
                 if navBridge.arrivalSceneReady || navBridge.pendingControlledDoorOpen {
                     elevatorLog("destination controller published -- floor \(navController.currentFloorNumber)")
                 }
@@ -2723,9 +2808,19 @@ struct HallwaySceneView: UIViewRepresentable {
         view.allowsCameraControl = false // our own touch/tap handling must be the only thing driving the camera
         view.isPlaying = true
         view.rendersContinuously = true
+        HallwaysAudio.shared.attach(engine: view.audioEngine)   // Oct 8: the mute switch covers SceneKit audio
 
         ElevatorArrivalTrace.shared.endPhase("install.viewConfiguration", traceViewConfig)
         let traceMirrors = ElevatorArrivalTrace.shared.beginPhase("install.mirrors")
+        // Oct 8 (Cool Hallways): the outgoing floor's mirror camera never
+        // survives into the new floor. Before this, a floor WITHOUT mirrors
+        // kept the previous floor's camera alive (only a mirror floor
+        // replaced it), so updateUIView kept it capturing for nothing.
+        if let previous = context.coordinator.mirrorCamera {
+            previous.setActive(false)
+            context.coordinator.mirrorCamera = nil
+            diag("mirror.camera.floorTeardown", ["floor": mazeStore.currentMazeID])
+        }
         if let scene = view.scene {
             var surfaces: [MirrorSurfaceTarget] = []
             scene.rootNode.enumerateChildNodes { node, _ in
@@ -2736,12 +2831,15 @@ struct HallwaySceneView: UIViewRepresentable {
                     // so MirrorCamera can crop the live feed to match instead of
                     // letting SceneKit stretch it onto the scaled plane.
                     let aspect = HallwayScene.mirrorSurfaceAspect(of: node)
-                    surfaces.append(MirrorSurfaceTarget(material: material, aspect: aspect))
+                    surfaces.append(MirrorSurfaceTarget(material: material, aspect: aspect,
+                                                        placement: MirrorPlacement(surface: node)))
                 }
             }
             if !surfaces.isEmpty {
-                context.coordinator.mirrorCamera = MirrorCamera(surfaces: surfaces, comments: mirrorComments)
-                context.coordinator.mirrorCamera?.setActive(cameraEnabled)
+                let camera = MirrorCamera(surfaces: surfaces, comments: mirrorComments)
+                camera.playerPose = Self.mirrorPlayerPose(context.coordinator)
+                context.coordinator.mirrorCamera = camera
+                camera.setActive(cameraEnabled)
             }
         }
         ElevatorArrivalTrace.shared.endPhase("install.mirrors", traceMirrors)
@@ -2865,7 +2963,7 @@ struct HallwaySceneView: UIViewRepresentable {
         // through TapNavigationController's own register/unregister
         // counterparts so live-authored objects join the real mission
         // bookkeeping immediately (Eddie's Sept 25 direction).
-        decorator.registerMirrorSurface = { [weak coordinator = context.coordinator] material, aspect in
+        decorator.registerMirrorSurface = { [weak coordinator = context.coordinator, weak view] material, aspect in
             guard let coordinator else { return }
             // Sept 25 (Designer wall authoring): on a floor whose build
             // started with NO mirrors (makeUIView's surfaces scan found
@@ -2875,9 +2973,19 @@ struct HallwaySceneView: UIViewRepresentable {
             // mirrorCamera?.setActive(cameraEnabled) pass picks it up on
             // the very next update, so its active state is always right.
             if coordinator.mirrorCamera == nil {
-                coordinator.mirrorCamera = MirrorCamera(surfaces: [], comments: mirrorComments)
+                let camera = MirrorCamera(surfaces: [], comments: mirrorComments)
+                camera.playerPose = Self.mirrorPlayerPose(coordinator)
+                coordinator.mirrorCamera = camera
             }
-            coordinator.mirrorCamera?.addSurface(material, aspect: aspect)
+            // Oct 8: where the new glass is (one lookup, at authoring time).
+            var placement: MirrorPlacement?
+            view?.scene?.rootNode.enumerateChildNodes { node, stop in
+                if node.name == "mirrorSurface", node.geometry?.firstMaterial === material {
+                    placement = MirrorPlacement(surface: node)
+                    stop.pointee = true
+                }
+            }
+            coordinator.mirrorCamera?.addSurface(material, aspect: aspect, placement: placement)
         }
         decorator.unregisterMirrorSurface = { [weak coordinator = context.coordinator] material in
             coordinator?.mirrorCamera?.removeSurface(material)
@@ -3085,6 +3193,7 @@ struct HallwaySceneView: UIViewRepresentable {
         context.coordinator.navigationController?.decorateModeEnabled = decorator.enabled
         context.coordinator.mirrorCamera?.setActive(cameraEnabled)
         context.coordinator.mirrorCamera?.setExpressionAnalysisEnabled(cameraEnabled && mirrorComments.looking)
+        HallwaysAudio.shared.attach(engine: uiView.audioEngine)   // Oct 8: re-assert mute (cheap; no-op if set)
         if context.coordinator.lastResetToken != runtime.resetToken {
             context.coordinator.lastResetToken = runtime.resetToken
             // Eddie, Sept 8: reset() mutates a good double-digit count
@@ -3197,6 +3306,16 @@ struct HallwaySceneView: UIViewRepresentable {
         }
 
         ElevatorArrivalTrace.shared.endPhase("updateUIView.cabArtworkSync", traceArtwork)
+    }
+
+    /// Oct 8 (Cool Hallways): the player's floor position and heading for
+    /// MirrorCamera's demand checks (a read of the camera node; no raycast).
+    static func mirrorPlayerPose(_ coordinator: Coordinator) -> () -> (position: SIMD2<Float>, yaw: Float)? {
+        { [weak coordinator] in
+            guard let camera = coordinator?.navigationController?.cameraNode.presentation else { return nil }
+            let p = camera.worldPosition
+            return (SIMD2<Float>(p.x, p.z), camera.eulerAngles.y)
+        }
     }
 
     static func dismantleUIView(_ uiView: TouchTrackingSCNView, coordinator: Coordinator) {
@@ -3365,6 +3484,22 @@ struct HallwaySceneView: UIViewRepresentable {
             }
         }
 
+        /// Oct 8 flight recorder: the begin and end of a continuous gesture
+        /// (never its per-frame changes), with where the player was.
+        func diagGesture(_ name: String, _ gesture: UIGestureRecognizer) {
+            let state: String
+            switch gesture.state {
+            case .began: state = "began"
+            case .ended: state = "ended"
+            case .cancelled: state = "cancelled"
+            case .failed: state = "failed"
+            default: return
+            }
+            let c = navigationController
+            diag("gesture." + name, ["state": state, "cell": c?.currentCell, "facing": c?.facing,
+                                     "tapWalking": c?.isFreeTapWalking, "ride": c?.isElevatorRideInProgress])
+        }
+
         func cancelHeldWalkForMap() {
             navigationController?.setWalkingHeld(false)
             forwardHoldTimer?.invalidate()
@@ -3471,9 +3606,13 @@ struct HallwaySceneView: UIViewRepresentable {
                AdministrationReception.isAdministrator(hit.node) {
                 AdministrationReception.directionsRequested = true
                 if controller.isInLandingPose("receptionDesk"), let root = view.scene?.rootNode {
+                    diag("juanita.tapped", ["atCounter": true])
                     AdministrationReception.landedAtDesk(in: root)
                 } else if !controller.beginLanding(kind: "receptionDesk") {
                     AdministrationReception.directionsRequested = false
+                    diag("juanita.ignored", ["reason": "counterLandingRefused", "cell": "\(controller.currentCell)"])
+                } else {
+                    diag("juanita.tapped", ["atCounter": false, "action": "landingToCounter"])
                 }
                 diag("tap.consumed", ["by": "administrator"])
                 return
@@ -3550,6 +3689,12 @@ struct HallwaySceneView: UIViewRepresentable {
             if controller.canStartElevatorExit, let view = gesture.view as? SCNView {
                 let hits = Posse.navigationHits(view.hitTest(gesture.location(in: view),
                                                              options: [.searchMode: SCNHitTestSearchMode.all.rawValue, .ignoreHiddenNodes: true]))
+                // Oct 7 (Annette, Build 10): the panel is live with the doors
+                // open -- another floor closes them and departs.
+                if controller.pressElevatorButton(hits: hits) {
+                    diag("tap.consumed", ["by": "elevator panel (doors open)"])
+                    return
+                }
                 if !controller.elevatorTapGoesThroughDoorway(hits: hits) {
                     diag("tap.consumed", ["by": "elevator cab interior (doors open)"])
                     return
@@ -3949,6 +4094,7 @@ struct HallwaySceneView: UIViewRepresentable {
         // in place, just unused, in case that shortcut should come back.
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
+            diagGesture("pinch", gesture)
             guard let controller = navigationController else { return }
             let fraction = (Double(gesture.scale) - 1.0) / pinchScalePerCell
             let velocityFraction = Double(gesture.velocity) / pinchScalePerCell
@@ -3984,6 +4130,7 @@ struct HallwaySceneView: UIViewRepresentable {
 
         /// Oct 3 TIN CAN RAT prototype 1: first-person <-> companion + rat.
         @objc func handleThreeFingerTap(_ gesture: UITapGestureRecognizer) {
+            guard BuildMode.developerTools else { return }
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             guard let view = gesture.view as? SCNView else { return }
             TinCanRat.toggle(in: view)
@@ -3992,12 +4139,14 @@ struct HallwaySceneView: UIViewRepresentable {
         @objc func handleTwoFingerTap() {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             navLog("two-finger tap (turn around)")
+            diag("gesture.twoFingerTap", ["cell": navigationController?.currentCell, "facing": navigationController?.facing])
             guard let controller = navigationController else { return }
             controller.rotate(toward: controller.facing.opposite)
         }
 
         @objc func handlePanRotate(_ gesture: UIPanGestureRecognizer) {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
+            diagGesture("pan", gesture)
             guard let controller = navigationController, let view = gesture.view else { return }
             let tracePan = ElevatorArrivalTrace.shared.samplePan(changed: gesture.state == .changed)
             let before = controller.cameraNode.eulerAngles
@@ -4152,6 +4301,7 @@ struct HallwaySceneView: UIViewRepresentable {
         @objc func handleSwipeDown() {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             navLog("swipe down (turn around)")
+            diag("gesture.swipeDown", ["cell": navigationController?.currentCell, "facing": navigationController?.facing])
             guard let controller = navigationController else { return }
             controller.rotate(toward: controller.facing.opposite)
         }
@@ -4161,6 +4311,7 @@ struct HallwaySceneView: UIViewRepresentable {
         // Release stops polling, including during a corner's pivot.
         @objc func handleLongPressForward(_ gesture: UILongPressGestureRecognizer) {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
+            diagGesture("hold", gesture)
             switch gesture.state {
             case .began:
                 navLog("long-press forward began")
@@ -4563,3 +4714,30 @@ struct HallwaySceneView: UIViewRepresentable {
 #Preview {
     ContentView()
 }
+
+#if DEBUG
+/// Oct 8: one labeled Debug-workshop HUD control (icon + caption), so each
+/// developer action says what it does. Debug builds only.
+private struct DevHUDButton: View {
+    let systemImage: String
+    let caption: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(caption)
+                    .font(.system(size: 8, weight: .bold))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .accessibilityLabel(caption.capitalized)
+    }
+}
+#endif

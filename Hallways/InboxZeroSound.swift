@@ -41,6 +41,7 @@ enum InboxZeroSound {
         players.removeAll { !$0.isPlaying }
         guard players.count < 24, let player = try? AVAudioPlayer(data: data) else { return }
         player.volume = 0.9
+        HallwaysAudio.shared.manage(player)          // Oct 8: the mute switch
         player.prepareToPlay()
         player.play()
         players.append(player)

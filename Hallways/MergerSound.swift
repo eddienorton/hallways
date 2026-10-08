@@ -36,6 +36,7 @@ enum MergerSound {
         players.removeAll { !$0.isPlaying }
         guard let player = try? AVAudioPlayer(data: data) else { return }
         player.volume = 0.9
+        HallwaysAudio.shared.manage(player)          // Oct 8: the mute switch
         player.prepareToPlay()
         player.play()
         players.append(player)

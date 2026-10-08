@@ -61,28 +61,27 @@ struct ElevatorCabLifecycleTests {
         #expect(!cab.camera.hasActions)
     }
 
-    @Test func stayingAboardClosesAndRearmsWithoutMovingCamera() async {
+    /// Oct 7 (Annette, Build 10): staying aboard no longer closes the
+    /// doors on a timer -- they stay open, the way out stays live.
+    @Test func stayingAboardKeepsTheDoorsOpen() async {
         let cab = Cab()
         let closed = cab.right.position
         cab.controller.presentArrivalInsideElevator(preservedYaw: 1.17, offset: SIMD2(0.4, 0.7))
-        let p = cab.camera.position, yaw = cab.camera.eulerAngles.y
         cab.controller.playControlledArrivalDoorOpen()
         let renderer = SCNRenderer(device: nil, options: nil)
         renderer.scene = cab.scene
         renderer.delegate = cab.controller
         await tick(renderer, from: 1, through: 10)
         #expect(cab.right.position.x > closed.x + 0.7)
+        await tick(renderer, from: 10.025, through: 30)
+        #expect(cab.right.position.x > closed.x + 0.7)
         #expect(!cab.controller.isElevatorWaitingForFloor)
-        #expect(cab.controller.canGoForward)
-        await tick(renderer, from: 10.025, through: 14)
-        #expect(SCNVector3EqualToVector3(cab.right.position, closed))
-        #expect(cab.controller.isElevatorWaitingForFloor)
         #expect(cab.controller.elevatorDestinationFloor == nil)
         #expect(cab.controller.isElevatorRideInProgress)
-        #expect(!cab.controller.canGoForward)
-        #expect(!cab.camera.hasActions)
-        #expect(SCNVector3EqualToVector3(p, cab.camera.position))
-        #expect(cab.camera.eulerAngles.y == yaw)
+        #expect(cab.controller.canGoForward)
+        #expect(cab.controller.canStartElevatorExit)
+        #expect(cab.controller.elevatorDoorsOpenIdle)
+        let yaw = cab.camera.eulerAngles.y
         cab.controller.beginElevatorCameraDrag()
         cab.controller.updateElevatorCameraDrag(fraction: -0.3)
         #expect(cab.camera.eulerAngles.y != yaw)
@@ -161,14 +160,27 @@ struct ElevatorCabLifecycleTests {
         renderer.delegate = cab.controller
         await tick(renderer, from: 1, through: 14)
         let p = cab.camera.position, yaw = cab.camera.eulerAngles.y
+        let closed: Float = 0.24 // Cab's right door, shut.
+        // Oct 7: the doors are still open -- the panel is live anyway.
+        #expect(cab.controller.elevatorDoorsOpenIdle)
         #expect(cab.controller.pressElevatorButton(hits: hits(x: 0.1)))
-        #expect(cab.controller.isElevatorWaitingForFloor) // Current floor only clicks.
+        #expect(cab.controller.elevatorDoorsOpenIdle) // Current floor only clicks.
         #expect(cab.controller.elevatorDestinationFloor == nil)
         #expect(cab.controller.pressElevatorButton(hits: hits(x: 0, y: 0.3)))
-        let assist = try #require(cab.camera.action(forKey: "elevatorPanelApproach"))
-        #expect(assist.duration == 2.8)
+        // Oct 8: a miss on the plate glides square-on to the panel (the
+        // boarding glide), choosing nothing.
+        let align = try #require(cab.camera.action(forKey: "elevatorPanelApproach"))
+        // Oct 8: at the standard wall-landing pace (cell 3.2 m / 6 m/s), not
+        // the boarding glide's 1.6 s.
+        #expect(align.duration >= 3.2 / 6 - 1e-9 && align.duration < 1.0)
+        #expect(cab.controller.elevatorDestinationFloor == nil)
+        #expect(cab.controller.elevatorDoorsOpenIdle)
         #expect(cab.controller.pressElevatorButton(hits: hits(x: -0.1)))
-        #expect(cab.camera.action(forKey: "elevatorPanelApproach") == nil)
+        #expect(!cab.controller.elevatorDoorsOpenIdle)
+        #expect(!cab.controller.canGoForward) // No walking through closing doors.
+        #expect(cab.controller.elevatorDestinationFloor == nil) // Departs once shut.
+        await tick(renderer, from: 14.025, through: 16)
+        #expect(abs(cab.right.position.x - closed) < 0.0001)
         #expect(cab.controller.elevatorDestinationFloor == 5)
         #expect(!cab.controller.isElevatorWaitingForFloor)
         #expect(SCNVector3EqualToVector3(p, cab.camera.position))

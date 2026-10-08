@@ -76,6 +76,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// becomes just another activity"); this doc comment is what's
     /// left of that history.
     var onReachedEnd: (() -> Void)?
+    /// Oct 7: the player's cell just changed (Administration: leaving the
+    /// counter stops Juanita's patience timer).
+    var onCellChanged: ((GridCoordinate) -> Void)?
     /// Fired (main thread, same as onReachedEnd) INSTEAD of it, at the
     /// exact same scheduled arrival moment, when the player took
     /// camera control during this ride (playerHasTakenElevatorCameraControl).
@@ -149,6 +152,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     @Published private(set) var currentCell: GridCoordinate {
         didSet {
             guard oldValue != currentCell else { return }
+            diag("nav.cell", ["cell": currentCell, "from": oldValue, "facing": facing])   // Oct 8 flight recorder
+            onCellChanged?(currentCell)
             // "it informs you of something that just happened, then
             // its gone once you leave" (Eddie, Sept 5) -- leaving IS
             // currentCell changing, so that's the one place this needs
@@ -188,6 +193,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     @Published private(set) var facing: Direction {
         didSet {
             guard oldValue != facing else { return }
+            diag("nav.facing", ["facing": facing, "from": oldValue, "cell": currentCell])   // Oct 8 flight recorder
             refreshFloorMapTexture()
         }
     }
@@ -521,6 +527,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// before the camera gets offset into the cab.
     private var elevatorEntryCellCenterPosition: SCNVector3? = nil
     private var arrivedElevatorDoorOpen = false
+    /// Oct 7: the open cab came from boarding here, not from a ride's arrival.
+    private var elevatorBoardedDoorsOpen = false
     private var arrivalExitPermitted = false
     var canStartElevatorExit: Bool { elevatorAwaitingEntryDirection != nil && arrivalExitPermitted && !elevatorInUse }
     var canReenterArrivedElevator: Bool {
@@ -596,7 +604,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     static let elevatorPanelApproachDuration: TimeInterval = 1.6
     /// Deliberate, visible correction after an imprecise panel tap.
     static let elevatorPanelAssistDuration: TimeInterval = 2.8
-    /// Time fully open before closing when the rider stays aboard.
+    /// Oct 7: no longer used -- arrival doors stay open until the rider
+    /// steps out or chooses a floor. Kept for reference only.
     static let elevatorArrivalDoorOpenDwell: TimeInterval = 8.0
     private static let elevatorArrivalDwellKey = "elevatorArrivalDwell"
     private var elevatorLookRevision = 0
@@ -1204,6 +1213,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// to, or nil (not a wall object, or one with nothing available now --
     /// open door, won game, busy chute -- which keeps its old tap behavior).
     func wallInteractionTarget(for node: SCNNode) -> WallInteractionTarget? {
+        // Oct 8: the Floor 1 lobby mirror -- a hardcoded fixture, untagged and
+        // absent from `mirrors`, so it matched nothing here and its tap became
+        // an ordinary walk that ended facing the tap's diagonal bearing.
+        // Passive (no action), like a picture: the standard square landing.
+        if floorNumber == 1, let mirror = Self.lobbyMirrorRoot(of: node) {
+            return WallInteractionTarget(kind: "lobbyMirror", face: HallwayScene.lobbyMirrorFace,
+                                         action: nil, objectWorld: mirror.worldPosition)
+        }
         // Passive: pictures, mission plaques, wall floor maps.
         if let passive = Self.passiveWallObject(for: node) {
             let direction: Direction?
@@ -1268,6 +1285,15 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         return nil
     }
 
+    private static func lobbyMirrorRoot(of node: SCNNode) -> SCNNode? {
+        var current: SCNNode? = node
+        while let candidate = current {
+            if candidate.name == HallwayScene.lobbyMirrorNodeName { return candidate }
+            current = candidate.parent
+        }
+        return nil
+    }
+
     private static func taggedCoord(of node: SCNNode, kind: DecoratorTarget.Kind) -> GridCoordinate? {
         var current: SCNNode? = node
         while let candidate = current {
@@ -1287,6 +1313,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
         }
         if let name = node.name, name.hasPrefix("bathroomDoor_") || name.hasPrefix("windowRoomDoor_") { return true }
+        if floorNumber == 1, node.name == HallwayScene.lobbyMirrorNodeName { return true }   // Oct 8
         return destinationNodes.values.contains { $0 === node }
     }
 
@@ -1481,6 +1508,36 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
         pendingWallInteraction = (kind, targetYaw, interact)
         return true
+    }
+
+    /// Oct 8 flight recorder: ONE line of the player's state and everything
+    /// around it -- periodic, at each floor install and just before a report
+    /// is shared (see DiagnosticRecorder.snapshotProvider). Reads only.
+    func diagStateSnapshot(_ reason: String) {
+        let p = cameraNode.position
+        diag("snapshot.state", [
+            "reason": reason,
+            "floor": floorNumber,
+            "cell": currentCell,
+            "facing": facing,
+            "pos": String(format: "%.2f,%.2f", p.x, p.z),
+            "yaw": Double(cameraNode.eulerAngles.y),
+            "phase": "\(phase)",
+            "animating": isAnimating,
+            "tapWalking": isFreeTapWalking,
+            "heldWalk": walkingHeld,
+            "dragRotate": isDragRotating,
+            "dragMove": isDragMoving,
+            "blockers": diagCanRotateBlockers,
+            "elevatorInUse": elevatorInUse,
+            "elevatorRide": isElevatorRideInProgress,
+            "elevatorWaiting": isElevatorWaitingForFloor,
+            "seated": isSeatedAtComputer,
+            "phoneLift": Double(HallPhone.shared.lift),
+            "phoneScreen": "\(HallPhone.shared.screen)",
+            "journey": GuidedJourney.trip.map { "\($0.stage)" } ?? "none",
+            "posse": Posse.diagSummary
+        ])
     }
 
     /// Oct 2 flight recorder: which canRotate condition is blocking (reads only).
@@ -4869,6 +4926,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             elevatorEntryCellCenterPosition = nil
         }
 
+        elevatorBoardedDoorsOpen = false
         if arrivedElevatorDoorOpen {
             cameraNode.removeAction(forKey: "elevatorManualWalkOut")
             elevatorLeftDoor?.position = elevatorLeftClosedPosition ?? SCNVector3Zero
@@ -6527,6 +6585,24 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// already commits to on release (see endDragRotate), just done
     /// here once, up front, silently. The camera's own visual yaw is
     /// always left at the exact value used, never snapped.
+    /// Oct 8 (Floor 1 elevator return): an elevator arrival on a floor whose
+    /// walk-in start is NOT its elevator cell (Floor 1: the front door).
+    /// Puts the player in the elevator cell -- current cell, facing, camera
+    /// -- so presentArrivalInsideElevator opens the cab where the cab is,
+    /// exactly as on floors whose start already is the elevator. startCell
+    /// is untouched (reset and the entrance-door tap still mean the door).
+    func enterAtElevatorCell() {
+        currentCell = endCell
+        facing = startingFacing(at: endCell, cells: cells)
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        let p = worldPosition(for: endCell)
+        cameraNode.position = SCNVector3(p.x, cameraNode.position.y, p.z)
+        cameraNode.eulerAngles = SCNVector3(0, Float(facing.yaw), 0)
+        SCNTransaction.commit()
+        diag("arrival.enterAtElevatorCell", ["floor": floorNumber, "cell": endCell, "start": startCell])
+    }
+
     func presentArrivalInsideElevator(preservedYaw: Double?, offset: SIMD2<Double>? = nil) {
         guard let direction = elevatorMountDirection,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
@@ -6717,16 +6793,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
         }
         beginArrivalFaceDoors(direction: direction)
-        if Self.interactiveElevator {
-            // Scene time: eight seconds AFTER the doors finish opening. Exit
-            // cancels this action before it can claim the cab again.
-            rightDoor.runAction(.sequence([
-                .wait(duration: elevatorSlideDuration + Self.elevatorArrivalDoorOpenDwell),
-                .run { [weak self] _ in
-                    DispatchQueue.main.async { self?.closeArrivalDoorsForContinuedRide() }
-                }
-            ]), forKey: Self.elevatorArrivalDwellKey)
-        }
+        // Oct 7 (Annette, Build 10): no dwell-and-close any more. The doors
+        // stay open until the player steps out or picks another floor on the
+        // panel (pressElevatorButton -> closeArrivalDoorsForContinuedRide).
+        // The old 8 s auto-close sealed riders in a cab whose only way out
+        // was the current-floor button.
     }
 
     /// Oct 6: called at the arrival ding (with the doors starting to open):
@@ -6818,14 +6889,17 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     /// Close while still aboard, then rearm the same physical panel without
     /// moving the camera or replaying boarding/panel presentation.
-    private func closeArrivalDoorsForContinuedRide() {
+    private func closeArrivalDoorsForContinuedRide(departTo floor: Int? = nil) {
         guard arrivedElevatorDoorOpen, elevatorAwaitingEntryDirection != nil, !isAnimating,
               let left = elevatorLeftDoor, let right = elevatorRightDoor,
               let leftClosed = elevatorLeftClosedPosition,
               let rightClosed = elevatorRightClosedPosition, let cabCenter = elevatorCabCenter else { return }
         elevatorInUse = true // No walking through closing doors; free look remains live.
         arrivedElevatorDoorOpen = false
+        elevatorBoardedDoorsOpen = false
         elevatorAwaitingEntryDirection = nil
+        cameraNode.removeAction(forKey: Self.elevatorArrivalFaceDoorsActionKey)
+        diag("elevator.openDoors.closing", ["floor": floorNumber, "departTo": floor])
         left.removeAllActions()
         right.removeAllActions()
         let closeLeft = SCNAction.move(to: leftClosed, duration: 1.6)
@@ -6837,6 +6911,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             DispatchQueue.main.async {
                 guard let self, self.elevatorInUse else { return }
                 self.beginElevatorWaiting(cabCenter: cabCenter, presentPanel: false, restoreLighting: {})
+                // Oct 7: the floor chosen with the doors open departs now
+                // that they are shut -- the same departure a sealed-cab
+                // press makes.
+                if let floor, self.isElevatorWaitingForFloor, let depart = self.elevatorDepart {
+                    self.elevatorDepart = nil
+                    diag("elevator.button.departAfterClose", ["from": self.floorNumber, "to": floor])
+                    depart(floor)
+                }
             }
         }
     }
@@ -6893,6 +6975,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             elevatorLog("arrival face-doors CANCELLED by stepping out")
         }
         cameraNode.removeAction(forKey: Self.elevatorArrivalFaceDoorsActionKey)   // Oct 6: stepping out owns yaw
+        cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)      // Oct 7: so does it over the open-cab panel glide
         movementPace = 1
         SoundEffects.setWalkingPace(1)
         phase = .scriptedWalkOut
@@ -6935,7 +7018,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 if !entering {
                     self.facing = self.nearestCardinal(toYaw: Double(self.cameraNode.eulerAngles.y))
                     self.isDraggingElevatorCamera = false
-                    let wasArrival = self.arrivedElevatorDoorOpen
+                    let wasArrival = self.arrivedElevatorDoorOpen && !self.elevatorBoardedDoorsOpen
+                    if self.elevatorBoardedDoorsOpen {
+                        // Oct 7: stepped back out without riding -- the
+                        // boarding's ride music has nothing to accompany.
+                        self.elevatorBoardedDoorsOpen = false
+                        SoundEffects.stopElevatorMusic()
+                        diag("elevator.boardedExit", ["floor": self.floorNumber])
+                    }
                     self.closeArrivedElevatorAfterExit()
                     self.refreshElevatorMissionSign()
                     // Continue through the normal grid planner exactly once. The
@@ -7326,6 +7416,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                                                "yaw": endYaw,
                                                "yawError": (manual ? nil : Optional(self.shortestDelta(from: endYaw, to: backWallYaw))) as Double?,
                                                "manualControlTaken": manual])
+                // Oct 7 (Annette, Build 10): an ordinary boarding no longer
+                // seals the cab. The doors stay open, the player is turned
+                // to the panel, and only a floor choice closes them. The
+                // building's own rides (Admission, the guided escort) keep
+                // the original close-and-auto-press sequence exactly.
+                if next == nil, self.elevatorCinematicAutoFloor == nil {
+                    let cabCenter = SCNVector3(cabCenterX, self.cameraNode.position.y, cabCenterZ)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.settleBoardedCabDoorsOpen(cabCenter: cabCenter, restoreLighting: restoreShaftLighting)
+                    }
+                    return
+                }
                 // Doors start closing here, the instant you're facing
                 // the back wall -- elevatorSlideDuration (1.6s) fits
                 // comfortably inside the 2-second dwell below, so
@@ -7537,14 +7639,62 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         diag("elevator.waiting", ["floor": floorNumber])
         // Oct 5 (Admission): on the first trip from the lobby the building
         // presses the button itself, a beat after the panel comes into view.
-        if let auto = admissionAutoFloor ?? guidedAutoFloor?(), elevatorReachableFloors.contains(auto), auto != floorNumber {
+        if let auto = elevatorCinematicAutoFloor {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.elevatorPanelApproachDuration + 0.4) { [weak self] in
                 self?.autoPressElevatorButton(floor: auto)
             }
         }
-        guard presentPanel, !playerHasTakenElevatorCameraControl, let pose = elevatorPanelViewPose(cabCenter: cabCenter) else {
+        guard presentPanel else {
             diag("elevator.panelApproach.skipped", ["manual": playerHasTakenElevatorCameraControl])
             return
+        }
+        glideToElevatorPanel(cabCenter: cabCenter)
+    }
+
+    /// Oct 7: a floor the building chooses for this ride (Admission's first
+    /// trip, the guided escort) -- those rides keep their scripted close and
+    /// automatic press. nil = the player chooses.
+    var elevatorCinematicAutoFloor: Int? {
+        guard let auto = admissionAutoFloor ?? guidedAutoFloor?(),
+              elevatorReachableFloors.contains(auto), auto != floorNumber else { return nil }
+        return auto
+    }
+
+    /// Oct 7 (Annette, Build 10): an ordinary boarding ends here, in the same
+    /// state an arrival leaves the cab in -- doors open, the way out live,
+    /// nothing timed -- with the panel live too. Lighting returns to the
+    /// arrival cab's (normal) level and the player is turned to the panel.
+    private func settleBoardedCabDoorsOpen(cabCenter: SCNVector3, restoreLighting: () -> Void) {
+        guard elevatorInUse, !isElevatorWaitingForFloor, elevatorDestinationFloor == nil,
+              let mount = elevatorMountDirection else { return }
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.5
+        restoreLighting()
+        SCNTransaction.commit()
+        let entry = worldPosition(for: endCell)
+        elevatorInUse = false
+        elevatorCabCenter = cabCenter
+        arrivedElevatorDoorOpen = true
+        elevatorBoardedDoorsOpen = true
+        controlledArrivalDoorsOpened = true      // already open: no second open
+        arrivalExitPermitted = true
+        elevatorAwaitingEntryDirection = mount.opposite
+        elevatorEntryCellCenterPosition = SCNVector3(entry.x, cameraNode.position.y, entry.z)
+        refreshElevatorMissionSign()
+        diag("elevator.boarded.doorsOpen", ["floor": floorNumber])
+        glideToElevatorPanel(cabCenter: cabCenter)
+    }
+
+    /// The panel approach (Oct 4), shared by the sealed cab and the open one.
+    /// `requested` (Oct 8): the player asked for it (a tap on the panel
+    /// wall) -- it runs even after they've taken the camera, cancels the
+    /// arrival turn-to-doors, and does nothing when already square-on.
+    /// Returns true if a glide started.
+    @discardableResult
+    private func glideToElevatorPanel(cabCenter: SCNVector3, requested: Bool = false) -> Bool {
+        guard requested || !playerHasTakenElevatorCameraControl, let pose = elevatorPanelViewPose(cabCenter: cabCenter) else {
+            diag("elevator.panelApproach.skipped", ["manual": playerHasTakenElevatorCameraControl])
+            return false
         }
         let start = cameraNode.position
         let startYaw = Double(cameraNode.eulerAngles.y)
@@ -7560,11 +7710,52 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
             if midFacing(other) < midFacing(turn) { turn = other }
         }
-        let duration = Self.elevatorPanelApproachDuration
+        var duration = Self.elevatorPanelApproachDuration
         let target = pose.position
+        if requested {
+            let off = hypotf(target.x - start.x, target.z - start.z)
+            guard off > 0.05 || abs(shortestDelta(from: startYaw, to: pose.yaw)) > 0.03 else {
+                diag("elevator.panelAlign.skipped", ["reason": "already square-on"])
+                return false
+            }
+            // Oct 8: a tapped alignment runs at the standard wall-object
+            // landing's pace (beginWallComposition -> beginFreeWalkTap's
+            // short approach: distance / travelSpeed, never under one cell's
+            // worth, turn spread over the whole glide). The boarding glide
+            // keeps its own unhurried 1.6 s.
+            duration = max(Double(off) / travelSpeed, Double(cellSize) / travelSpeed)
+            cameraNode.removeAction(forKey: Self.elevatorArrivalFaceDoorsActionKey)  // the tap owns the view now
+        }
         runTurnAndGlide(to: target, yaw: startYaw + turn, duration: duration, key: Self.elevatorPanelApproachActionKey)
-        diag("elevator.panelApproach.start", ["duration": duration, "turn": turn,
+        diag("elevator.panelApproach.start", ["duration": duration, "turn": turn, "requested": requested,
                                               "to": String(format: "(%.3f, %.3f)", target.x, target.z)])
+        return true
+    }
+
+    /// Oct 8: a doors-open tap that missed the buttons. On the panel plate,
+    /// or on the door wall right around it (not the doors, not another
+    /// wall): glide square-on to the panel -- the boarding glide, same pose.
+    /// Never chooses a floor. Returns true when the tap was the panel's.
+    private func alignToElevatorPanelFromOpenCab(hit: SCNHitTestResult, onPlate: Bool) -> Bool {
+        guard let panel = scene?.rootNode.childNode(withName: "elevatorControlPanel", recursively: true) else { return false }
+        if !onPlate {
+            guard !isElevatorDoor(hit.node) else { return false }
+            let p = panel.worldPosition, w = hit.worldCoordinates
+            let (lo, hi) = panel.boundingBox
+            let reach = max(hi.y - lo.y, hi.x - lo.x) / 2 + 0.35
+            let n = panel.convertVector(SCNVector3(0, 0, -1), to: nil)
+            let nl = max(hypotf(n.x, n.z), 0.0001)
+            let offPlane = abs((w.x - p.x) * n.x / nl + (w.z - p.z) * n.z / nl)
+            // The door wall only: beside/around the plate, in its plane.
+            guard hypotf(w.x - p.x, w.z - p.z) < 0.6, abs(w.y - p.y) < reach, offPlane < 0.15 else { return false }
+        }
+        guard elevatorCinematicAutoFloor == nil, let cabCenter = elevatorCabCenter else {
+            diag("elevator.panelAlign.skipped", ["reason": "scripted ride or no cab"])
+            return true
+        }
+        let started = glideToElevatorPanel(cabCenter: cabCenter, requested: true)
+        diag("elevator.panelAlign", ["on": onPlate ? "plate" : "wall", "started": started])
+        return true
     }
 
     /// Oct 4: the elevator's one motion language (entry line-up, panel
@@ -7647,7 +7838,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// the panel -> the nearest button within a finger's reach is pressed.
     /// Returns true when the tap was the panel's.
     func pressElevatorButton(hits: [SCNHitTestResult]) -> Bool {
+        if elevatorDoorsOpenIdle { return pressElevatorButtonDoorsOpen(hits: hits) }
         guard isElevatorWaitingForFloor, elevatorInUse, let hit = hits.first else { return false }
+        // Oct 7 (Annette, Build 10): a tap on the shut doors of a stationary
+        // cab opens them onto this floor -- the same reopen the current
+        // floor's button makes. Never once a trip is chosen or moving, and
+        // never during the building's own scripted rides.
+        if isElevatorDoor(hit.node) {
+            if elevatorSameFloorReopenAllowed, elevatorCinematicAutoFloor == nil {
+                diag("elevator.doorTap.reopen", ["floor": floorNumber])
+                reopenElevatorDoorsAtCurrentFloor()
+            } else {
+                diag("elevator.doorTap.rejected", ["floor": floorNumber,
+                                                   "destination": elevatorDestinationFloor,
+                                                   "scripted": elevatorCinematicAutoFloor != nil])
+            }
+            return true
+        }
         var node: SCNNode? = hit.node
         var plate: SCNNode?
         while let n = node {
@@ -7677,7 +7884,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         var best: (floor: Int, cap: SCNNode, distance: Float)?
         for child in plate.childNodes {
             guard let name = child.name, name.hasPrefix(prefix), let floor = Int(name.dropFirst(prefix.count)) else { continue }
-            let d = hypotf(child.position.x - local.x, child.position.y - local.y)
+            // Oct 8: measured in the cap's own proportions (LOBBY is a wider oval).
+            let d = hypotf((child.position.x - local.x) / max(child.scale.x, 1), child.position.y - local.y)
             if best == nil || d < best!.distance { best = (floor, child, d) }
         }
         guard let best, best.distance < 0.085 else {                    // on the plate, between buttons:
@@ -7714,6 +7922,62 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         elevatorDepart = nil
         diag("elevator.button.pressed", ["from": floorNumber, "to": best.floor])
         depart(best.floor)
+        return true
+    }
+
+    /// Oct 7 (Annette, Build 10): standing in a stationary cab with the doors
+    /// fully open (after an arrival, a boarding, or a reopen) -- the panel is
+    /// live and nothing is timed.
+    var elevatorDoorsOpenIdle: Bool {
+        canStartElevatorExit && arrivedElevatorDoorOpen && !isAnimating && !isElevatorWaitingForFloor
+    }
+
+    /// Oct 7: a panel tap with the doors open. Another floor's button lights
+    /// and the doors close, then the normal departure runs
+    /// (closeArrivalDoorsForContinuedRide(departTo:)). This floor's button
+    /// only clicks -- the doors are already open. Anything that isn't the
+    /// panel returns false (the doorway/interior tap rules decide).
+    private func pressElevatorButtonDoorsOpen(hits: [SCNHitTestResult]) -> Bool {
+        guard let hit = hits.first else { return false }
+        var node: SCNNode? = hit.node
+        var plate: SCNNode?
+        while let n = node {
+            if n.name == "elevatorControlPanel" { plate = n; break }
+            node = n.parent
+        }
+        guard let plate else { return alignToElevatorPanelFromOpenCab(hit: hit, onPlate: false) }
+        let local = plate.convertPosition(hit.worldCoordinates, from: nil)
+        let prefix = "elevatorControlButton_"
+        var best: (floor: Int, cap: SCNNode, distance: Float)?
+        for child in plate.childNodes {
+            guard let name = child.name, name.hasPrefix(prefix), let floor = Int(name.dropFirst(prefix.count)) else { continue }
+            // Oct 8: measured in the cap's own proportions (LOBBY is a wider oval).
+            let d = hypotf((child.position.x - local.x) / max(child.scale.x, 1), child.position.y - local.y)
+            if best == nil || d < best!.distance { best = (floor, child, d) }
+        }
+        guard let best, best.distance < 0.085 else {
+            diag("elevator.button.missed", ["doors": "open"])
+            return alignToElevatorPanelFromOpenCab(hit: hit, onPlate: true)
+        }
+        let cap = best.cap
+        cap.removeAction(forKey: "press")
+        cap.runAction(.sequence([.moveBy(x: 0, y: 0, z: 0.006, duration: 0.06),
+                                 .moveBy(x: 0, y: 0, z: -0.006, duration: 0.14)]), forKey: "press")
+        ElevatorRideSound.click(on: cameraNode)
+        guard best.floor != floorNumber, elevatorReachableFloors.contains(best.floor) else {
+            diag("elevator.button.inert", ["button": best.floor, "floor": floorNumber, "doors": "open"])
+            return true
+        }
+        let lit = SCNMaterial()
+        lit.lightingModel = .physicallyBased
+        lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
+        lit.emission.contents = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
+        lit.metalness.contents = 0.6
+        lit.roughness.contents = 0.3
+        cap.geometry?.materials = [lit]
+        cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)
+        diag("elevator.button.pressed", ["from": floorNumber, "to": best.floor, "doors": "open"])
+        closeArrivalDoorsForContinuedRide(departTo: best.floor)
         return true
     }
 
@@ -7774,7 +8038,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     /// Oct 5 (same-floor reopen): puts the cab into the exact state an
     /// arrival at this floor leaves it in (doors open, exit toward the
-    /// hallway, dwell then close-for-continued-ride) and opens the doors with
+    /// hallway, panel live; Oct 7: no dwell-close) and opens the doors with
     /// the arrival's own door path. No ride, no rebuild, no camera change.
     private func reopenElevatorDoorsAtCurrentFloor() {
         guard let mount = elevatorMountDirection else { return }

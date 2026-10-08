@@ -110,6 +110,118 @@ private func mirrorWorldDistance(_ a: SCNVector3, _ b: SCNVector3) -> CGFloat {
 struct MirrorSurfaceTarget {
     let material: SCNMaterial
     let aspect: CGFloat
+    /// Oct 8 (Cool Hallways): where the surface is, for camera demand.
+    /// nil = unknown -- that surface then always counts as wanting the
+    /// camera (the old floor-wide behaviour), so it can never go dark.
+    var placement: MirrorPlacement? = nil
+}
+
+/// Oct 8 (Cool Hallways): a mirror surface on the floor plan, world x/z.
+/// `normal` is the unit direction the glass faces (out into the room).
+struct MirrorPlacement: Equatable {
+    var center: SIMD2<Float>
+    var normal: SIMD2<Float>
+
+    /// From the live "mirrorSurface" node (its plane faces local +Z).
+    init?(surface node: SCNNode) {
+        let c = node.convertPosition(SCNVector3Zero, to: nil)
+        let n = node.convertVector(SCNVector3(0, 0, 1), to: nil)
+        let flat = SIMD2<Float>(n.x, n.z)
+        let length = simd_length(flat)
+        guard length > 0.001 else { return nil }
+        center = SIMD2<Float>(c.x, c.z)
+        normal = flat / length
+    }
+
+    init(center: SIMD2<Float>, normal: SIMD2<Float>) {
+        self.center = center
+        self.normal = simd_normalize(normal)
+    }
+}
+
+/// Oct 8 (Cool Hallways): does any mirror need the front camera right now?
+/// Pure geometry on the player's floor position and heading -- no raycasts.
+/// Waking is strict and early (well before the glass is big on screen);
+/// staying on is looser, so small turns and steps never cycle the camera.
+enum MirrorDemand {
+    /// Wake within this distance (m) when facing the mirror's way...
+    static let wakeDistance: Float = 7.0
+    /// ...and stay on until beyond this one.
+    static let sleepDistance: Float = 9.0
+    /// This close, it wakes whatever the heading (a quick turn must not
+    /// find a stale or empty mirror)...
+    static let nearWakeDistance: Float = 2.0
+    /// ...and stays on regardless of heading until beyond this.
+    static let nearSleepDistance: Float = 2.6
+    /// Wake when the mirror is within 70 degrees of straight ahead...
+    static let wakeCos: Float = cos(70 * .pi / 180)
+    /// ...and stay on until it is more than 105 degrees off.
+    static let sleepCos: Float = cos(105 * .pi / 180)
+    /// In front of the glass by at least this (m) to wake; staying on
+    /// tolerates standing just past its plane.
+    static let wakeFront: Float = 0.05
+    static let sleepFront: Float = -0.3
+    /// Keep running this long after the last moment any mirror wanted it.
+    static let sleepDelay: TimeInterval = 1.5
+    /// How often the demand is re-checked (s).
+    static let checkInterval: TimeInterval = 0.25
+
+    enum Verdict: String { case near, facing, far, behind, facingAway }
+
+    static func verdict(_ m: MirrorPlacement, player: SIMD2<Float>, yaw: Float, on: Bool) -> Verdict {
+        let toPlayer = player - m.center
+        let d = simd_length(toPlayer)
+        if simd_dot(toPlayer, m.normal) <= (on ? sleepFront : wakeFront) { return .behind }
+        if d > (on ? sleepDistance : wakeDistance) { return .far }
+        if d <= (on ? nearSleepDistance : nearWakeDistance) { return .near }
+        let forward = SIMD2<Float>(-sin(yaw), -cos(yaw))      // SceneKit camera looks down -Z
+        let toMirror = -toPlayer / max(d, 0.001)
+        return simd_dot(forward, toMirror) >= (on ? sleepCos : wakeCos) ? .facing : .facingAway
+    }
+
+    /// The decision for a whole floor: (wanted, reason). Unknown placements
+    /// always want it.
+    static func evaluate(_ mirrors: [MirrorPlacement?], player: SIMD2<Float>, yaw: Float, on: Bool) -> (wanted: Bool, reason: String) {
+        var closest: (verdict: Verdict, distance: Float)?
+        for (i, m) in mirrors.enumerated() {
+            guard let m else { return (true, "mirror\(i):placementUnknown") }
+            let v = verdict(m, player: player, yaw: yaw, on: on)
+            let d = simd_length(player - m.center)
+            if v == .near || v == .facing {
+                return (true, "mirror\(i):\(v.rawValue) d=\(String(format: "%.1f", d))")
+            }
+            if closest == nil || d < closest!.distance { closest = (v, d) }
+        }
+        guard let closest else { return (false, "noMirrors") }
+        return (false, "\(closest.verdict.rawValue) d=\(String(format: "%.1f", closest.distance))")
+    }
+}
+
+/// Oct 8: wake at once, sleep only after `sleepDelay` of nobody wanting it.
+struct MirrorDemandTracker {
+    private(set) var on = false
+    private var unwantedSince: TimeInterval?
+
+    /// Returns the new state when it changes, else nil.
+    mutating func update(wanted: Bool, now: TimeInterval) -> Bool? {
+        if wanted {
+            unwantedSince = nil
+            guard !on else { return nil }
+            on = true
+            return true
+        }
+        guard on else { unwantedSince = nil; return nil }
+        if let since = unwantedSince {
+            guard now - since >= MirrorDemand.sleepDelay else { return nil }
+            on = false
+            unwantedSince = nil
+            return false
+        }
+        unwantedSince = now
+        return nil
+    }
+
+    mutating func reset() { on = false; unwantedSince = nil }
 }
 
 /// Owns only a live preview: no microphone input, still capture, or recording output.
@@ -121,7 +233,20 @@ final class MirrorCamera {
     /// again via removeSurface) without a floor reload -- see
     /// ContentView's decorator closure wiring.
     private(set) var surfaces: [MirrorSurfaceTarget]
+    /// The capture pipeline is running (camera on, frames painted).
     private var active = false
+    /// Oct 8 (Cool Hallways): the app/lifecycle allows the camera
+    /// (ContentView's cameraEnabled) -- necessary, no longer sufficient.
+    private var allowed = false
+    /// Oct 8: a mirror is near enough and in view to need it.
+    private var demand = MirrorDemandTracker()
+    private var demandTimer: Timer?
+    /// The player's floor position (x, z) and yaw; nil = unknown (the
+    /// demand then stays as it is).
+    var playerPose: (() -> (position: SIMD2<Float>, yaw: Float)?)?
+    /// Diagnostics/tests: is the capture pipeline running? Does a mirror want it?
+    var isCapturing: Bool { active }
+    var isDemanded: Bool { demand.on }
     private var requestedPermission = false
     private var worker: MirrorCaptureWorker?
     private var rotationObserver: NSObjectProtocol?
@@ -170,14 +295,16 @@ final class MirrorCamera {
     /// camera once per floor by enumerating "mirrorSurface"-named nodes,
     /// so a newly-authored mirror needs this to show the player's face
     /// without reloading the floor.
-    func addSurface(_ material: SCNMaterial, aspect: CGFloat) {
-        surfaces.append(MirrorSurfaceTarget(material: material, aspect: aspect))
+    func addSurface(_ material: SCNMaterial, aspect: CGFloat, placement: MirrorPlacement? = nil) {
+        surfaces.append(MirrorSurfaceTarget(material: material, aspect: aspect, placement: placement))
+        refreshDemand(reason: "surfaceAdded")
     }
 
     /// Reverse of addSurface above -- drops the given surface (identity
     /// match on the material) when its mirror is deleted in the Designer.
     func removeSurface(_ material: SCNMaterial) {
         surfaces.removeAll { $0.material === material }
+        refreshDemand(reason: "surfaceRemoved")
     }
 
     // Eddie, Sept 17: reverted to its original form -- routing the
@@ -194,18 +321,84 @@ final class MirrorCamera {
     func setActive(_ enabled: Bool) {
         if !enabled {
             expressionAnalyzer?.setEnabled(false)
+            if allowed {
+                allowed = false
+                stopDemandChecks()
+            }
             if active {
-                active = false
-                worker?.stop()
+                stopCapture(reason: "lifecycle")
                 show("Mirror")
             }
             return
         }
+        if !allowed {
+            allowed = true
+            startDemandChecks()
+            refreshDemand(reason: "allowed")     // decide at once, no tick wait
+        }
+        guard demand.on else { return }
         if active {
             updateOrientation()
             return
         }
+        startCapture()
+    }
+
+    // MARK: Oct 8 (Cool Hallways) -- demand-driven capture
+
+    private func startDemandChecks() {
+        guard demandTimer == nil else { return }
+        demandTimer = Timer.scheduledTimer(withTimeInterval: MirrorDemand.checkInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshDemand(reason: nil) }
+        }
+    }
+
+    private func stopDemandChecks() {
+        demandTimer?.invalidate()
+        demandTimer = nil
+        demand.reset()
+    }
+
+    /// Re-decide whether any mirror needs the camera; start or stop it.
+    private func refreshDemand(reason forced: String?) {
+        guard allowed else { return }
+        let decision: (wanted: Bool, reason: String)
+        if surfaces.isEmpty {
+            decision = (false, "noMirrors")
+        } else if let pose = playerPose?() {
+            decision = MirrorDemand.evaluate(surfaces.map(\.placement), player: pose.position, yaw: pose.yaw, on: demand.on)
+        } else if surfaces.contains(where: { $0.placement == nil }) {
+            decision = (true, "placementUnknown")
+        } else {
+            return                                   // no pose yet: leave it as it is
+        }
+        // A surface removal with nothing left is immediate, not delayed.
+        if surfaces.isEmpty, demand.on { demand.reset(); stopCapture(reason: "noMirrors"); return }
+        guard let change = demand.update(wanted: decision.wanted, now: CACurrentMediaTime()) else { return }
+        if change {
+            diag("mirror.demand.on", ["why": decision.reason, "trigger": forced ?? "check", "mirrors": surfaces.count])
+            if !active { startCapture() }
+        } else {
+            diag("mirror.demand.off", ["why": decision.reason, "mirrors": surfaces.count])
+            // Out of sight by definition: the last reflection stays on the
+            // glass (no placeholder flash on the way back); fresh frames
+            // replace it as soon as capture restarts.
+            if active { stopCapture(reason: decision.reason) }
+        }
+    }
+
+    private func stopCapture(reason: String) {
+        guard active else { return }
+        active = false
+        worker?.stop()
+        diag("mirror.camera.stopped", ["why": reason])
+    }
+
+    /// The original activation path (permission handling unchanged).
+    private func startCapture() {
+        guard !active else { return }
         active = true
+        diag("mirror.camera.starting", ["auth": AVCaptureDevice.authorizationStatus(for: .video).rawValue])
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: start()
         case .notDetermined:
@@ -303,6 +496,7 @@ final class MirrorCamera {
     }
 
     deinit {
+        demandTimer?.invalidate()
         expressionAnalyzer?.setEnabled(false)
         worker?.stop()
         if let rotationObserver { NotificationCenter.default.removeObserver(rotationObserver) }

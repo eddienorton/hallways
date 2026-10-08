@@ -54,6 +54,7 @@ enum SoundEffects {
         do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.prepareToPlay()
+            HallwaysAudio.shared.manage(player)      // Oct 8: the mute switch
             return player
         } catch {
             print("SoundEffects: could not decode \(filename): \(error)")
@@ -153,6 +154,7 @@ enum SoundEffects {
         player?.numberOfLoops = -1
         player?.enableRate = true          // before prepareToPlay, per AVAudioPlayer
         player?.prepareToPlay()
+        if let player { HallwaysAudio.shared.manage(player) }   // Oct 8: the mute switch
         return player
     }
 
@@ -258,7 +260,7 @@ enum SoundEffects {
         } catch {
             print("SoundEffects: could not activate street audio: \(error)")
         }
-        player.volume = 1
+        HallwaysAudio.shared.setVolume(player, 1)   // Oct 8: via the mute switch
         player.currentTime = 0
         player.play()
     }
@@ -271,12 +273,12 @@ enum SoundEffects {
         for i in 1...steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i)) {
                 guard player.isPlaying else { return }
-                player.volume = Float(1 - Double(i) / Double(steps))
+                HallwaysAudio.shared.setVolume(player, Float(1 - Double(i) / Double(steps)))
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             player.stop()
-            player.volume = 1
+            HallwaysAudio.shared.setVolume(player, 1)
         }
     }
 

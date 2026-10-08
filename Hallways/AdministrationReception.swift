@@ -76,6 +76,7 @@ enum AdministrationReception {
                                                    "missing": expectedCells.subtracting(cells).count])
             return
         }
+        cancelPatienceTimer()                              // Oct 7: never carried across builds
         let s = Float(cellSize)
         let half = s / 2
         let boundaryX = (Float(publicCol) + 0.5) * s       // public | staff line
@@ -378,29 +379,11 @@ enum AdministrationReception {
         return root
     }
 
+    /// Oct 8: the back-wall clock is now the shared real-time WallClock
+    /// (it used to fake time: a fixed hour hand and a minute hand creeping
+    /// from 12 at launch). Same size and spot; real local time.
     private static func makeClock() -> SCNNode {
-        let root = SCNNode()
-        let face = SCNNode(geometry: SCNCylinder(radius: 0.2, height: 0.04))
-        face.geometry?.materials = [material(UIColor(white: 0.93, alpha: 1), rough: 0.5)]
-        face.eulerAngles.x = .pi / 2
-        root.addChildNode(face)
-        let rim = SCNNode(geometry: SCNTorus(ringRadius: 0.2, pipeRadius: 0.018))
-        rim.geometry?.materials = [material(brass, metal: 0.85, rough: 0.3)]
-        rim.eulerAngles.x = .pi / 2
-        root.addChildNode(rim)
-        let ink = material(UIColor(white: 0.08, alpha: 1))
-        let minute = SCNNode()
-        minute.position = SCNVector3(0, 0, 0.025)
-        box(0.012, 0.16, 0.006, ink, 0, 0.07, 0, in: minute)
-        root.addChildNode(minute)
-        let hour = SCNNode()
-        hour.position = SCNVector3(0, 0, 0.03)
-        hour.eulerAngles.z = -.pi / 3
-        box(0.016, 0.1, 0.006, ink, 0, 0.045, 0, in: hour)
-        root.addChildNode(hour)
-        // The minute hand creeps (one turn an hour) -- time passes here.
-        minute.runAction(.repeatForever(.rotateBy(x: 0, y: 0, z: -2 * .pi, duration: 3600)))
-        return root
+        WallClock.makeNode(radius: 0.2)
     }
 
     // MARK: The Administrator (stand-in)
@@ -536,12 +519,32 @@ enum AdministrationReception {
     static func landedAtDesk(in root: SCNNode) {
         let requested = directionsRequested
         directionsRequested = false
-        guard let standIn = root.childNode(withName: standInName, recursively: true) else { return }
-        guard directionsTarget != nil else { return }                // prologue complete: no routing
+        // Oct 8 (Juanita diagnostics): observe only -- every path through the
+        // counter landing is now visible in the report, including the silent ones.
+        diag("juanita.landed", ["requested": requested, "admission": Admission.isCompleted,
+                                "prologue": Admission.isPrologueCompleted,
+                                "target": directionsTarget?.rawValue ?? "none"])
+        guard let standIn = root.childNode(withName: standInName, recursively: true) else {
+            diag("juanita.noResponse", ["reason": "standInMissing", "requested": requested])
+            return
+        }
+        guard directionsTarget != nil else {                         // prologue complete: no routing
+            diag("juanita.noResponse", ["reason": "prologueCompleted", "requested": requested])
+            return
+        }
         if greetedStandIn !== standIn || greetedTarget != directionsTarget {
+            diag("juanita.greetRequested", ["target": directionsTarget?.rawValue ?? "none",
+                                            "newTarget": greetedStandIn === standIn])
             greet(in: root)
         } else if requested {
+            diag("juanita.repeatRequested", ["count": patienceCount])
             repeatDirections(in: root)
+        } else {
+            diag("juanita.noResponse", ["reason": "alreadyGreetedNotTapped", "count": patienceCount,
+                                        "action": "patienceTimerRestarted"])
+            // Oct 7: back at the counter after wandering off -- her patience
+            // (the visit's count) is where it was; the clock starts afresh.
+            schedulePatienceTimer(for: standIn)
         }
     }
 
@@ -551,8 +554,14 @@ enum AdministrationReception {
     /// off to ITS right and points: the visitor's left, where the ID terminal
     /// hangs. No words, nothing forced: the camera is never touched.
     static func greet(in root: SCNNode) {
-        guard let standIn = root.childNode(withName: standInName, recursively: true) else { return }
-        guard let target = directionsTarget else { return }
+        guard let standIn = root.childNode(withName: standInName, recursively: true) else {
+            diag("juanita.noResponse", ["reason": "standInMissing", "in": "greet"])
+            return
+        }
+        guard let target = directionsTarget else {
+            diag("juanita.noResponse", ["reason": "prologueCompleted", "in": "greet"])
+            return
+        }
         guard greetedStandIn !== standIn || greetedTarget != target else {
             diag("administration.greet.skipped", ["reason": "already greeted this visit"])
             return
@@ -562,6 +571,7 @@ enum AdministrationReception {
         greetedTarget = target
         diag("administration.greet", ["target": target.rawValue])
         perform(.welcome, on: standIn)
+        schedulePatienceTimer(for: standIn)
     }
 
     /// A deliberate request (a tap) for the directions again. Her patience
@@ -569,14 +579,27 @@ enum AdministrationReception {
     /// impatient, then -- on the fourth ask -- she loses it (and stays
     /// exasperated for any further asks this visit).
     static func repeatDirections(in root: SCNNode) {
-        guard let standIn = root.childNode(withName: standInName, recursively: true),
-              directionsTarget != nil else { return }
+        guard let standIn = root.childNode(withName: standInName, recursively: true) else {
+            diag("juanita.noResponse", ["reason": "standInMissing", "in": "repeat"])
+            return
+        }
+        advancePatience(on: standIn, source: "poke")
+    }
+
+    /// The one escalation step, shared by a poke and the patience timer:
+    /// the same count, the same moods, the same busy guard.
+    private static func advancePatience(on standIn: SCNNode, source: String) {
+        guard directionsTarget != nil else {
+            diag("juanita.noResponse", ["reason": "prologueCompleted", "in": "patience", "source": source])
+            return
+        }
         if patienceStandIn !== standIn {
             patienceStandIn = standIn
             repeatRequests = 0
         }
         guard CACurrentMediaTime() >= busyUntil else {
             diag("administration.repeat.skipped", ["reason": "still performing"])
+            diag("juanita.ignored", ["reason": "stillPerforming", "source": source])
             return
         }
         repeatRequests += 1
@@ -587,8 +610,81 @@ enum AdministrationReception {
         case 3: mood = .impatient
         default: mood = .exasperated
         }
-        diag("administration.repeat", ["count": repeatRequests, "mood": "\(mood)", "target": directionsTarget?.rawValue ?? "none"])
+        diag("administration.repeat", ["count": repeatRequests, "mood": "\(mood)", "source": source,
+                                       "target": directionsTarget?.rawValue ?? "none"])
         perform(mood, on: standIn)
+        schedulePatienceTimer(for: standIn)
+    }
+
+    // MARK: Oct 7 -- her patience runs out on its own
+
+    /// Seconds AFTER a routine ends before she tells you again, indexed by
+    /// how many times she has already repeated herself this visit (0 = only
+    /// the greeting so far). Once she has reached the scream, nothing more.
+    /// (var only so tests can shorten it.)
+    static var patienceIntervals: [TimeInterval] = [8, 7, 6, 5]
+    /// The ask count at which she has hit her final mood (the scream).
+    static let finalPatienceStage = 4
+    /// Is the visitor still standing at the counter? (ContentView wires it;
+    /// nil = nobody to be impatient with.)
+    static var isVisitorAtDesk: (() -> Bool)?
+    /// Bumped to cancel: a pending fire with an older number does nothing
+    /// (it holds only a weak reference to the stand-in).
+    private static var patienceGeneration = 0
+    /// True while a fire is pending (tests / diagnostics).
+    private(set) static var isPatienceTimerPending = false
+    /// How many times she has repeated herself to THIS visit's stand-in.
+    static var patienceCount: Int {
+        guard let standIn = greetedStandIn, patienceStandIn === standIn else { return 0 }
+        return repeatRequests
+    }
+
+    /// One pending timer at most: (re)started after every telling and on a
+    /// return to the counter; never past the final stage.
+    static func schedulePatienceTimer(for standIn: SCNNode) {
+        cancelPatienceTimer()
+        guard directionsTarget != nil else { return }
+        let done = patienceStandIn === standIn ? repeatRequests : 0
+        guard done < finalPatienceStage, done < patienceIntervals.count else { return }
+        let remaining = max(0, busyUntil - CACurrentMediaTime())
+        let delay = remaining + patienceIntervals[done]
+        let generation = patienceGeneration
+        isPatienceTimerPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak standIn] in
+            guard generation == patienceGeneration else { return }    // cancelled or superseded
+            patienceTimerFired(standIn: standIn)
+        }
+        diag("administration.patience.scheduled", ["after": done, "in": delay])
+    }
+
+    static func cancelPatienceTimer() {
+        patienceGeneration += 1
+        isPatienceTimerPending = false
+    }
+
+    /// Oct 8 (Start Over): drop any pending request/timer from the previous
+    /// employee's visit. Her behavior is unchanged; the rebuilt floor's new
+    /// stand-in greets as on a first visit.
+    static func resetForNewPlayer() {
+        cancelPatienceTimer()
+        directionsRequested = false
+    }
+
+    private static func patienceTimerFired(standIn: SCNNode?) {
+        isPatienceTimerPending = false
+        guard let standIn, standIn.parent != nil else {                // the floor is gone
+            diag("juanita.noResponse", ["reason": "floorGone", "in": "patienceTimer"])
+            return
+        }
+        guard isVisitorAtDesk?() == true else {
+            diag("administration.patience.cancelled", ["reason": "visitor walked away"])
+            return                                                     // resumes when they land again
+        }
+        if CACurrentMediaTime() < busyUntil {                          // never overlap a routine
+            schedulePatienceTimer(for: standIn)
+            return
+        }
+        advancePatience(on: standIn, source: "timer")
     }
 
     enum Mood { case welcome, friendly, lessEnthused, impatient, exasperated }
@@ -645,14 +741,22 @@ enum AdministrationReception {
               let head = standIn.childNode(withName: "adminHead", recursively: true),
               let eyes = standIn.childNode(withName: "adminEyes", recursively: true),
               let pupils = standIn.childNode(withName: "adminPupils", recursively: true),
-              let antenna = standIn.childNode(withName: "adminAntenna", recursively: true) else { return }
+              let antenna = standIn.childNode(withName: "adminAntenna", recursively: true) else {
+            diag("juanita.noResponse", ["reason": "rigMissing", "mood": "\(mood)"])
+            return
+        }
         // Oct 5 (post-ID): kiosk = her right arm and a look to her right;
         // Fred's office = her left arm and a wider look to her left.
         let toOffice = directionsTarget == .office
-        guard let arm = standIn.childNode(withName: toOffice ? "adminArmRest" : "adminArmPoint", recursively: true) else { return }
+        guard let arm = standIn.childNode(withName: toOffice ? "adminArmRest" : "adminArmPoint", recursively: true) else {
+            diag("juanita.noResponse", ["reason": "armMissing", "mood": "\(mood)"])
+            return
+        }
         let pointPose = toOffice ? armPointOffice : armPoint
         let mirror: CGFloat = toOffice ? -1 : 1
         let t = telling(mood)
+        diag("juanita.gesture", ["mood": "\(mood)", "target": directionsTarget?.rawValue ?? "none",
+                                 "voice": t.voice != nil, "jabs": t.jabs, "duration": t.total])
         busyUntil = CACurrentMediaTime() + t.total
         func rot(_ x: CGFloat = 0, _ y: CGFloat = 0, _ z: CGFloat = 0, _ d: Double) -> SCNAction {
             .rotateTo(x: x, y: y, z: z, duration: d, usesShortestUnitArc: true)

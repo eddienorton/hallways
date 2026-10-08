@@ -22,6 +22,7 @@
 
 import SceneKit
 import UIKit
+import QuartzCore
 
 /// SCNView subclass that remembers where the current touch started and
 /// where it is now. No gesture recognizers — this is the raw input for
@@ -34,6 +35,50 @@ final class TouchTrackingSCNView: SCNView {
     private(set) var activeTouchCount = 0
 
     private var activeTouches: Set<UITouch> = []
+
+    // MARK: Oct 8 -- Operation Cool Hallways, experiment 2 (render scale)
+
+    /// The most pixels-per-point SceneKit renders at. 3x phones normally
+    /// render the 3D view at 3x; 2.0 renders it at 2x (~44% of the pixels)
+    /// and the system scales it up to the screen. Everything else -- frame
+    /// rate, 2x MSAA, lighting, materials, overlays, touch -- is untouched.
+    /// TO REVERT: set this to nil (native scale, exactly as before).
+    static let renderScaleCap: CGFloat? = 2.0
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyRenderScale()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyRenderScale()
+    }
+
+    private var loggedRenderScale = false
+
+    /// Re-applied on every window move and layout: UIKit re-assigns the
+    /// screen's scale to a view when it joins a window.
+    private func applyRenderScale() {
+        guard let cap = Self.renderScaleCap, let window else { return }
+        let native = window.screen.scale
+        let target = min(native, cap)
+        if contentScaleFactor != target { contentScaleFactor = target }
+        // One line per launch: proof of what SceneKit is actually drawing.
+        // Read a couple of seconds in, after SceneKit has drawn at the new size.
+        if !loggedRenderScale, bounds.width > 0 {
+            loggedRenderScale = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self else { return }
+                let drawable = (self.layer as? CAMetalLayer)?.drawableSize ?? .zero
+                diag("render.scale", ["native": Double(native), "cap": Double(cap),
+                                      "contentScale": Double(self.contentScaleFactor),
+                                      "points": "\(Int(self.bounds.width))x\(Int(self.bounds.height))",
+                                      "drawable": "\(Int(drawable.width))x\(Int(drawable.height))",
+                                      "metalLayer": self.layer is CAMetalLayer])
+            }
+        }
+    }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)

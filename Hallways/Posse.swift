@@ -167,6 +167,20 @@ enum Posse {
 
     // MARK: Follow / stay (main thread)
 
+    /// Oct 8 flight recorder: every member installed on this floor (where,
+    /// following or not) and every record (following, home floor). Reads only.
+    static var diagSummary: String {
+        let live = members.map { m in
+            "\(m.memberID):\(m.isFollowing ? "following" : "staying")@\(String(format: "%.2f,%.2f", m.groundPosition.x, m.groundPosition.y))"
+        }
+        let recorded = records.keys.sorted().map { id -> String in
+            let r = records[id]!
+            return "\(id).record:\(r.following ? "following" : "not-following"),met=\(r.met),home=F\(r.homeFloor.map(String.init) ?? "?")"
+        }
+        let all = live + recorded
+        return all.isEmpty ? "none" : all.joined(separator: ";")
+    }
+
     static func recruit(_ member: PosseMember) {
         member.startFollowing()
         var record = records[member.memberID] ?? Record()
@@ -280,6 +294,15 @@ nonisolated final class FollowLeash: @unchecked Sendable {
     private var slotKind = SlotKind.side
     private var routeDirect = true
     private var target: SIMD2<Float>?
+    /// Oct 8 flight recorder: who this leash belongs to ("freddy"), and the
+    /// last decisions recorded -- only CHANGES are written, never per frame.
+    var diagLabel = "follower"
+    private var diagLastDirect: Bool?
+    private var diagLastSlot: SlotKind?
+    private var diagClock: Double = 0
+    private var diagLastRouteLog: Double = -10
+    private var diagLastSlotLog: Double = -10
+    private static func diagPoint(_ p: SIMD2<Float>) -> String { String(format: "%.2f,%.2f", p.x, p.y) }
 
     struct Reading {
         let player: SIMD2<Float>
@@ -348,10 +371,14 @@ nonisolated final class FollowLeash: @unchecked Sendable {
 
     func update(follower pos: SIMD2<Float>, dt: Double) -> Reading? {
         guard let ground = playerGround() else { return nil }
+        diagClock += dt
         let player = ground.pos, forward = ground.forward
         let right = SIMD2<Float>(-forward.y, forward.x)   // forward turned 90 degrees clockwise
         // Breadcrumbs of where the player has actually been.
-        if let last = lastPlayer, simd_distance(last, player) > 3 { trail = [] }   // a jump (elevator, reset)
+        if let last = lastPlayer, simd_distance(last, player) > 3 {           // a jump (elevator, reset)
+            trail = []
+            diag("follow.trailReset", ["who": diagLabel, "jump": simd_distance(last, player), "player": Self.diagPoint(player)])
+        }
         if let last = lastPlayer, dt > 0, simd_distance(last, player) <= 3 {
             playerVelocity += ((player - last) / Float(dt) - playerVelocity) * min(1, Float(dt) * 10)
         } else {
@@ -404,7 +431,23 @@ nonisolated final class FollowLeash: @unchecked Sendable {
                 if (found == nil && simd_distance(pos, player) > 4.5) || simd_distance(pos, player) > 9 {
                     let back = trail.count >= 5 ? trail[trail.count - 5] : behind
                     reposition = clear(player, back) ? back : player
+                    diag("follow.reposition", ["who": diagLabel, "from": Self.diagPoint(pos),
+                                               "to": Self.diagPoint(reposition ?? player), "player": Self.diagPoint(player),
+                                               "distance": simd_distance(pos, player), "trailVisible": found != nil])
                 }
+            }
+            // Route/slot changes: at most one line per half-second each (they
+            // can flicker while rounding a corner).
+            if diagLastDirect != routeDirect, diagClock - diagLastRouteLog >= 0.5 {
+                diagLastDirect = routeDirect
+                diagLastRouteLog = diagClock
+                diag("follow.route", ["who": diagLabel, "direct": routeDirect, "follower": Self.diagPoint(pos),
+                                      "player": Self.diagPoint(player), "onGrid": grid])
+            }
+            if diagLastSlot != slotKind, diagClock - diagLastSlotLog >= 0.5 {
+                diagLastSlot = slotKind
+                diagLastSlotLog = diagClock
+                diag("follow.slot", ["who": diagLabel, "slot": "\(slotKind)"])
             }
         } else if routeDirect {
             // Between checks the slot keeps riding along with the player.

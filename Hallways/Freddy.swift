@@ -48,6 +48,7 @@ enum Freddy {
         let traceDriver = ElevatorArrivalTrace.shared.beginPhase("Freddy.driverAndLeash")
         let leash = FollowLeash(playerCamera: context.playerCamera, root: context.scene.rootNode,
                                 cells: context.cells, cellSize: context.cellSize)
+        leash.diagLabel = memberID                               // Oct 8: flight recorder label
         let fires = context.fires.map { (coord: $0.key, node: $0.value) }
         let extinguish = context.extinguish
         let driver = FreddyDriver(parts: parts, leash: leash, sceneRoot: context.scene.rootNode, fires: fires,

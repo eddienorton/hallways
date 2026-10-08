@@ -76,6 +76,8 @@ struct PlayerSettingsButton: View {
     // sheet had no store reference before, since PICK YOUR FEET is
     // pure AppStorage.
     @ObservedObject var store: MazeStore
+    /// Oct 8: Settings > Start Over (ContentView owns the actual reset).
+    var onStartOver: () -> Void = {}
     @State private var showingSettings = false
     var body: some View {
         VStack {
@@ -94,12 +96,15 @@ struct PlayerSettingsButton: View {
         }
         .padding(.leading, 20)
         .padding(.bottom, 28)
-        .sheet(isPresented: $showingSettings) { PlayerSettingsSheet(store: store) }
+        .sheet(isPresented: $showingSettings) { PlayerSettingsSheet(store: store, onStartOver: onStartOver) }
     }
 }
 
 private struct PlayerSettingsSheet: View {
     @ObservedObject var store: MazeStore
+    var onStartOver: () -> Void
+    // Oct 8 (Start Over): confirmation gate -- only Confirm starts over.
+    @State private var showingStartOverConfirmation = false
     @AppStorage(PlayerFeet.preferenceKey) private var selectedFeet = PlayerFeet.man.rawValue
     // Sept 28 (Your Height): see PlayerHeight. ContentView observes the
     // same key and moves the live camera as this changes.
@@ -151,6 +156,7 @@ private struct PlayerSettingsSheet: View {
                         guard !preparingDiagnostics else { return }
                         preparingDiagnostics = true
                         diag("diagnostics.shareRequested")
+                        DiagnosticRecorder.shared.snapshot("share")     // Oct 8: the report ends with the state right now
                         DiagnosticRecorder.shared.makeShareSnapshot { url in
                             preparingDiagnostics = false
                             if let url { diagnosticsShare = DiagnosticsShareItem(url: url) }
@@ -175,6 +181,29 @@ private struct PlayerSettingsSheet: View {
                 // "default." Destructive role/styling, same visual
                 // language as every other destructive row in this app
                 // (GridEditorView's own Reset Floor button).
+                // Oct 8 -- START OVER (Debug AND Release): begin again as a
+                // new employee. Settings and building decorations are kept
+                // (see StartOver).
+                Section {
+                    Button(role: .destructive) {
+                        showingStartOverConfirmation = true
+                    } label: {
+                        Text("Start Over")
+                    }
+                    .alert(StartOver.confirmationTitle, isPresented: $showingStartOverConfirmation) {
+                        Button("Cancel", role: .cancel) {}
+                        Button(StartOver.confirmButtonTitle, role: .destructive) {
+                            onStartOver()
+                            dismiss()
+                        }
+                    } message: {
+                        Text(StartOver.confirmationMessage)
+                    }
+                } footer: {
+                    Text("Begin again as a new employee, from outside the building.")
+                }
+                // Oct 8 (Developer/Release separation): Debug workshop only.
+                if BuildMode.developerTools {
                 Section {
                     Button(role: .destructive) {
                         showingResetAllFloorsConfirmation = true
@@ -183,6 +212,7 @@ private struct PlayerSettingsSheet: View {
                     }
                 } footer: {
                     Text("Replaces every customized floor with the current built-in defaults.")
+                }
                 }
             }
             .navigationTitle("Settings")
@@ -198,6 +228,7 @@ private struct PlayerSettingsSheet: View {
             .alert("Reset All Floors?", isPresented: $showingResetAllFloorsConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Reset All Floors", role: .destructive) {
+                    guard BuildMode.developerTools else { return }
                     store.resetAllFloorsToDefaults()
                 }
             } message: {

@@ -107,7 +107,21 @@ enum MailCatalog {
 
             Recreation Committee
             """,
-            delivery: .atFirstLogin(minutesEarlier: 17))
+            delivery: .atFirstLogin(minutesEarlier: 17)),
+        // Oct 8 (Episode 3, Dispatch test): delivered ONLY when BuildingDispatch
+        // sends it (today: the DEBUG test trigger). Never at first login.
+        AuthoredMail(
+            id: BuildingDispatch.staffMeetingTestMailID,
+            sender: "Administration",
+            senderAddress: "administration@hallways.internal",
+            subject: "New Employee Staff Meeting",
+            body: """
+            Welcome to the Hallways Building.
+
+            All new employees are invited to attend a staff meeting.
+            Further details will follow.
+            """,
+            delivery: .byEvent)
     ]
 
     static func authored(_ id: String) -> AuthoredMail? { all.first { $0.id == id } }
@@ -181,6 +195,17 @@ final class MailStore: ObservableObject {
         if let data = try? JSONEncoder().encode(delivered) { UserDefaults.standard.set(data, forKey: Self.deliveredKey) }
         UserDefaults.standard.set(Array(read).sorted(), forKey: Self.readKey)
     }
+
+    #if DEBUG
+    /// DEV (Dispatch test trigger): take one delivered message back out, so
+    /// the same test can be sent -- and arrive unread -- again.
+    func devWithdraw(_ id: String) {
+        guard delivered[id] != nil else { return }
+        delivered[id] = nil
+        read.remove(id)
+        save()
+    }
+    #endif
 
     /// DEV (New Player reset): an empty mailbox until the next first login.
     func resetForNewPlayer() {

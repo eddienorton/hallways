@@ -97,6 +97,34 @@ enum HallwayScene {
     /// visual prototype. The local +Z side faces out into the hallway.
     /// Oct 4: the elevator floor indicator's face -- amber LED-style floor
     /// number on black, with an up (1) / down (-1) arrow while travelling.
+    /// Oct 8: the text on a cab floor button. Presentation only -- the
+    /// button is still elevatorControlButton_<floor> and still selects that
+    /// floor. Floor 1 reads LOBBY (the existing fit-to-button sizing below
+    /// shrinks it to the same width as a two-digit number).
+    static func elevatorButtonLabel(floor: Int) -> String {
+        floor == 1 ? "LOBBY" : "\(floor)"
+    }
+
+    /// Oct 8: how much wider than round a cab button is -- LOBBY is a
+    /// horizontal oval (same height, wider) so its word reads; every
+    /// numbered button stays round. The tap test reads the same scale off
+    /// the cap node, so the target matches what's drawn.
+    static func elevatorButtonWidthScale(floor: Int) -> Float {
+        floor == 1 ? 1.9 : 1                       // Oct 8 final: 1.6 -> 1.9 with the wider plate
+    }
+
+    /// Oct 8 (final): the widest a button's lettering may be (m), set on its
+    /// own rather than derived from the button -- LOBBY gets room to read at
+    /// nearly the digits' height (0.045 m cap). Numbers keep 0.0675.
+    static func elevatorButtonLabelMaxWidth(floor: Int) -> Float {
+        floor == 1 ? 0.15 : 0.0675
+    }
+
+    /// Oct 8: the hardcoded lobby mirror's wall face (Floor 1): mounted on
+    /// the east wall of (11,7). Shared by its builder and its tap landing.
+    static let lobbyMirrorFace = WallFace(coord: GridCoordinate(row: 11, col: 7), direction: .east)
+    static let lobbyMirrorNodeName = "lobbyDecorativeMirror"
+
     static func elevatorIndicatorImage(floor: Int, direction: Int) -> UIImage {
         let size = CGSize(width: 300, height: 170)
         return UIGraphicsImageRenderer(size: size).image { context in
@@ -1885,7 +1913,7 @@ enum HallwayScene {
     /// open sides meet the neighbor's rect edge-to-edge with no gap and
     /// no overlap.
     static func build(fromMaze cells: Set<GridCoordinate>, cellSize: CGFloat, wallHeight: CGFloat, objects: [GridCoordinate: ObjectKind] = [:], destinations: [GridCoordinate: ObjectKind] = [:], exitSigns: [GridCoordinate: Direction] = [:], floorMaps: [GridCoordinate: Direction] = [:], spotlights: Set<GridCoordinate> = [], missionSigns: [GridCoordinate: Direction] = [:], pictures: [WallFace: PictureSize] = [:], mirrors: [GridCoordinate: Direction] = [:],
-                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], tables: [GridCoordinate: FurnitureTable] = [:], desks: [GridCoordinate: FurnitureDesk] = [:], waterCoolers: [GridCoordinate: FurnitureWaterCooler] = [:], officeChairs: [GridCoordinate: FurnitureOfficeChair] = [:], floorLamps: [GridCoordinate: FurnitureFloorLamp] = [:], aquariums: [GridCoordinate: FurnitureAquarium] = [:], filingCabinets: [GridCoordinate: FurnitureFilingCabinet] = [:], cellSurfaces: [GridCoordinate: CellSurfaceOverride] = [:], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
+                                            wallLights: [GridCoordinate: Direction] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement] = [:], fires: Set<GridCoordinate> = [], extinguishers: [GridCoordinate: Direction] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], shellGameStations: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], simonTerminals: [GridCoordinate: Direction] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], picturesUseCameraRoll: Bool = false, roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], missionHeading: String = "", missionBody: String = "", missionObjectKind: ObjectKind? = nil, floorNumber: Int = 1, totalFloors: Int = 1, playerStart: GridCoordinate? = nil, playerEnd: GridCoordinate? = nil, theme: HallwayTheme = .brick, wallTexture: String? = nil, floorTexture: String? = nil, ceilingTexture: String? = nil, elevatorArtwork: [String: Any] = [:], fluorescentLights: [GridCoordinate: FluorescentOrientation] = [:], ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind] = [:], pictureLights: Set<WallFace> = [], lightBrightness: [LightBrightness] = [], pictureImageSelections: [WallFace: PictureImageSelection] = [:], elevatorCabDecoration: ElevatorCabDecoration = ElevatorCabDecoration(), floorObjectPlacements: [GridCoordinate: FloorObjectPlacement] = [:], tables: [GridCoordinate: FurnitureTable] = [:], desks: [GridCoordinate: FurnitureDesk] = [:], waterCoolers: [GridCoordinate: FurnitureWaterCooler] = [:], officeChairs: [GridCoordinate: FurnitureOfficeChair] = [:], floorLamps: [GridCoordinate: FurnitureFloorLamp] = [:], aquariums: [GridCoordinate: FurnitureAquarium] = [:], filingCabinets: [GridCoordinate: FurnitureFilingCabinet] = [:], cellSurfaces: [GridCoordinate: CellSurfaceOverride] = [:], clocks: Set<WallFace> = [], reportPictureIdentity: @escaping (WallFace, PictureImageSelection) -> Void = { _, _ in }, reportElevatorBackIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideIdentity: @escaping (PictureImageSelection) -> Void = { _ in }, reportElevatorSideRightIdentity: @escaping (PictureImageSelection) -> Void = { _ in }) -> (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial]) {
         let scene = SCNScene()
         scene.background.contents = UIColor(white: 0.04, alpha: 1)
         scene.fogColor = UIColor(white: 0.04, alpha: 1)
@@ -2897,7 +2925,7 @@ enum HallwayScene {
                 let rimRadius: CGFloat = 0.063
                 let colSpacing: CGFloat = 0.16
                 let rowSpacing: CGFloat = 0.145
-                let marginX: CGFloat = 0.075
+                let marginX: CGFloat = 0.095            // Oct 8 final: 0.075 -> 0.095 (plate 0.31 -> 0.35 m wide) for LOBBY
                 let marginY: CGFloat = 0.075
                 let plateThickness: CGFloat = 0.02
                 let plateWidth = colSpacing + marginX * 2
@@ -3006,15 +3034,18 @@ enum HallwayScene {
                     let x: CGFloat = slot.x
                     let y = contentTop - CGFloat(row) * rowSpacing
 
+                    let widen = Self.elevatorButtonWidthScale(floor: floorLabel)
                     let recess = SCNNode(geometry: SCNCylinder(radius: rimRadius, height: 0.009))
                     recess.geometry?.materials = [recessMaterial]
                     recess.eulerAngles.x = .pi / 2
+                    recess.scale = SCNVector3(widen, 1, 1)         // Oct 8: LOBBY's oval rim
                     recess.position = SCNVector3(Float(x), Float(y), -(Float(plateThickness) / 2 + 0.0045))
                     plate.addChildNode(recess)
 
                     let cap = SCNNode(geometry: SCNCylinder(radius: buttonRadius, height: 0.015))
                     cap.geometry?.materials = [buttonMetal]
                     cap.eulerAngles.x = .pi / 2
+                    cap.scale = SCNVector3(widen, 1, 1)            // Oct 8: LOBBY's oval cap (same height)
                     cap.position = SCNVector3(Float(x), Float(y), -(Float(plateThickness) / 2 + 0.0135))
                     // Sept 26: stable, clear names for future work (per
                     // Eddie's request) -- NOT wired into any tap/
@@ -3024,7 +3055,7 @@ enum HallwayScene {
                     cap.name = "elevatorControlButton_\(floorLabel)"
                     plate.addChildNode(cap)
 
-                    let digitText = SCNText(string: "\(floorLabel)", extrusionDepth: 0)
+                    let digitText = SCNText(string: Self.elevatorButtonLabel(floor: floorLabel), extrusionDepth: 0)
                     digitText.font = UIFont.monospacedDigitSystemFont(ofSize: 30, weight: .medium)
                     digitText.flatness = 0.1
                     let digitMaterial = SCNMaterial()
@@ -3040,7 +3071,7 @@ enum HallwayScene {
                     digitMaterial.isDoubleSided = true
                     digitText.materials = [digitMaterial]
                     let (lo, hi) = digitText.boundingBox
-                    let digitScale = min(0.045 / max(hi.y - lo.y, 1), 0.0675 / max(hi.x - lo.x, 1))
+                    let digitScale = min(0.045 / max(hi.y - lo.y, 1), Self.elevatorButtonLabelMaxWidth(floor: floorLabel) / max(hi.x - lo.x, 1))
                     // Sept 26 (still invisible, second pass): found the
                     // actual bug on inspection -- the previous single-
                     // node version applied BOTH the 180-degree Y turn
@@ -4294,11 +4325,11 @@ enum HallwayScene {
 
         // The lobby mirror remains a special live fixture, independent of authored pictures.
         if floorNumber == 1 {
-            let mirrorCell = GridCoordinate(row: 11, col: 7)
+            let mirrorCell = Self.lobbyMirrorFace.coord
             if cells.contains(mirrorCell), !isOpen(mirrorCell.row, mirrorCell.col + 1) {
                 // Blinn remains bright in an unlit scene; this physical lobby frame must not.
-                let mirror = Self.makeMirrorNode(at: mirrorCell, direction: .east, cellSize: cellSize, frameLightingModel: .physicallyBased)
-                mirror.name = "lobbyDecorativeMirror"
+                let mirror = Self.makeMirrorNode(at: mirrorCell, direction: Self.lobbyMirrorFace.direction, cellSize: cellSize, frameLightingModel: .physicallyBased)
+                mirror.name = Self.lobbyMirrorNodeName
                 mirror.scale.y = 2
                 mirror.position.y = 1.35
                 // Eddie, Sept 17 (lobby mirror correction): this
@@ -4331,6 +4362,17 @@ enum HallwayScene {
                 }
                 root.addChildNode(mirror)
             }
+        }
+
+        // Oct 8: real-time analog wall clocks (WallClock) -- proud of the
+        // ordinary wall panel (which is kept), so deleting one in the
+        // Decorator simply re-reveals the wall.
+        for face in clocks where cells.contains(face.coord) {
+            let neighbor = GridCoordinate(row: face.coord.row + face.direction.delta.row, col: face.coord.col + face.direction.delta.col)
+            guard !cells.contains(neighbor) else { continue }
+            let clock = WallClock.makeWallNode(at: face, cellSize: cellSize)
+            DecoratorTarget(floor: floorNumber, coord: face.coord, kind: .clock, direction: face.direction).tag(clock)
+            root.addChildNode(clock)
         }
 
         for (coord, direction) in mirrors where cells.contains(coord) {

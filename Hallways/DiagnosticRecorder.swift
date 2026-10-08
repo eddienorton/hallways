@@ -40,6 +40,8 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
     private let version: String
     private let lock = NSLock()
     private var _floor: Int?
+    private var _snapshotProvider: (@MainActor (String) -> Void)?
+    private var _beats = 0
     private var _lastMainBeat = ProcessInfo.processInfo.systemUptime
     private var _watching = false
     // Queue-confined.
@@ -123,6 +125,23 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
         }
     }
 
+    // MARK: State snapshots (Oct 8)
+
+    /// Seconds between periodic state snapshots while the app is active.
+    static let snapshotInterval: TimeInterval = 30
+
+    /// Installed by the scene: records ONE line of the current player/world
+    /// state (see TapNavigationController.diagStateSnapshot). Reads only.
+    var snapshotProvider: (@MainActor (String) -> Void)? {
+        get { lock.withLock { _snapshotProvider } }
+        set { lock.withLock { _snapshotProvider = newValue } }
+    }
+
+    /// Record a state snapshot now (if a scene is installed), tagged `reason`.
+    @MainActor func snapshot(_ reason: String) {
+        snapshotProvider?(reason)
+    }
+
     /// Blocks until every queued write has reached the file (tests, share).
     func flush() { queue.sync {} }
 
@@ -137,7 +156,16 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
         beat.schedule(deadline: .now() + 0.5, repeating: 0.5)
         beat.setEventHandler { [weak self] in
             guard let self else { return }
-            self.lock.withLock { self._lastMainBeat = ProcessInfo.processInfo.systemUptime }
+            // Every `snapshotInterval` of active time, one state snapshot.
+            let due = self.lock.withLock { () -> Bool in
+                self._lastMainBeat = ProcessInfo.processInfo.systemUptime
+                guard self._watching else { return false }
+                self._beats += 1
+                guard Double(self._beats) * 0.5 >= Self.snapshotInterval else { return false }
+                self._beats = 0
+                return true
+            }
+            if due { MainActor.assumeIsolated { self.snapshot("periodic") } }
         }
         let check = DispatchSource.makeTimerSource(queue: queue)
         check.schedule(deadline: .now() + 1, repeating: 1)

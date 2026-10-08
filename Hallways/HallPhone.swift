@@ -29,13 +29,20 @@ import Combine
 // Nothing the phone does stops the player or the world.
 //
 // The apps (Building GPS, HallChat, Mail, Directory) are in PhoneApps.swift.
-// Deliberately NOT here: calls, a clock, scheduling, an assistant. The only
-// notification is a DEBUG test one: press and hold the phone still for 0.6 s.
+// Notifications are presented here; messages are delivered by
+// BuildingDispatch. DEBUG: press and hold the phone still for 0.6 s to have
+// Dispatch send the staff-meeting test mail.
+// Deliberately NOT here: calls, a clock, scheduling, an assistant.
 
+/// A notification on the phone's screen: presentation only. The message it
+/// announces already lives in its own store (Mail, later HallChat).
 nonisolated struct PhoneNotification: Identifiable, Equatable, Sendable {
+    /// Where tapping the notification takes the player.
+    enum Opens: Equatable, Sendable { case mail(String) }
     let id: UUID
     let source: String
-    let text: String
+    let title: String
+    var opens: Opens? = nil
 }
 
 /// What the phone's screen is showing. Owned here and never reset by moving
@@ -178,11 +185,19 @@ final class HallPhone: ObservableObject {
         PhoneApps.shared.resetForNewPlayer()
     }
 
-    // MARK: Notifications (Stage 1: a DEBUG test only)
+    // MARK: Notifications
 
-    func deliverTestNotification() {
-        notifications.insert(PhoneNotification(id: UUID(), source: "Hallways Building",
-                                               text: "Test notification. If you can read this, your phone works."), at: 0)
+    /// How long an ignored notification stays on the screen. The message
+    /// itself stays where it was delivered (and unread) regardless.
+    static let notificationLifetime: TimeInterval = 12
+
+    /// Something arrived (see BuildingDispatch): the phone sounds, buzzes in
+    /// place, lights its screen and shows a compact notification -- wherever
+    /// it is held. It is never raised, moved or opened by this.
+    func notify(source: String, title: String, opens: PhoneNotification.Opens? = nil) {
+        let note = PhoneNotification(id: UUID(), source: source, title: title, opens: opens)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { notifications.insert(note, at: 0) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.notificationLifetime) { [weak self] in self?.dismiss(note.id) }
         HallPhoneSound.playNotification()
         buzzHaptic.prepare()
         buzzHaptic.impactOccurred(intensity: 0.7)
@@ -195,10 +210,10 @@ final class HallPhone: ObservableObject {
             guard let self, self.litToken == t else { return }
             withAnimation(.easeIn(duration: 0.8)) { self.screenLit = false }
         }
-        diag("phone.notification", ["unread": notifications.count])
+        diag("phone.notification", ["source": source, "title": title, "showing": notifications.count])
     }
 
-    /// Tapping a notification on the screen clears it.
+    /// A notification goes away (tapped, or its time is up).
     func dismiss(_ id: UUID) {
         withAnimation(.easeOut(duration: 0.2)) { notifications.removeAll { $0.id == id } }
     }
@@ -218,6 +233,7 @@ enum HallPhoneSound {
         data = d
         guard let p = try? AVAudioPlayer(data: d) else { return }
         p.volume = 0.9
+        HallwaysAudio.shared.manage(p)               // Oct 8: the mute switch
         p.prepareToPlay()
         p.play()
         player = p
@@ -467,7 +483,8 @@ struct HallPhoneOverlayHost: View {
     private func touchChanged(_ v: DragGesture.Value, layout: HallPhoneLayout) {
         if grabStartY == nil && !touchMoved && !devPending && !devFired {
             #if DEBUG
-            // DEV: hold the phone still for 0.6 s = a test notification.
+            // DEV: hold the phone still for 0.6 s = Dispatch sends the staff
+            // meeting test mail (Episode 3 pipeline test).
             devPending = true
             devToken += 1
             let t = devToken
@@ -475,7 +492,7 @@ struct HallPhoneOverlayHost: View {
                 guard devToken == t, devPending, !touchMoved else { return }
                 devPending = false
                 devFired = true
-                phone.deliverTestNotification()
+                BuildingDispatch.devSendStaffMeetingTest()
             }
             #endif
         }
@@ -617,6 +634,8 @@ private struct HallPhoneScreen: View {
                 case .directory: DirectoryApp(phone: phone)
                 }
             }
+            // Notifications sit over whatever is on the screen.
+            PhoneNotificationBanners(phone: phone, mazeStore: mazeStore)
         }
         .contentShape(Rectangle())
         .onTapGesture { }                                  // the screen keeps its taps

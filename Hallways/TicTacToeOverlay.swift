@@ -17,6 +17,11 @@ final class TicTacToeViewModel: ObservableObject {
     /// line -- TicTacToeOverlay wires this to
     /// TapNavigationController.completeTicTacToeTerminal(at:).
     var onWin: (() -> Void)?
+    /// Oct 7 (Games portal): the floor terminal clears a lost/drawn board by
+    /// itself after a beat (retry pacing for the floor test). The office
+    /// computer sets this false so the finished board stays up until the
+    /// PLAYER starts another game. Default true = floor behaviour unchanged.
+    var autoResetsAfterLossOrDraw = true
     private var rng = SystemRandomNumberGenerator()
 
     func canTap(_ index: Int) -> Bool {
@@ -85,6 +90,7 @@ final class TicTacToeViewModel: ObservableObject {
     }
 
     private func scheduleReset() {
+        guard autoResetsAfterLossOrDraw else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
             guard let self, self.isGameOver else { return }
             self.board = TicTacToeBoard()

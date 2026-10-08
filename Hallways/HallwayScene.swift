@@ -46,6 +46,9 @@ struct PictureBackfillTarget: Equatable {
 }
 
 enum HallwayScene {
+    /// Oct 5 (elevator staging): exactly build(fromMaze:...)'s result, nameable.
+    typealias MazeBuildResult = (scene: SCNScene, cameraNode: SCNNode, walkableRects: [FloorRect], wallMaterials: [SCNMaterial], floorMaterial: SCNMaterial, ceilingMaterial: SCNMaterial, objectNodes: [GridCoordinate: SCNNode], destinationNodes: [GridCoordinate: SCNNode], fireNodes: [GridCoordinate: SCNNode], extinguisherNodes: [GridCoordinate: SCNNode], photoBoothNodes: [GridCoordinate: SCNNode], ticTacToeTerminalNodes: [GridCoordinate: SCNNode], shellGameStationNodes: [GridCoordinate: SCNNode], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode], higherLowerTerminalNodes: [GridCoordinate: SCNNode], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode], simonTerminalNodes: [GridCoordinate: SCNNode], hangmanTerminalNodes: [GridCoordinate: SCNNode], connectFourTerminalNodes: [GridCoordinate: SCNNode], checkersTerminalNodes: [GridCoordinate: SCNNode], woidleTerminalNodes: [GridCoordinate: SCNNode], elevatorDoors: (left: SCNNode, right: SCNNode, direction: Direction, buttonNodes: [Int: SCNNode], shaft: SCNNode)?, exitSignNodes: [GridCoordinate: SCNNode], floorMapPlaneNodes: [SCNNode], pictureMaterials: [WallFace: SCNMaterial])
+
     /// Sept 21 (Picture Decorator complete pass, Goal 1): the
     /// direction-based proud-offset wall positioning that used to be a
     /// local `orient` closure inside buildPictureNode -- pulled out so
@@ -92,6 +95,43 @@ enum HallwayScene {
 
     /// A lightweight, non-interactive environmental prop for the Floor 4
     /// visual prototype. The local +Z side faces out into the hallway.
+    /// Oct 4: the elevator floor indicator's face -- amber LED-style floor
+    /// number on black, with an up (1) / down (-1) arrow while travelling.
+    static func elevatorIndicatorImage(floor: Int, direction: Int) -> UIImage {
+        let size = CGSize(width: 300, height: 170)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor(white: 0.03, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            let amber = UIColor(red: 1.0, green: 0.62, blue: 0.12, alpha: 1)
+            let dim = UIColor(red: 0.22, green: 0.12, blue: 0.03, alpha: 1)
+            // Arrow column on the left: lit when travelling that way.
+            func arrow(up: Bool, lit: Bool) {
+                let cx: CGFloat = 62, cy: CGFloat = up ? 58 : 112, w: CGFloat = 46, h: CGFloat = 34
+                let path = UIBezierPath()
+                if up {
+                    path.move(to: CGPoint(x: cx, y: cy - h / 2)); path.addLine(to: CGPoint(x: cx + w / 2, y: cy + h / 2))
+                    path.addLine(to: CGPoint(x: cx - w / 2, y: cy + h / 2))
+                } else {
+                    path.move(to: CGPoint(x: cx, y: cy + h / 2)); path.addLine(to: CGPoint(x: cx + w / 2, y: cy - h / 2))
+                    path.addLine(to: CGPoint(x: cx - w / 2, y: cy - h / 2))
+                }
+                path.close()
+                (lit ? amber : dim).setFill()
+                path.fill()
+            }
+            arrow(up: true, lit: direction > 0)
+            arrow(up: false, lit: direction < 0)
+            let text = "\(floor)" as NSString
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 112, weight: .bold),
+                .foregroundColor: amber
+            ]
+            let textSize = text.size(withAttributes: attributes)
+            let area = CGRect(x: 105, y: 0, width: size.width - 115, height: size.height)
+            text.draw(at: CGPoint(x: area.midX - textSize.width / 2, y: area.midY - textSize.height / 2), withAttributes: attributes)
+        }
+    }
+
     static func makeFireExtinguisherNode(at coord: GridCoordinate, direction: Direction, cellSize: CGFloat) -> SCNNode {
         let root = SCNNode()
         root.name = "fireExtinguisher"
@@ -2824,9 +2864,21 @@ enum HallwayScene {
                 // (16/25/30/...): every dimension below derives from
                 // this value and from `columns`, so nothing else needs
                 // hand-editing to change the panel's size.
-                let controlPanelFloorCount = 21
+                // Oct 4: the panel IS the building -- one button per real
+                // floor (was a fixed 21), laid out like a real elevator:
+                // highest floor at the TOP, floor 1 at the BOTTOM, paired
+                // rows with EVEN on the passenger's LEFT and ODD on the
+                // RIGHT (16 alone on top, 14|15 ... 2|3, then 1 alone).
+                // A passenger faces this plate looking along shaft +Z, so
+                // their left is shaft +X (see the digit labels' y = pi).
+                let controlPanelFloorCount = max(totalFloors, 1)
                 let columns = 2
-                let rows = (controlPanelFloorCount + columns - 1) / columns
+                var panelRows: [[Int]] = []             // top to bottom
+                var nextHigh = controlPanelFloorCount
+                if nextHigh >= 2, nextHigh % 2 == 0 { panelRows.append([nextHigh]); nextHigh -= 1 }
+                while nextHigh >= 3 { panelRows.append([nextHigh - 1, nextHigh]); nextHigh -= 2 }
+                panelRows.append([1])
+                let rows = panelRows.count
 
                 // Sept 26: buttonRadius/rimRadius keep the large,
                 // confirmed-good iPhone-tap-target size from the
@@ -2896,6 +2948,35 @@ enum HallwayScene {
                 )
                 shaft.addChildNode(plate)
 
+                // Oct 4: the physical floor indicator -- a dark display just
+                // above the panel, same wall, facing the passenger. Its face
+                // is a texture (HallwayScene.elevatorIndicatorImage) that
+                // TapNavigationController redraws while travelling.
+                do {
+                    let displayWidth: CGFloat = 0.3, displayHeight: CGFloat = 0.17
+                    let housingMaterial = SCNMaterial()
+                    housingMaterial.diffuse.contents = UIColor(white: 0.08, alpha: 1)
+                    housingMaterial.lightingModel = .physicallyBased
+                    housingMaterial.metalness.contents = 0.6
+                    housingMaterial.roughness.contents = 0.4
+                    let housing = SCNNode(geometry: SCNBox(width: displayWidth + 0.04, height: displayHeight + 0.04, length: 0.025, chamferRadius: 0.006))
+                    housing.geometry?.materials = [housingMaterial]
+                    housing.name = "elevatorFloorIndicator"
+                    housing.position = SCNVector3(plate.position.x,
+                                                  plate.position.y + Float(plateHeight) / 2 + 0.06 + Float(displayHeight + 0.04) / 2,
+                                                  plate.position.z - 0.003)
+                    shaft.addChildNode(housing)
+                    let faceMaterial = SCNMaterial()
+                    faceMaterial.lightingModel = .constant
+                    faceMaterial.diffuse.contents = elevatorIndicatorImage(floor: floorNumber, direction: 0)
+                    let face = SCNNode(geometry: SCNPlane(width: displayWidth, height: displayHeight))
+                    face.geometry?.materials = [faceMaterial]
+                    face.name = "elevatorFloorIndicatorDisplay"
+                    face.eulerAngles.y = .pi                       // faces the passenger (shaft -Z), like the digits
+                    face.position = SCNVector3(0, 0, -0.0135)
+                    housing.addChildNode(face)
+                }
+
                 let recessMaterial = SCNMaterial()
                 recessMaterial.diffuse.contents = UIColor(white: 0.12, alpha: 1)
                 recessMaterial.lightingModel = .physicallyBased
@@ -2908,37 +2989,22 @@ enum HallwayScene {
                 buttonMetal.metalness.contents = 0.6
                 buttonMetal.roughness.contents = 0.3
 
-                // Sept 26: DISPLAY ONLY -- addElevatorDoor already
-                // receives `floorNumber` (the floor THIS scene build
-                // represents) as a plain parameter, the same value the
-                // existing hidden in-ride digit row above (buttonNodes/
-                // billboardedText) already compares against for its own
-                // "if f == floorNumber" lighting check. Reusing that
-                // exact, already-reliable value here -- a one-time,
-                // build-time comparison, never updated afterward -- is
-                // what keeps this purely decorative: no new navigation
-                // state, no coupling to TapNavigationController.
-                // lightElevatorPanel (that method keeps driving the
-                // OTHER, pre-existing digit row for the in-ride
-                // progression indicator; this panel's buttons are a
-                // separate, static-per-build set of nodes entirely).
-                let activeButtonMetal = buttonMetal.copy() as! SCNMaterial
-                activeButtonMetal.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
-                activeButtonMetal.emission.contents = UIColor(red: 0.5, green: 0.32, blue: 0.05, alpha: 1)
-
+                // Destination lamps are neutral until the rider selects a trip.
                 let contentTop = plateHeight / 2 - marginY
-                for index in 0..<controlPanelFloorCount {
-                    let floorLabel = index + 1
-                    let row = index / columns
-                    // Clean, general odd-final-row handling: only the
-                    // LAST button, only when the count doesn't divide
-                    // evenly by `columns`, centers instead of taking a
-                    // left/right slot -- no hand-picked coordinates for
-                    // any specific floor count.
-                    let isLastSingle = (index == controlPanelFloorCount - 1) && (controlPanelFloorCount % columns != 0)
-                    let x: CGFloat = isLastSingle ? 0 : (index % columns == 0 ? -colSpacing / 2 : colSpacing / 2)
+                var panelSlots: [(floor: Int, row: Int, x: CGFloat)] = []
+                for (row, floors) in panelRows.enumerated() {
+                    for f in floors {
+                        // A lone button is centred; in a pair EVEN is the passenger's left (+X).
+                        let x: CGFloat = floors.count == 1 ? 0 : (f % 2 == 0 ? colSpacing / 2 : -colSpacing / 2)
+                        panelSlots.append((floor: f, row: row, x: x))
+                    }
+                }
+                _ = columns
+                for slot in panelSlots {
+                    let floorLabel = slot.floor
+                    let row = slot.row
+                    let x: CGFloat = slot.x
                     let y = contentTop - CGFloat(row) * rowSpacing
-                    let isCurrentFloor = floorLabel == floorNumber
 
                     let recess = SCNNode(geometry: SCNCylinder(radius: rimRadius, height: 0.009))
                     recess.geometry?.materials = [recessMaterial]
@@ -2947,7 +3013,7 @@ enum HallwayScene {
                     plate.addChildNode(recess)
 
                     let cap = SCNNode(geometry: SCNCylinder(radius: buttonRadius, height: 0.015))
-                    cap.geometry?.materials = [isCurrentFloor ? activeButtonMetal : buttonMetal]
+                    cap.geometry?.materials = [buttonMetal]
                     cap.eulerAngles.x = .pi / 2
                     cap.position = SCNVector3(Float(x), Float(y), -(Float(plateThickness) / 2 + 0.0135))
                     // Sept 26: stable, clear names for future work (per
@@ -4479,8 +4545,12 @@ enum HallwayScene {
             let roomEntranceAssemblyTarget = DecoratorTarget(floor: floorNumber, coord: coord, kind: .roomEntranceDoor, direction: direction)
             roomEntranceAssemblyTarget.tag(assembly)
             root.addChildNode(assembly)
-            addDoorFrame(direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: roomEntranceDoorWidth, doorHeight: roomEntranceDoorHeight, doorCenterY: roomEntranceDoorCenterY, into: assembly, tag: { roomEntranceAssemblyTarget.tag($0) })
-            let roomEntranceHinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: roomEntranceDoorWidth, doorHeight: roomEntranceDoorHeight, doorCenterY: roomEntranceDoorCenterY, style: placement.style, textureName: placement.textureName)
+            // Oct 5: the opening follows the style (Double Glass is wider/taller).
+            let entranceWidth = placement.style == .doubleGlass ? placement.style.doorWidth : roomEntranceDoorWidth
+            let entranceHeight = placement.style == .doubleGlass ? placement.style.doorHeight : roomEntranceDoorHeight
+            let entranceCenterY = placement.style == .doubleGlass ? entranceHeight / 2 : roomEntranceDoorCenterY
+            addDoorFrame(direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: entranceWidth, doorHeight: entranceHeight, doorCenterY: entranceCenterY, into: assembly, tag: { roomEntranceAssemblyTarget.tag($0) })
+            let roomEntranceHinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: entranceWidth, doorHeight: entranceHeight, doorCenterY: entranceCenterY, style: placement.style, textureName: placement.textureName, label: placement.label)
             // Sept 27 (door cosmetics tap-routing fix): tagged so a
             // build-time Room Entrance (any floor reload or app
             // restart, not just a live "+" -> Door Entry placement) is
@@ -4494,6 +4564,24 @@ enum HallwayScene {
             // this function.
             roomEntranceAssemblyTarget.tag(roomEntranceHinge)
             assembly.addChildNode(roomEntranceHinge)
+            // Oct 5 (Administration): a named Double Glass entrance carries its
+            // name on a bronze fascia directly above the opening, on the
+            // approach side, flush to the wall face.
+            if placement.style == .doubleGlass, let label = placement.label, !label.isEmpty {
+                // Oct 5 (approved tweak): the same plaque, uniformly scaled to
+                // ~91% of the opening's width, centered over the doors, its
+                // bottom edge 5 cm above the opening.
+                let designWidth = entranceWidth + 0.24
+                let scale = Float(0.91 * entranceWidth / designWidth)
+                let fascia = HallwayScene.makeEntranceFascia(label, width: designWidth)
+                fascia.scale = SCNVector3(scale, scale, scale)
+                let out: CGFloat = 0.05 + 0.02 * CGFloat(scale)
+                fascia.position = SCNVector3(Float(rwx - CGFloat(direction.delta.col) * out),
+                                             Float(entranceHeight + 0.05) + 0.21 * scale,
+                                             Float(rwz - CGFloat(direction.delta.row) * out))
+                fascia.eulerAngles.y = Float(direction.yaw)   // face toward the approach cell
+                assembly.addChildNode(fascia)
+            }
         }
 
         // Floor 7's aptitude-test terminal -- same "small wall fixture
@@ -5073,7 +5161,25 @@ enum HallwayScene {
         return names.sorted()
     }
 
+    /// Bundle/procedural surface images are immutable. Reuse pixels across
+    /// materials and floor builds; never cache mutable SCNMaterial instances.
+    private static let themeImageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 48 * 1024 * 1024
+        cache.countLimit = 64
+        return cache
+    }()
+
     static func resolveThemeImage(_ imageName: String?) -> UIImage? {
+        guard let imageName else { return nil }
+        if let image = themeImageCache.object(forKey: imageName as NSString) { return image }
+        guard let image = loadThemeImage(imageName) else { return nil }
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        themeImageCache.setObject(image, forKey: imageName as NSString, cost: cost)
+        return image
+    }
+
+    private static func loadThemeImage(_ imageName: String?) -> UIImage? {
         guard let imageName else { return nil }
         switch imageName {
         case officeWallGradientName:

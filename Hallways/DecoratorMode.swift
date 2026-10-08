@@ -2503,10 +2503,11 @@ final class DecoratorState: ObservableObject {
         case .east: (wx, wz) = (doorX + half, doorZ)
         case .west: (wx, wz) = (doorX - half, doorZ)
         }
-        let doorWidth: CGFloat = 1.0
-        let doorHeight: CGFloat = 2.2
+        // Oct 5: same per-style opening as the build (Double Glass is wider).
+        let doorWidth: CGFloat = placement.style == .doubleGlass ? placement.style.doorWidth : 1.0
+        let doorHeight: CGFloat = placement.style == .doubleGlass ? placement.style.doorHeight : 2.2
         let doorCenterY = doorHeight / 2
-        let hinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, style: placement.style, textureName: placement.textureName)
+        let hinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, style: placement.style, textureName: placement.textureName, label: placement.label)
         // Sept 27 (tap-routing fix): tag with a FRESH target built
         // straight from this door's own coord/direction/floor -- not
         // conditionally reused from `selection` -- so a rebuilt door

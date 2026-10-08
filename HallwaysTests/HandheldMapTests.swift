@@ -80,7 +80,7 @@ struct HandheldMapTests {
         let cells: Set<GridCoordinate> = [start, GridCoordinate(row: 0, col: 1), GridCoordinate(row: 1, col: 0), GridCoordinate(row: 5, col: 5)]
         let image = HallwayScene.makeFloorMapTexture(cells: cells, end: GridCoordinate(row: 5, col: 5), playerAt: start,
             facing: .east, roomDoors: [GridCoordinate(row: 5, col: 5): RoomDoorPlacement(coord: GridCoordinate(row: 5, col: 5), direction: .north, roomNumber: 501)],
-            simplified: true, backgroundOpacity: 1)
+            backgroundOpacity: 1, simplified: true)
         let cg = try #require(image.cgImage)
         let w = cg.width
         let scale = CGFloat(w) / 192

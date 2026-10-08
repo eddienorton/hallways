@@ -1237,6 +1237,15 @@ private enum MazeLibrary {
     /// rather than looping clearSaved() per id (same end result; this
     /// just makes the "reset everything" intent explicit at the call
     /// site and touches storage once).
+    /// Oct 5: floors whose layout is authored by the game (Administration),
+    /// never replaced by a device-local override.
+    /// Oct 6: + the player's office floor (PlayerOffice.floor) -- the
+    /// opening of the game is authored data too.
+    static let bundleOwnedFloorIDs: Set<Int> = [Admission.administrationFloor, PlayerOffice.floor]
+    private static func overrideIDsIgnoringBundleOwned() -> Set<Int> {
+        savedOverrideIDs().intersection(bundleOwnedFloorIDs)
+    }
+
     static func clearAllSaved() {
         setSavedOverrideIDs([])
     }
@@ -1249,7 +1258,15 @@ private enum MazeLibrary {
               let bundled = readMaps(at: url) else { return [:] }
         print("[Maps] Loaded \(bundled.count) bundled floors")
         var merged = bundled
-        let overrideIDs = savedOverrideIDs()
+        // Oct 5 (Administration): floors the game authors itself are always
+        // built from the bundle. A device copy saved before Administration
+        // existed (any Decorate/editor edit marks one) would otherwise keep
+        // showing the old layout forever -- which is exactly what happened.
+        let ignoredOverrides = overrideIDsIgnoringBundleOwned()
+        if !ignoredOverrides.isEmpty {
+            diag("maps.bundleOwnedOverrideIgnored", ["floors": ignoredOverrides.sorted().map(String.init).joined(separator: ",")])
+        }
+        let overrideIDs = savedOverrideIDs().subtracting(bundleOwnedFloorIDs)
         if !overrideIDs.isEmpty, let localRecords = readMaps(at: fileURL) {
             for id in overrideIDs {
                 if let localRecord = localRecords[id] {
@@ -1668,6 +1685,11 @@ final class MazeStore: ObservableObject {
         max(library.keys.max() ?? 1, currentMazeID)
     }
 
+    /// Oct 4 (interactive elevator): every floor that actually exists.
+    var floorIDs: Set<Int> {
+        Set(library.keys).union([currentMazeID])
+    }
+
     /// Running total of all cash absorbed this run, across every floor
     /// -- deliberately NOT part of any per-floor state (cells/objects/
     /// destinations/undo all get swapped out by switchTo(); this
@@ -1849,6 +1871,11 @@ final class MazeStore: ObservableObject {
         if let firstID = loaded.keys.min() {
             library = loaded
             var startID = firstID
+            // Oct 5: mid-prologue (entrance made, prologue unfinished) a
+            // relaunch resumes in Administration, not at the front door.
+            if Admission.resumesInAdministration, loaded[Admission.administrationFloor] != nil {
+                startID = Admission.administrationFloor
+            }
             #if DEBUG
             // Dev-only override: if the "Start on last dev floor"
             // toggle is on and that floor still exists in what was
@@ -3680,8 +3707,13 @@ final class MazeStore: ObservableObject {
     /// (gameplay reaching an elevator/end cell) — same operation either
     /// way, just triggered from two different places.
     func switchTo(id: Int) {
+        let tracePhase = ElevatorArrivalTrace.shared.beginPhase("MazeStore.switchTo")
+        defer { ElevatorArrivalTrace.shared.endPhase("MazeStore.switchTo", tracePhase) }
         guard id != currentMazeID else { return }
+        let traceSave = ElevatorArrivalTrace.shared.beginPhase("MazeStore.saveOutgoing")
         save()
+        ElevatorArrivalTrace.shared.endPhase("MazeStore.saveOutgoing", traceSave)
+        let traceState = ElevatorArrivalTrace.shared.beginPhase("MazeStore.publishFloorState")
         currentMazeID = id
         #if DEBUG
         // Sept 22 (Start-on-Last-Dev-Floor, root-caused for real this
@@ -3813,6 +3845,7 @@ final class MazeStore: ObservableObject {
             floorTexture = nil
             ceilingTexture = nil
         }
+        ElevatorArrivalTrace.shared.endPhase("MazeStore.publishFloorState", traceState)
         undoStack = [] // undo history is per-floor, doesn't carry across a switch
         // Same "this is a load, not an edit" bookkeeping
         // resetCurrentFloorToDefault() does -- switching floors bumps
@@ -3821,8 +3854,161 @@ final class MazeStore: ObservableObject {
         // as having a local override. Actual edits made to the floor
         // you're LEAVING were already marked individually, in real
         // time, as each one happened -- see autosaveAfterVersionChange().
+        let traceVersion = ElevatorArrivalTrace.shared.beginPhase("MazeStore.publishVersion")
         version += 1
+        ElevatorArrivalTrace.shared.endPhase("MazeStore.publishVersion", traceVersion)
         floorLoadVersion = version
+    }
+
+    /// Oct 5 (elevator staging): everything one floor's scene build reads,
+    /// derived from its library record WITHOUT switching to it -- the same
+    /// record-to-state mapping switchTo(id:) applies (kept verbatim), so a
+    /// destination can be built during the elevator ride while the current
+    /// floor stays live.
+    struct FloorContent {
+        let id: Int
+        let cells: Set<GridCoordinate>
+        let nextMazeID: Int?
+        let objects: [GridCoordinate: ObjectKind]
+        let floorObjectPlacements: [GridCoordinate: FloorObjectPlacement]
+        let destinations: [GridCoordinate: ObjectKind]
+        let exitSigns: [GridCoordinate: Direction]
+        let floorMaps: [GridCoordinate: Direction]
+        let lightBrightness: [LightBrightness]
+        let spotlights: Set<GridCoordinate>
+        let missionSigns: [GridCoordinate: Direction]
+        let mirrors: [GridCoordinate: Direction]
+        let fluorescentLights: [GridCoordinate: FluorescentOrientation]
+        let ceilingVisibleFixture: [GridCoordinate: AuthoredLightKind]
+        let pictureLights: Set<WallFace>
+        let wallLights: [GridCoordinate: Direction]
+        let bathroomDoors: [GridCoordinate: Direction]
+        let windowRooms: [GridCoordinate: WindowRoomPlacement]
+        let roomEntranceDoors: [GridCoordinate: RoomEntranceDoorPlacement]
+        let ticTacToeTerminals: [GridCoordinate: Direction]
+        let shellGameStations: [GridCoordinate: Direction]
+        let rockPaperScissorsTerminals: [GridCoordinate: Direction]
+        let higherLowerTerminals: [GridCoordinate: Direction]
+        let fiveCardDrawTerminals: [GridCoordinate: Direction]
+        let simonTerminals: [GridCoordinate: Direction]
+        let hangmanTerminals: [GridCoordinate: Direction]
+        let connectFourTerminals: [GridCoordinate: Direction]
+        let checkersTerminals: [GridCoordinate: Direction]
+        let woidleTerminals: [GridCoordinate: Direction]
+        let fires: Set<GridCoordinate>
+        let tables: [GridCoordinate: FurnitureTable]
+        let desks: [GridCoordinate: FurnitureDesk]
+        let waterCoolers: [GridCoordinate: FurnitureWaterCooler]
+        let officeChairs: [GridCoordinate: FurnitureOfficeChair]
+        let floorLamps: [GridCoordinate: FurnitureFloorLamp]
+        let aquariums: [GridCoordinate: FurnitureAquarium]
+        let filingCabinets: [GridCoordinate: FurnitureFilingCabinet]
+        let cellSurfaces: [GridCoordinate: CellSurfaceOverride]
+        let floorGlowSequences: [FloorGlowSequence]
+        let extinguishers: [GridCoordinate: Direction]
+        let photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)]
+        let pictures: [WallFace: PictureSize]
+        let pictureImageSelections: [WallFace: PictureImageSelection]
+        let roomDoors: [GridCoordinate: RoomDoorPlacement]
+        let itemRooms: [GridCoordinate: Int]
+        let picturesUseCameraRoll: Bool
+        let missionHeading: String
+        let missionBody: String
+        let missionObjectKind: ObjectKind?
+        let wallTexture: String?
+        let floorTexture: String?
+        let ceilingTexture: String?
+        /// Floors 2+ share the fixed arrival/elevator cell (startCoordinate/endCoordinate).
+        var startAndEnd: (start: GridCoordinate, end: GridCoordinate)? {
+            cells.isEmpty ? nil : (MazeStore.floor2ElevatorCoordinate, MazeStore.floor2ElevatorCoordinate)
+        }
+    }
+
+    /// See FloorContent. Floors 2 and up only (floor 1's spawn is derived
+    /// from its own shape; it simply loads the ordinary way at arrival).
+    func stagedFloorContent(id: Int) -> FloorContent? {
+        guard id != 1, let record = library[id] else { return nil }
+        let cells = Set(record.cells)
+        return FloorContent(
+            id: id,
+            cells: cells,
+            nextMazeID: record.nextMazeID,
+            objects: Dictionary(uniqueKeysWithValues: record.objects.map { ($0.coord, $0.kind) }),
+            floorObjectPlacements: Dictionary(uniqueKeysWithValues: record.objects.filter { $0.kind == .trashCan }.map { ($0.coord, FloorObjectPlacement(position: $0.floorPosition ?? .center, orientation: $0.floorOrientation ?? .northSouth)) }),
+            destinations: Dictionary(uniqueKeysWithValues: record.destinations.map { ($0.coord, $0.kind) }),
+            exitSigns: Dictionary(uniqueKeysWithValues: record.exitSigns.map { ($0.coord, $0.direction) }),
+            floorMaps: Dictionary(uniqueKeysWithValues: record.floorMaps.map { ($0.coord, $0.direction) }),
+            lightBrightness: record.lightBrightness,
+            spotlights: Set(record.spotlights),
+            missionSigns: Dictionary(uniqueKeysWithValues: record.missionSigns.map { ($0.coord, $0.direction) }),
+            mirrors: Dictionary(uniqueKeysWithValues: record.mirrors.map { ($0.coord, $0.direction) }),
+            fluorescentLights: Dictionary(uniqueKeysWithValues: record.fluorescentLights.map { ($0.coord, $0.orientation) }),
+            ceilingVisibleFixture: Dictionary(uniqueKeysWithValues: record.ceilingVisibleFixture.map { ($0.coord, $0.kind) }),
+            pictureLights: Set(record.pictureLights.map { WallFace(coord: $0.coord, direction: $0.direction) }),
+            wallLights: Dictionary(uniqueKeysWithValues: record.wallLights.map { ($0.coord, $0.direction) }),
+            bathroomDoors: Dictionary(uniqueKeysWithValues: record.bathroomDoors.map { ($0.coord, $0.direction) }),
+            windowRooms: Dictionary(uniqueKeysWithValues: record.windowRooms.map { ($0.coord, $0) }),
+            roomEntranceDoors: Dictionary(uniqueKeysWithValues: record.roomEntranceDoors.map { ($0.coord, $0) }),
+            ticTacToeTerminals: Dictionary(uniqueKeysWithValues: record.ticTacToeTerminals.map { ($0.coord, $0.direction) }),
+            shellGameStations: Dictionary(uniqueKeysWithValues: record.shellGameStations.map { ($0.coord, $0.direction) }),
+            rockPaperScissorsTerminals: Dictionary(uniqueKeysWithValues: record.rockPaperScissorsTerminals.map { ($0.coord, $0.direction) }),
+            higherLowerTerminals: Dictionary(uniqueKeysWithValues: record.higherLowerTerminals.map { ($0.coord, $0.direction) }),
+            fiveCardDrawTerminals: Dictionary(uniqueKeysWithValues: record.fiveCardDrawTerminals.map { ($0.coord, $0.direction) }),
+            simonTerminals: Dictionary(uniqueKeysWithValues: record.simonTerminals.map { ($0.coord, $0.direction) }),
+            hangmanTerminals: Dictionary(uniqueKeysWithValues: record.hangmanTerminals.map { ($0.coord, $0.direction) }),
+            connectFourTerminals: Dictionary(uniqueKeysWithValues: record.connectFourTerminals.map { ($0.coord, $0.direction) }),
+            checkersTerminals: Dictionary(uniqueKeysWithValues: record.checkersTerminals.map { ($0.coord, $0.direction) }),
+            woidleTerminals: Dictionary(uniqueKeysWithValues: record.woidleTerminals.map { ($0.coord, $0.direction) }),
+            fires: Set(record.fires.map(\.coord)),
+            tables: Self.tableDictionary(record.tables, cells: cells),
+            desks: Self.deskDictionary(record.desks, cells: cells),
+            waterCoolers: Self.waterCoolerDictionary(record.waterCoolers, cells: cells),
+            officeChairs: Self.officeChairDictionary(record.officeChairs, cells: cells),
+            floorLamps: Self.floorLampDictionary(record.floorLamps, cells: cells),
+            aquariums: Self.aquariumDictionary(record.aquariums, cells: cells),
+            filingCabinets: Self.filingCabinetDictionary(record.filingCabinets, cells: cells),
+            cellSurfaces: Self.cellSurfaceDictionary(record.cellSurfaces, cells: cells),
+            floorGlowSequences: record.floorGlowSequences,
+            extinguishers: Dictionary(uniqueKeysWithValues: record.extinguishers.map { ($0.coord, $0.direction) }),
+            photoBooths: Dictionary(uniqueKeysWithValues: record.photoBooths.map { ($0.coord, ($0.direction, $0.expression)) }),
+            pictures: Dictionary(uniqueKeysWithValues: record.pictures.map { (WallFace(coord: $0.coord, direction: $0.direction), $0.size ?? .standard) }),
+            pictureImageSelections: Self.wallFacedPictureImageSelections(record.pictureImageSelections, pictures: record.pictures),
+            roomDoors: Dictionary(uniqueKeysWithValues: record.roomDoors.map { ($0.coord, $0) }),
+            itemRooms: Dictionary(uniqueKeysWithValues: record.itemRooms.map { ($0.coord, $0.roomNumber) }),
+            picturesUseCameraRoll: record.picturesUseCameraRoll,
+            missionHeading: record.missionHeading,
+            missionBody: record.missionBody,
+            missionObjectKind: record.missionObjectKind,
+            wallTexture: record.wallTexture,
+            floorTexture: record.floorTexture,
+            ceilingTexture: record.ceilingTexture)
+    }
+
+    /// Oct 8 (the phone's Building GPS): every floor the building has, for
+    /// its floor picker. Read-only.
+    var buildingFloorIDs: [Int] { library.filter { !$0.value.cells.isEmpty }.keys.sorted() }
+
+    /// Oct 8 (Building GPS): the plain plan of ANY floor -- corridors,
+    /// elevator, doors, exit signs and wall objects -- straight from the
+    /// stored floor data, read-only. Nothing is loaded, built or changed.
+    func floorPlan(id: Int) -> BuildingFloorPlan? {
+        guard let r = library[id], !r.cells.isEmpty else { return nil }
+        let faces: (Direction, GridCoordinate) -> WallFace = { WallFace(coord: $1, direction: $0) }
+        let wallObjects = Set(r.pictures.map { faces($0.direction, $0.coord) })
+            .union(r.mirrors.map { faces($0.direction, $0.coord) })
+            .union(r.missionSigns.map { faces($0.direction, $0.coord) })
+            .union(r.floorMaps.map { faces($0.direction, $0.coord) })
+        let doors = Set(r.roomDoors.map { faces($0.direction, $0.coord) })
+            .union(r.roomEntranceDoors.map { faces($0.direction, $0.coord) })
+        var roomDoors: [GridCoordinate: RoomDoorPlacement] = [:]
+        for door in r.roomDoors { roomDoors[door.coord] = door }
+        var bathroomDoors: [GridCoordinate: Direction] = [:]
+        for door in r.bathroomDoors { bathroomDoors[door.coord] = door.direction }
+        return BuildingFloorPlan(id: id, cells: Set(r.cells),
+                                 elevator: id == 1 ? Self.elevatorCoordinate : Self.floor2ElevatorCoordinate,
+                                 roomDoors: roomDoors, bathroomDoors: bathroomDoors,
+                                 wallObjectFaces: wallObjects, doorFaces: doors,
+                                 exitSignFaces: Set(r.exitSigns.map { faces($0.direction, $0.coord) }))
     }
 
     #if DEBUG

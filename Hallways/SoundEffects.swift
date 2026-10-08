@@ -146,16 +146,28 @@ enum SoundEffects {
     private(set) static var walkingReverse = false
 
     private static func makeWalkingPlayer(_ feet: PlayerFeet, reverse: Bool) -> AVAudioPlayer? {
-        let player = loadPlayer(feet.walkingFilename(reverse: reverse))
+        // Oct 6: synthesised footsteps (FootstepSynth), replacing the recorded
+        // walk-*.mp3 loops -- same loop/rate/start/stop handling as before.
+        let style: FootstepSynth.Style = feet == .highHeels ? .heel : .shoe
+        let player = FootstepSynth.loopURL(style, reverse: reverse).flatMap { try? AVAudioPlayer(contentsOf: $0) }
         player?.numberOfLoops = -1
-        player?.enableRate = true
+        player?.enableRate = true          // before prepareToPlay, per AVAudioPlayer
+        player?.prepareToPlay()
         return player
     }
 
     /// Plays the forward (or, `reverse`, the backward) footstep loop. Already
     /// playing that loop: no restart. The other loop is paused first, so the
     /// two never overlap.
+    /// Oct 3 (Noodle habitat pass): while Noodle mode is on, the human
+    /// footstep loops stay silent -- Noodle makes his own sounds. Set by
+    /// TinCanRat (install/toggle); navigation still calls start/stop as before.
+    static var humanFootstepsSuppressed = false {
+        didSet { if humanFootstepsSuppressed { stopWalking() } }
+    }
+
     static func startWalking(reverse: Bool = false) {
+        guard !humanFootstepsSuppressed else { return }
         let selected = PlayerFeet.current
         if selected != loadedFeet {
             stopWalking()

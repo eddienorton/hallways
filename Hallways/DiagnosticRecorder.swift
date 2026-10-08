@@ -280,3 +280,128 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
 nonisolated func diag(_ event: String, _ fields: KeyValuePairs<String, Any?> = [:]) {
     DiagnosticRecorder.shared.record(event, fields)
 }
+
+/// One trip per launch; observation only. All elapsed times are captured at
+/// the call site using systemUptime, including render/background callbacks.
+nonisolated final class ElevatorArrivalTrace: @unchecked Sendable {
+    static let shared = ElevatorArrivalTrace()
+    private let lock = NSLock()
+    private var start: Double?
+    private var used = false
+    private var destinationScene: ObjectIdentifier?
+    private var frames = 0
+    private var indicatorRendered = false
+    private var indicatorAssigned = false
+    private var lastPan = 0.0
+    private var doorX: Float?
+    private var doorZ: Float?
+    private var doorMoved = false
+    private var phaseCounts: [String: Int] = [:]
+
+    func begin(from: Int, to: Int) {
+        let enabled = lock.withLock { () -> Bool in
+            guard !used else { return false }
+            used = true
+            start = ProcessInfo.processInfo.systemUptime
+            return true
+        }
+        guard enabled else { return }
+        event("indicator.assignmentBegin", "from=\(from) to=\(to)")
+        probe()
+    }
+
+    func event(_ name: String, _ detail: String = "") {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let origin = lock.withLock({ start }), now - origin < 30 else { return }
+        diag("ELEVATOR_TRACE", ["ms": String(format: "%.3f", (now - origin) * 1000),
+                                "event": name, "main": Thread.isMainThread, "detail": detail])
+    }
+
+    /// Bounded phase pairs: no per-object logs. The optional token means inactive
+    /// traces do no formatting/writing. Repeated UI passes cap at 24 per phase.
+    func beginPhase(_ name: String, _ detail: @autoclosure () -> String = "") -> Double? {
+        let now = ProcessInfo.processInfo.systemUptime
+        let enabled = lock.withLock { () -> Bool in
+            guard let start, now - start < 30 else { return false }
+            let count = phaseCounts[name, default: 0]
+            guard count < 24 else { return false }
+            phaseCounts[name] = count + 1
+            return true
+        }
+        guard enabled else { return nil }
+        event(name + ".begin", detail())
+        return now
+    }
+
+    func endPhase(_ name: String, _ began: Double?) {
+        guard let began else { return }
+        let elapsed = (ProcessInfo.processInfo.systemUptime - began) * 1000
+        event(name + ".end", "elapsedMS=\(String(format: "%.3f", elapsed))")
+    }
+
+    private func probe() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1) { [self] in
+            guard let origin = lock.withLock({ start }),
+                  ProcessInfo.processInfo.systemUptime - origin < 30 else { return }
+            let sent = ProcessInfo.processInfo.systemUptime
+            event("heartbeat.sent")
+            DispatchQueue.main.async { [self] in
+                event("heartbeat.ack", "queueDelayMS=\((ProcessInfo.processInfo.systemUptime - sent) * 1000)")
+                probe() // At most one pending probe, even through a long stall.
+            }
+        }
+    }
+
+    func destinationNumberAssigned() {
+        lock.withLock { indicatorAssigned = true }
+        event("indicator.assignmentEnd")
+    }
+
+    func registerScene(_ scene: AnyObject) {
+        lock.withLock { destinationScene = ObjectIdentifier(scene) }
+    }
+
+    func registerDestination(_ controller: AnyObject) {
+        event("controller.installed", "controller=\(ObjectIdentifier(controller))")
+    }
+
+    func rendered(_ controller: AnyObject, scene: AnyObject, doorPosition: (Float, Float)?) {
+        let marks: [String] = lock.withLock {
+            guard start != nil else { return [] }
+            guard destinationScene == ObjectIdentifier(scene) else {
+                if indicatorAssigned && !indicatorRendered { indicatorRendered = true; return ["indicator.firstRenderAfterAssignment"] }
+                return []
+            }
+            frames += 1
+            var result = frames <= 2 ? ["destination.renderedFrame.\(frames)"] : []
+            if !doorMoved, let x = doorX, let z = doorZ, let p = doorPosition,
+               abs(p.0 - x) + abs(p.1 - z) > 0.00001 {
+                doorMoved = true
+                result.append("doors.firstRenderedMovement")
+            }
+            return result
+        }
+        for mark in marks { event(mark, "controller=\(ObjectIdentifier(controller))") }
+        if marks.contains("doors.firstRenderedMovement") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
+                event("trace.end")
+                lock.withLock { start = nil }
+            }
+        }
+    }
+
+    func doorsScheduled(x: Float, z: Float) {
+        lock.withLock { doorX = x; doorZ = z }
+        event("doors.actionsScheduled")
+    }
+
+    func samplePan(changed: Bool) -> Bool {
+        lock.withLock {
+            guard let start, ProcessInfo.processInfo.systemUptime - start < 30 else { return false }
+            let now = ProcessInfo.processInfo.systemUptime
+            if changed && now - lastPan < 0.1 { return false }
+            lastPan = now
+            return true
+        }
+    }
+}

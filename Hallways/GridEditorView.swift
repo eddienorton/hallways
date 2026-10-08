@@ -334,6 +334,9 @@ struct GridEditorView: View {
     /// which isn't where they actually are. nil when there's no 3D
     /// session running yet (matches youAreHere's own nil case).
     var youAreHereMazeID: Int? = nil
+    /// Oct 5 (DEBUG only): reset onboarding and jump straight into
+    /// Administration as a new employee (ContentView does the work).
+    var devNewEmployeeAtAdministration: (() -> Void)? = nil
 
     private let openColor = Color(red: 0.55, green: 0.62, blue: 0.7)
 
@@ -1449,6 +1452,13 @@ struct GridEditorView: View {
                         dismiss()
                     }
                 }
+                if let devNewEmployeeAtAdministration {
+                    Divider()
+                    Button("Floor \(Admission.administrationFloor) \u{00B7} New Employee (reset onboarding)") {
+                        devNewEmployeeAtAdministration()
+                        dismiss()
+                    }
+                }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "hammer.fill")
@@ -1466,6 +1476,31 @@ struct GridEditorView: View {
                 set: { UserDefaults.standard.set($0, forKey: MazeStore.devStartOnLastFloorKey) }
             )) {
                 Text("Start on last dev floor")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+            }
+            .toggleStyle(.switch)
+
+            // Oct 5 (Admission): OFF = a brand-new player (the lobby trip
+            // goes to Administration on Floor 2). ON = ordinary play.
+            Toggle(isOn: Binding(
+                get: { Admission.isCompleted },
+                set: { Admission.isCompleted = $0 }
+            )) {
+                Text("Admission completed")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.6))
+            }
+            .toggleStyle(.switch)
+
+            // Oct 5: OFF = the prologue is still running (Floors 1 and 2 stay
+            // quiet: no Noodle, critters or posse). ON = the building is alive.
+            // Takes effect at the next floor build.
+            Toggle(isOn: Binding(
+                get: { Admission.isPrologueCompleted },
+                set: { Admission.isPrologueCompleted = $0 }
+            )) {
+                Text("Prologue completed")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.black.opacity(0.6))
             }

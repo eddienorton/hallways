@@ -9,10 +9,17 @@ import Testing
 struct TicTacToeGameTests {
     @Test func placingOnAnOccupiedOrOutOfRangeSquareIsRejected() {
         var board = TicTacToeBoard()
-        #expect(board.place(.x, at: 0))
-        #expect(!board.place(.o, at: 0)) // already occupied
-        #expect(!board.place(.o, at: 9)) // out of range
-        #expect(!board.place(.o, at: -1))
+        // Mutating calls hoisted out of #expect: the macro expansion
+        // captures its expression in an immutable closure, so calling a
+        // mutating method inline fails to compile.
+        let placedFirst = board.place(.x, at: 0)
+        let placedOnOccupied = board.place(.o, at: 0) // already occupied
+        let placedOutOfRangeHigh = board.place(.o, at: 9)
+        let placedOutOfRangeLow = board.place(.o, at: -1)
+        #expect(placedFirst)
+        #expect(!placedOnOccupied)
+        #expect(!placedOutOfRangeHigh)
+        #expect(!placedOutOfRangeLow)
         #expect(board.cells[0] == .x)
     }
 
@@ -89,7 +96,8 @@ struct TicTacToeGameTests {
     @Test func aiReturnsNilOnAFullBoard() {
         let board = TicTacToeBoard(cells: [.x, .o, .x, .x, .o, .o, .o, .x, .x])
         var rng = SeededRNG(seed: 1)
-        #expect(TicTacToeAI.chooseMove(board: board, computer: .o, player: .x, using: &rng) == nil)
+        let move = TicTacToeAI.chooseMove(board: board, computer: .o, player: .x, using: &rng)
+        #expect(move == nil)
     }
 
     // "subtly more generous as the board develops" -- Eddie, Sept 13.

@@ -182,6 +182,7 @@ enum SoundEffects {
         guard let player = reverse ? reverseWalkingPlayer : walkingPlayer, !player.isPlaying else { return }
         player.rate = walkingRate
         player.play()
+        AudioHealth.shared.footstepToggled()                          // Oct 9: measurement only
     }
 
     static func stopWalking() {
@@ -201,8 +202,12 @@ enum SoundEffects {
         0.2 + elevatorDoorOpeningDelay + 1.0 + 0.1
     }
 
-    static func playElevatorArrival() {
+    /// `gain` (Oct 9): 1 for the player's own ride (unchanged); less for a
+    /// chime heard from elsewhere in the building (a character's call; see
+    /// CritterAudio.buildingGain). Set through HallwaysAudio so Mute still wins.
+    static func playElevatorArrival(gain: Float = 1) {
         guard let player = elevatorArrivalPlayer else { return }
+        HallwaysAudio.shared.setVolume(player, min(1, max(0, gain)))
         player.currentTime = 0
         player.play()
     }

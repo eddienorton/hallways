@@ -44,7 +44,14 @@ final class AdministrationIDTerminal {
         /// The player has taken the card (admission complete).
         case issued(UIImage)
         case unavailable
+        /// Oct 10: the face was badly placed -- asks for another try.
+        case reposition(HallwaysFace.Framing)
     }
+    /// Oct 10 (face framing): badly framed captures in a row. After this many
+    /// re-prompts the next capture is shown regardless, so an undetectable
+    /// face (lighting, glasses, a mask) can never block the ID.
+    static let maxFramingPrompts = 2
+    private var framingPrompts = 0
 
     private(set) var state: State = .form
     private weak var screen: SCNNode?
@@ -118,7 +125,7 @@ final class AdministrationIDTerminal {
         diag("idTerminal.tap", ["x": Double(point.x.rounded()), "y": Double(point.y.rounded()),
                                 "u": Double(uv.x), "v": Double(uv.y), "state": "\(state)"])
         switch state {
-        case .form, .unavailable:
+        case .form, .unavailable, .reposition:
             if Self.takeRect.insetBy(dx: -20, dy: -20).contains(point) { takePhoto() }
         case .result(let photo):
             if Self.acceptRect.insetBy(dx: -16, dy: -10).contains(point) {
@@ -127,6 +134,7 @@ final class AdministrationIDTerminal {
                 diag("idTerminal.accepted", ["isTransformOutput": photo === lastTransformOutput])
                 render()
                 issueCard(photo)
+                AdministrationExitGuard.photoAccepted()          // Oct 9: Juanita comes out to stand by the exit
             } else if Self.retakeRect.insetBy(dx: -16, dy: -10).contains(point) {
                 state = .form
                 lastTransformOutput = nil
@@ -217,6 +225,7 @@ final class AdministrationIDTerminal {
         EmployeeID.save(portrait: photo, number: number)
         Admission.isCompleted = true
         AdministrationReception.installOfficeOccupantIfDue()      // Oct 5: Fred is now at his desk
+        AdministrationExitGuard.visitorAdmitted()                 // Oct 9: Juanita heads for the exit
         diag("idTerminal.card.taken", ["number": number, "admissionCompleted": Admission.isCompleted,
                                         "isTransformOutput": photo === lastTransformOutput])
     }
@@ -264,6 +273,19 @@ final class AdministrationIDTerminal {
                         guard let self else { return }
                         diag("idTerminal.capture.done", ["w": Double(output.image.size.width), "h": Double(output.image.size.height),
                                                          "transformApplied": applied, "isRawCapture": isRawCapture])
+                        // Oct 10: a badly placed face (cut off at the bottom,
+                        // mostly eyes and forehead...) asks for a retake instead
+                        // of being offered for acceptance -- a limited number of
+                        // times, so it can never block the ID.
+                        if output.framing != .ok, self.framingPrompts < Self.maxFramingPrompts {
+                            self.framingPrompts += 1
+                            diag("idTerminal.reposition", ["framing": output.framing.rawValue, "prompt": self.framingPrompts])
+                            self.lastTransformOutput = nil
+                            self.state = .reposition(output.framing)
+                            self.render()
+                            return
+                        }
+                        self.framingPrompts = 0
                         self.lastTransformOutput = output.image
                         self.state = .result(output.image)
                         self.render()
@@ -344,6 +366,12 @@ final class AdministrationIDTerminal {
                 button("TAKE ID PHOTO", in: takeRect, filled: true)
             case .capturing:
                 button("HOLD STILL", in: takeRect, filled: false)
+            case .reposition(let framing):
+                button("TAKE ID PHOTO", in: takeRect, filled: true)
+                fittedText(framing.prompt.0, in: CGRect(x: 130, y: 1082, width: 540, height: 40),
+                           size: 32, weight: .bold, color: gold, kern: 2)
+                fittedText(framing.prompt.1, in: CGRect(x: 130, y: 1124, width: 540, height: 34),
+                           size: 26, weight: .semibold, color: paper, kern: 2)
             case .unavailable:
                 button("TAKE ID PHOTO", in: takeRect, filled: true)
                 fittedText("CAMERA UNAVAILABLE", in: CGRect(x: 130, y: 1090, width: 540, height: 44),

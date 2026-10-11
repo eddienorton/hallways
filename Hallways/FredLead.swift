@@ -62,6 +62,7 @@ enum FredLead {
                                        finalHeading: FredLeadPerformer.heading(doors - finalPoint))
         let lead = CharacterLead(performer: performer, context: context, steps: steps)
         lead.name = "followMe"
+        lead.guidedRoute = route                     // Oct 10: WALK follows him
         lead.onFinish = onDone
         // The first place he heads for = the direction of "this way".
         var firstTarget = finalPoint
@@ -144,7 +145,7 @@ enum FredDoorGuard {
               FredLead.context != nil else { return false }
         if busy {
             // Already out showing you the way: "nuh-uh" from wherever he is.
-            if let nope = FredSound.nope { fred.runAction(.playAudio(nope, waitForCompletion: false)) }
+            if let nope = FredSound.nope { CritterAudio.play(nope, on: fred) }
             return true
         }
         busy = true
@@ -335,7 +336,7 @@ final class FredLeadPerformer: LeadPerformer {
 
     func call() {
         guard let node else { return }
-        if let source = FredSound.comeAlong { node.runAction(.playAudio(source, waitForCompletion: false)) }
+        if let source = FredSound.comeAlong { CritterAudio.play(source, on: node) }
         body?.runAction(.sequence([.moveBy(x: 0, y: 0.022, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.022, z: 0, duration: 0.14)]),
                         forKey: "leadCallBounce")
         earsFlick()
@@ -367,7 +368,7 @@ final class FredLeadPerformer: LeadPerformer {
 
     func depart() {
         guard let node else { return }
-        if let source = FredSound.tick { node.runAction(.playAudio(source, waitForCompletion: false)) }
+        if let source = FredSound.tick { CritterAudio.play(source, on: node) }
         body?.runAction(.sequence([.rotateTo(x: 0.15, y: 0, z: 0, duration: 0.08, usesShortestUnitArc: true),
                                    .rotateTo(x: 0, y: 0, z: 0, duration: 0.12, usesShortestUnitArc: true)]))
     }
@@ -465,7 +466,7 @@ final class FredLeadPerformer: LeadPerformer {
     /// plays on the office model): trill, bounce, wiggle, ears, fast wag.
     func petShimmy() {
         guard let node, let body else { return }
-        if let happy = FredSound.happy { node.runAction(.playAudio(happy, waitForCompletion: false)) }
+        if let happy = FredSound.happy { CritterAudio.play(happy, on: node) }
         let restY = body.position.y
         body.runAction(.sequence([
             .group([.move(to: SCNVector3(0, restY + 0.02, 0), duration: 0.1),
@@ -624,7 +625,7 @@ final class FredLeadPerformer: LeadPerformer {
     }
 
     private func say(_ source: SCNAudioSource?) -> SCNAction {
-        .run { node in if let source { node.runAction(.playAudio(source, waitForCompletion: false)) } }
+        .run { node in if let source { CritterAudio.play(source, on: node) } }
     }
 
     private func ear(_ i: Int, up: CGFloat, _ d: Double) -> SCNAction? {
@@ -664,7 +665,7 @@ final class FredLeadPerformer: LeadPerformer {
                 guard let self, leg < self.legs.count else { return }
                 self.legs[leg].runAction(.sequence([.rotateTo(x: -0.55, y: 0, z: 0, duration: 0.06),
                                                     .rotateTo(x: 0, y: 0, z: 0, duration: 0.07)]))
-                if let step = self.steps.randomElement() { self.node?.runAction(.playAudio(step, waitForCompletion: false)) }
+                if let step = self.steps.randomElement(), let n = self.node { CritterAudio.play(step, on: n) }
             }
         }
     }
@@ -684,7 +685,7 @@ final class FredLeadPerformer: LeadPerformer {
             var footfalls: [SCNAction] = []
             for _ in 0..<(cycles * 2) {
                 footfalls.append(.run { n in
-                    if let step = steps.randomElement() { n.runAction(.playAudio(step, waitForCompletion: false)) }
+                    if let step = steps.randomElement() { CritterAudio.play(step, on: n) }
                 })
                 footfalls.append(.wait(duration: half))
             }

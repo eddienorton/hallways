@@ -437,7 +437,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// same "only ever grows, closeRoomEntranceDoorIfJustCrossed does
     /// the actual closing" policy as openBathroomDoors/
     /// openWindowRoomDoors.
-    @Published private(set) var openRoomEntranceDoors: Set<GridCoordinate> = []
+    @Published private(set) var openRoomEntranceDoors: Set<GridCoordinate> = [] {
+        didSet { if openRoomEntranceDoors != oldValue { publishAcousticDoors() } }
+    }
+
+    /// Oct 9 (closed-door sound): tell the critter/building sound model which
+    /// Room Entrance doors are shut right now (a door held open for show by a
+    /// character counts as open -- the opening is real). Called on every
+    /// change and once per floor install.
+    func publishAcousticDoors() {
+        let shut = roomEntranceDoors.filter { !openRoomEntranceDoors.contains($0.key) && !cosmeticallyOpenRoomEntranceDoors.contains($0.key) }
+        CritterAudio.setClosedDoors(shut.map { (row: $0.key.row, col: $0.key.col, dRow: $0.value.delta.row, dCol: $0.value.delta.col) })
+    }
 
     /// The deposit half of the mechanic -- same shape as objectKinds/
     /// objectNodes above, but destinationNodes points at the metal
@@ -683,6 +694,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         Set(Direction.allCases.filter { d in
             let n = GridCoordinate(row: currentCell.row + d.delta.row, col: currentCell.col + d.delta.col)
             guard cells.contains(n) else { return false }
+            if isBlockedByCharacter(from: currentCell, direction: d) { return false }
             if let anchor = bathroomDoorAnchor(from: currentCell, direction: d), !openBathroomDoors.contains(anchor) {
                 return false
             }
@@ -724,6 +736,78 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     /// Same resolution bathroomDoorAnchor/windowRoomDoorAnchor do, for
     /// a Room Entrance door.
+    /// Oct 9 (Juanita in the doorway): a boundary a CHARACTER is standing in.
+    /// Closed to the player exactly like a wall -- grid steps, tap walks and
+    /// the free walk (which reads openRunLength) all stop at it -- whatever
+    /// state any door there is in. Keyed by the cell and the side it's on;
+    /// both sides of the boundary are honoured.
+    struct BlockedEdge: Hashable {
+        let cell: GridCoordinate
+        let direction: Direction
+    }
+    var characterBlockedEdges: Set<BlockedEdge> = [] {
+        didSet {
+            guard characterBlockedEdges != oldValue else { return }
+            diag("nav.characterBlock", ["edges": characterBlockedEdges.count])
+            // A free walk/drag in progress holds its own geometry snapshot.
+            if freeWalkGeometry != nil { freeWalkGeometry = makeFreeWalkGeometry() }
+        }
+    }
+    /// The player walked into a character standing in a boundary (a grid
+    /// step refused by characterBlockedEdges, or -- Oct 9 -- a free walk
+    /// stopped by a character keep-out) -- the character reacts; no wall
+    /// thump, a person isn't a wall.
+    var onCharacterBlockBump: (() -> Void)?
+
+    /// Oct 9 (conversational distance): circles around characters the free
+    /// walk (taps, holds, drags, wall-composition glides) never enters.
+    var characterKeepOuts: [FreeWalkGeometry.KeepOut] = [] {
+        didSet {
+            guard characterKeepOuts != oldValue else { return }
+            diag("nav.characterKeepOut", ["count": characterKeepOuts.count,
+                                          "radius": characterKeepOuts.first.map { $0.radius }])
+            if freeWalkGeometry != nil { freeWalkGeometry = makeFreeWalkGeometry() }
+        }
+    }
+
+    /// `point` moved straight along `retreat` (a unit floor direction) until
+    /// it is clear of every character keep-out (+5 cm) -- where a
+    /// wall-composition glide (e.g. facing the guarded doors) ends instead
+    /// of inside someone. Unchanged when already clear.
+    func pointClearOfCharacters(_ point: SCNVector3, retreat: (x: Double, z: Double)) -> SCNVector3 {
+        var p = (x: Double(point.x), z: Double(point.z))
+        for k in characterKeepOuts {
+            let r = k.radius + 0.05
+            let ox = p.x - k.x, oz = p.z - k.z
+            guard (ox * ox + oz * oz).squareRoot() < r else { continue }
+            // |o + t*u| = r, t > 0.
+            let b = ox * retreat.x + oz * retreat.z
+            let c = ox * ox + oz * oz - r * r
+            let t = -b + (b * b - c).squareRoot()
+            p = (p.x + retreat.x * t, p.z + retreat.z * t)
+        }
+        return SCNVector3(Float(p.x), point.y, Float(p.z))
+    }
+
+    /// Does the straight segment from (x, z) by (dx, dz) come within a
+    /// character keep-out? (A walk aimed into or past a character.)
+    private func segmentMeetsCharacter(x: Double, z: Double, dx: Double, dz: Double) -> Bool {
+        for k in characterKeepOuts {
+            let len2 = dx * dx + dz * dz
+            let t = len2 > 1e-12 ? max(0, min(1, ((k.x - x) * dx + (k.z - z) * dz) / len2)) : 0
+            let cx = x + dx * t - k.x, cz = z + dz * t - k.z
+            if (cx * cx + cz * cz).squareRoot() < k.radius + 0.02 { return true }
+        }
+        return false
+    }
+
+    func isBlockedByCharacter(from cell: GridCoordinate, direction: Direction) -> Bool {
+        guard !characterBlockedEdges.isEmpty else { return false }
+        if characterBlockedEdges.contains(BlockedEdge(cell: cell, direction: direction)) { return true }
+        let n = GridCoordinate(row: cell.row + direction.delta.row, col: cell.col + direction.delta.col)
+        return characterBlockedEdges.contains(BlockedEdge(cell: n, direction: direction.opposite))
+    }
+
     private func roomEntranceDoorAnchor(from: GridCoordinate, direction: Direction) -> GridCoordinate? {
         if roomEntranceDoors[from] == direction { return from }
         let neighbor = GridCoordinate(row: from.row + direction.delta.row, col: from.col + direction.delta.col)
@@ -748,6 +832,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         while count < limit {
             let n = GridCoordinate(row: cell.row + direction.delta.row, col: cell.col + direction.delta.col)
             guard cells.contains(n) else { break }
+            if isBlockedByCharacter(from: cell, direction: direction) { break }
             if let anchor = bathroomDoorAnchor(from: cell, direction: direction), !openBathroomDoors.contains(anchor) { break }
             if let anchor = windowRoomDoorAnchor(from: cell, direction: direction), !openWindowRoomDoors.contains(anchor) { break }
             if let anchor = roomEntranceDoorAnchor(from: cell, direction: direction), !openRoomEntranceDoors.contains(anchor) { break }
@@ -834,6 +919,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private var pivotStartYaw: Double = 0
     private var pivotTargetYaw: Double = 0
     private let pivotDuration: Double = 0.18
+    /// Oct 10: duration of the pivot currently started by rotate(toward:)
+    /// (standaloneRotation only) -- gestures keep pivotDuration; the HUD's
+    /// LEFT/RIGHT pass a slower, body-turn duration.
+    private var standalonePivotDuration: Double = 0.18
 
     // MARK: - Free look (Sept 28 experiment: DISCRETE POSITION, CONTINUOUS VISION)
     //
@@ -977,7 +1066,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 open.insert(FreeWalkGeometry.Edge(cell: cell, direction: direction))
             }
         }
-        return FreeWalkGeometry(cells: cells, openEdges: open, cellSize: Double(cellSize))
+        var geometry = FreeWalkGeometry(cells: cells, openEdges: open, cellSize: Double(cellSize))
+        geometry.keepOuts = characterKeepOuts                          // Oct 9: Juanita's conversational distance
+        return geometry
     }
 
     /// Whether a player-controlled walk takes the free path right now.
@@ -1265,6 +1356,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                                          action: { [weak self] in self?.openWindowRoomDoor(at: coord) })
         }
         if let coord = roomEntranceDoorCoordinate(for: node) ?? Self.taggedCoord(of: node, kind: .roomEntranceDoor) {
+            // Oct 9 (Juanita on guard): a tap on the doors she guards is an
+            // attempt to leave -- no glide, no door; she answers it.
+            if let direction = roomEntranceDoors[coord], roomEntranceDoorGuarded?(coord) == true {
+                return WallInteractionTarget(kind: Self.guardedDoorKind, face: twoSidedDoorFace(at: coord, direction: direction),
+                                             action: { [weak self] in self?.guardedRoomEntranceDoorTapped(coord) })
+            }
             guard let direction = roomEntranceDoors[coord], !openRoomEntranceDoors.contains(coord) else { return nil }
             return WallInteractionTarget(kind: "roomEntranceDoor", face: twoSidedDoorFace(at: coord, direction: direction),
                                          action: { [weak self] in self?.openRoomEntranceDoor(at: coord) })
@@ -1332,6 +1429,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// grid navigation, while input is locked, or if the glide can't start.
     /// No distance limit: a recognized tap is intent.
     func composeWallInteraction(_ target: WallInteractionTarget) -> Bool {
+        // Oct 9: guarded doors -- consumed right here, BEFORE any glide or
+        // door animation: the player stays where they are, she reacts.
+        if target.kind == Self.guardedDoorKind, !decorateModeEnabled {
+            diag("wallInteraction.guardedDoor", ["coord": target.face.coord])
+            target.action?()
+            return true
+        }
         guard !decorateModeEnabled, freeWalkApplies(held: false), canRotate else {
             diag("wallInteraction.declined", ["kind": target.kind, "coord": target.face.coord,
                                               "reason": "not applicable (decorate/grid/locked)"])
@@ -1484,7 +1588,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     @discardableResult
     private func beginWallComposition(kind: String, face: WallFace, at position: SCNVector3? = nil, then interact: (() -> Void)?,
                                       extra: [String: Any?] = [:]) -> Bool {
-        let target = position ?? worldPosition(for: face.coord)
+        // Oct 9: never compose INTO a character (e.g. facing the doors she
+        // guards): stop short, backed off from the face, outside her circle.
+        let back = face.direction.opposite.delta
+        let target = pointClearOfCharacters(position ?? worldPosition(for: face.coord),
+                                            retreat: (Double(back.col), Double(back.row)))
         let targetYaw = face.direction.yaw
         let start = cameraNode.position
         let startYaw = Double(cameraNode.eulerAngles.y)
@@ -1515,6 +1623,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// is shared (see DiagnosticRecorder.snapshotProvider). Reads only.
     func diagStateSnapshot(_ reason: String) {
         let p = cameraNode.position
+        // Oct 9 (heating investigation): render rate, thermal state and the
+        // floor's light census -- measurement only.
+        RenderHealth.shared.startWatching()
+        let census = RenderHealth.census(scene?.rootNode)
+        diag("snapshot.render", [
+            "reason": reason,
+            "floor": floorNumber,
+            "fps": String(format: "%.1f", RenderHealth.shared.sampleFPS()),
+            "fpsSetting": RenderHealth.testFramesPerSecond.map { "\($0)" } ?? "default",
+            "audio": AudioHealth.shared.summary(),
+            "thermal": RenderHealth.thermal,
+            "lowPower": ProcessInfo.processInfo.isLowPowerModeEnabled,
+            "nodes": census.nodes,
+            "lights": census.lights,
+            "lightsByKind": census.byKind,
+            "audioSilent": HallwaysAudio.shared.isMuted || HallwaysAudio.shared.isSuppressed
+        ])
         diag("snapshot.state", [
             "reason": reason,
             "floor": floorNumber,
@@ -1583,6 +1708,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
         let path = makeFreeWalkGeometry().slidePath(from: SCNVector3(start.x, eyeHeight, start.z),
                                                     dx: forward.x * requested, dz: forward.z * requested)
+        // Oct 9: a plain tap aimed into or past a character on guard is an
+        // attempt to push past her -- she reacts (her own cooldown applies).
+        if finalYaw == nil, !characterKeepOuts.isEmpty,
+           segmentMeetsCharacter(x: Double(start.x), z: Double(start.z), dx: forward.x * requested, dz: forward.z * requested) {
+            onCharacterBlockBump?()
+        }
         var arc: [Double] = [0]
         for i in 1..<max(1, path.count) {
             arc.append(arc[i - 1] + Double(hypotf(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z)))
@@ -1630,6 +1761,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
         let walks = distance > 0.05
         freeTapStopRequested = false
+        if cruiseActive || continuousWalkState != .stopped { stopContinuousWalk(reason: "tapWalk") }
         freeTapWalkActive = true
         tapWalkDestination = target
         movementPace = 1
@@ -1713,6 +1845,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     private func beginFreeHeldWalk() {
         guard canRotate else { return }
+        if cruiseActive || continuousWalkState != .stopped { stopContinuousWalk(reason: "holdWalk") }
         cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
         freeWalkGeometry = makeFreeWalkGeometry()
         freeWalkCell = currentCell
@@ -1940,6 +2073,973 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // behaviour): turn immediately. Moving: the .freeMove loop turns
         // toward the target at the limited rate.
         if heldThrottle == 0 || !heldWalkTurnRateLimit.isFinite { stepHeldSteering(dt: 0, translating: false) }
+    }
+
+    // MARK: - CONTINUOUS WALK & QUEUED TURNS (Oct 10 experiment)
+    //
+    // Three HUD buttons: LEFT | WALK/STOP | RIGHT (ContinuousWalkControls).
+    // WALK starts ONE renderer-driven free movement (the same .freeMove phase,
+    // FreeWalkGeometry, slideEndpoint collision, keep-outs, cell tracking and
+    // arrivals every other free walk uses) that keeps going on its own until
+    // STOP, a dead end, a block, or anything that takes movement away. While
+    // walking, LEFT/RIGHT queue a turn (last press wins; the same arrow again
+    // cancels) that executes at the next opening on that side STILL AHEAD of
+    // the player, as one continuous quarter-circle arc that starts `radius`
+    // before the crossing's centre and ends on the new corridor's centreline.
+    // Stopped, LEFT/RIGHT are the ordinary 90-degree pivot (rotate(toward:)).
+    // Any touch gesture on the scene stops the walk first (ContentView).
+
+    /// Master switch for the experiment (hides the buttons when false).
+    static let continuousWalkExperimentOn = true
+
+    enum ContinuousWalkTurn: Equatable { case left, right }
+    enum ContinuousWalkState: Equatable {
+        case stopped
+        case walking
+        case walkingQueued(ContinuousWalkTurn)
+    }
+    /// What the HUD shows. Main thread only.
+    @Published private(set) var continuousWalkState: ContinuousWalkState = .stopped
+
+    /// Max deceleration toward a stop / a turn's entry speed (scene units/s^2).
+    static let cruiseBrake: Double = 10
+    /// Acceleration from standing / out of a turn.
+    static let cruiseAccel: Double = 8
+    /// THE TUNING NUMBER (Oct 10 addendum): seconds per 90 degrees for a
+    /// HUD LEFT/RIGHT pivot, eased in and out. Queued walking turns use the
+    /// same time for their corner arc (the walk slows to whatever speed
+    /// covers the arc in this time), so both read as one body turn.
+    static var pivotTurnDuration: Double = 0.30
+    /// Corner-arc speed for a given radius: the arc takes pivotTurnDuration.
+    static func cruiseTurnSpeed(radius: Double) -> Double {
+        radius * .pi / 2 / max(0.05, pivotTurnDuration)
+    }
+    /// A LEFT/RIGHT pressed while a HUD pivot is still turning: runs when it
+    /// finishes (last press wins). Never two rotations at once.
+    private var pendingHUDPivot: ContinuousWalkTurn?
+    /// True from a HUD pivot's start until its main-thread completion.
+    private var hudPivotInFlight = false
+    /// Preferred corner radius (clamped to the legal corridor band).
+    static let cruiseTurnRadius: Double = 0.5
+
+    // MARK: Smart WALK (Oct 10, playthrough refinements)
+    /// TUNING SWITCH: WALK stops at a hallway decision -- a cell offering a
+    /// genuine choice (straight plus a side branch, or both sides) -- just
+    /// short of its mouth, where the openings are still in view. WALK again
+    /// goes straight on; LEFT/RIGHT there walk on and take that way with the
+    /// usual smooth corner (no stop-pivot-go).
+    var smartWalkDecisionStopsOn = true
+    /// TUNING: how far short of the decision's mouth (its near edge) the
+    /// walk stops, metres. 0 = right at the mouth.
+    static var smartWalkDecisionStopShort: Double = 0.4
+    /// Where the last decision stop left the player, and its decision cell.
+    private var cruiseDecisionStop: (cell: GridCoordinate, x: Float, z: Float)?
+    /// Cells that are not decisions for this walk: where it started, and the
+    /// decision it was just stopped for (WALK again = go on through it).
+    private var cruiseDecisionSkip: Set<GridCoordinate> = []
+    /// (Unused since the stop moved short of the mouth; kept false.)
+    private var cruiseWalkAfterPivot = false
+    /// The cell the walk started in: never a decision (or a landing) for
+    /// this walk -- that's where the player just chose to go on from.
+    private var cruiseStartCell: GridCoordinate?
+    /// Main-thread snapshot for the render-thread walk (swapped under
+    /// cruiseGeometryLock, like the geometry): an active escort's route
+    /// (cell -> the way it goes on) and the landing spots that cap a walk
+    /// (the existing LandingSpot.capsApproach -- conversation distance).
+    private struct CruiseGuidance {
+        var routeOnward: [GridCoordinate: Direction]? = nil
+        var landingCaps: [(cell: GridCoordinate, face: Direction, x: Double, z: Double)] = []
+    }
+    private var cruiseGuidance = CruiseGuidance()
+    private var cruisePendingGuidance: CruiseGuidance?
+
+    /// Main thread: what the walk should know about escorts and landings now.
+    private func makeCruiseGuidance() -> CruiseGuidance {
+        var guidance = CruiseGuidance()
+        if let route = CharacterLead.activeGuidedRoute, route.count >= 2 {
+            var onward: [GridCoordinate: Direction] = [:]
+            for i in 0..<(route.count - 1) {
+                let a = route[i], b = route[i + 1]
+                if let d = Direction.allCases.first(where: { $0.delta.row == b.row - a.row && $0.delta.col == b.col - a.col }) {
+                    onward[a] = d
+                }
+            }
+            guidance.routeOnward = onward
+        }
+        for spot in landingSpots where spot.capsApproach && (spot.isAvailable?() ?? true) {
+            let p = landingPosition(spot)
+            guidance.landingCaps.append((spot.face.coord, spot.face.direction, Double(p.x), Double(p.z)))
+        }
+        return guidance
+    }
+
+    /// Render thread: distance ahead to a capped landing spot's pose on this
+    /// heading (walking toward what it faces, on its line), if any.
+    private func cruiseLandingCap(x: Double, z: Double, heading: Direction, cellSize: Double) -> Double? {
+        let f = Self.unit(heading)
+        var best: Double?
+        for cap in cruiseGuidance.landingCaps where cap.face == heading && cap.cell != cruiseStartCell {
+            let t = (cap.x - x) * f.x + (cap.z - z) * f.z
+            let lateral = abs((cap.x - x) * f.z - (cap.z - z) * f.x)
+            guard t > -0.05, lateral < cellSize / 2 else { continue }
+            best = min(best ?? .infinity, max(0, t))
+        }
+        return best
+    }
+
+    /// Main thread, after a decision stop: remember it; a turn pressed too
+    /// late to take as a corner is taken now, as a pivot and walk on.
+    private func continuousWalkDecisionStop(cell: GridCoordinate, late: ContinuousWalkTurn?) {
+        let p = cameraNode.position
+        cruiseDecisionStop = (cell, p.x, p.z)
+        diag("cruise.decision", ["cell": currentCell, "decision": cell, "facing": "\(facing)", "late": late.map { "\($0)" } ?? "-"])
+        if let late { continuousWalkTurnTapped(late) }
+    }
+
+    private struct CruiseArc {
+        let centerX: Double, centerZ: Double
+        let headX: Double, headZ: Double      // old heading (unit)
+        let sideX: Double, sideZ: Double      // new heading (unit)
+        let radius: Double
+        let startYaw: Double, endYaw: Double
+        let endHeading: Direction
+        let serial: Int
+        var travelled: Double = 0
+        var stall: Double = 0
+        var length: Double { radius * .pi / 2 }
+    }
+
+    // Written on main, read by the render loop (same convention as walkingHeld).
+    private var cruiseActive = false
+    private var cruiseSession = 0
+    private var cruiseRequest: (turn: ContinuousWalkTurn, serial: Int)?
+    private var cruiseRequestSerial = 0
+    // Render-loop state.
+    private var cruiseConsumedSerial = -1
+    private var cruiseHeadingYaw: Double = 0
+    private var cruiseArc: CruiseArc?
+    private var cruiseSpeed: Double = 0
+    private var cruiseDistance: Double = 0
+    private var cruiseStall: Double = 0
+    private var cruiseBumped = false
+    private let cruiseGeometryLock = NSLock()
+    private var cruisePendingGeometry: FreeWalkGeometry?
+
+    // MARK: Oct 10 -- CONTEXTUAL NAVIGATION (the center button + assistance)
+    //
+    // Automate the obvious, preserve the choices. While walking, a closed
+    // ordinary door ahead is opened with its own existing door code (never a
+    // guarded, intercepted or blocked one), the elevator ahead is boarded with
+    // openElevator() (its own guards and feedback), and a dead-end with exactly
+    // one way on is rounded like a queued turn. Stopped, the center button
+    // offers the one existing interaction in front of the player (OPEN, TAKE,
+    // USE, PLAY...), run through the same handler a tap would use. Priority:
+    // scripts/restrictions > STOP > explicit turns > interactions > assistance.
+
+    /// A closed door at the end of the straight run ahead (render side).
+    enum CruiseDoor: Equatable {
+        case roomEntrance(GridCoordinate), bathroom(GridCoordinate), windowRoom(GridCoordinate)
+    }
+    /// The door this walk already asked to open (once per door per walk).
+    private var cruiseDoorRequested: CruiseDoor?
+    /// Walk clock (render) and the moment until which a just-opened doorway is
+    /// taken at door speed, so the leaf is clear before the player gets there.
+    private var cruiseClock: Double = 0
+    private var cruiseDoorSlowUntil: Double = 0
+    /// Lead (beyond braking distance) at which a door ahead is asked to open.
+    static let cruiseDoorLead: Double = 1.5
+    /// Speed through a doorway that has only just begun to swing open.
+    static let cruiseDoorSpeed: Double = 3.5
+    /// Run when the walk ends in front of something that refused it (e.g. the
+    /// guarded Administration doors: Juanita's existing reaction).
+    private var cruiseStopReaction: (() -> Void)?
+    /// WALK pressed while the player can't move YET (stepping out of the cab,
+    /// a walk or turn finishing): the walk starts the moment movement frees up.
+    private var cruiseStartDeadline: Date?
+    static let cruiseStartWaitLimit: TimeInterval = 8
+    /// After STOP, the center button ignores taps this long, so a double tap
+    /// can never turn into OPEN/TAKE/USE.
+    static let hudStopToActionGuard: TimeInterval = 0.45
+    private var hudInteractionArmedAt: Date = .distantPast
+    /// How far (radians) the view may be off its cardinal facing for the
+    /// thing in front to count as "in front".
+    static let hudFacingTolerance: Double = 35 * .pi / 180
+    /// The scene view (the office computer's seat needs it). Set by ContentView.
+    weak var hudSceneView: SCNView?
+    /// Elevator-cab LEFT/RIGHT pivot in flight (same look the pan drives).
+    private var elevatorHUDPivotRunning = false
+    static let elevatorHUDPivotActionKey = "hudElevatorPivot"
+
+    /// Why a continuous walk can't run right now (nil = it can).
+    private var continuousWalkBlockReason: String? {
+        if isSeatedAtComputer { return "seatedAtComputer" }
+        if activePictureMenu != nil || activePhotoBooth != nil || activeTicTacToeTerminal != nil || activeShellGameTerminal != nil
+            || activeRockPaperScissorsTerminal != nil || activeHigherLowerTerminal != nil || activeFiveCardDrawTerminal != nil
+            || activeSimonTerminal != nil || activeHangmanTerminal != nil || activeConnectFourTerminal != nil
+            || activeCheckersTerminal != nil || activeWoidleTerminal != nil { return "interactionOpen" }
+        if elevatorInUse || isElevatorRideInProgress { return "elevator" }
+        if chuteInUse { return "chute" }
+        if extinguisherPickupInProgress || !extinguishingFireCoords.isEmpty { return "fireScript" }
+        if isDragRotating || isDragMoving || walkingHeld { return "gesture" }
+        if pendingWallInteraction != nil { return "wallInteraction" }
+        if !freeWalkApplies(held: true) { return "freeWalkUnavailable" }
+        return nil
+    }
+
+    /// WALK / STOP.
+    func continuousWalkButtonTapped() {
+        if continuousWalkState == .stopped { startContinuousWalk() } else { stopContinuousWalk(reason: "stopButton") }
+    }
+
+    /// What the center button offers right now.
+    enum HUDCenter: Equatable {
+        case walk, stop, action(String), unavailable
+        var label: String {
+            switch self {
+            case .walk, .unavailable: return "WALK"
+            case .stop: return "STOP"
+            case .action(let label): return label
+            }
+        }
+    }
+
+    var hudCenter: HUDCenter {
+        if continuousWalkState != .stopped { return .stop }               // STOP always wins
+        if elevatorAwaitingEntryDirection != nil { return .walk }        // in the cab: WALK steps out
+        if isElevatorRideInProgress || isElevatorWaitingForFloor { return .unavailable }
+        if let target = contextualTarget() { return .action(target.label) }
+        if let reason = continuousWalkBlockReason, reason != "wallInteraction", reason != "gesture" { return .unavailable }
+        return .walk
+    }
+
+    /// The center button. STOP never does anything but stop.
+    func hudCenterTapped() {
+        let center = hudCenter
+        switch center {
+        case .stop:
+            stopContinuousWalk(reason: "stopButton")
+            hudInteractionArmedAt = Date().addingTimeInterval(Self.hudStopToActionGuard)
+        case .walk:
+            startContinuousWalk()
+        case .action(let label):
+            guard Date() >= hudInteractionArmedAt, let target = contextualTarget(), target.label == label else {
+                diag("hud.actionIgnored", ["label": label, "reason": "justStopped or changed"])
+                return
+            }
+            diag("hud.action", ["label": label, "kind": target.kind, "cell": currentCell, "facing": "\(facing)"])
+            target.perform()
+            objectWillChange.send()
+        case .unavailable:
+            diag("hud.centerIgnored", ["blocked": continuousWalkBlockReason ?? "elevator"])
+        }
+    }
+
+    struct HUDTarget {
+        let label: String
+        let kind: String
+        let perform: () -> Void
+    }
+
+    /// The single existing interaction directly in front of a stationary
+    /// player, judged by the same rules its tap uses (cell, facing, range,
+    /// availability), or nil. Never a guess between several.
+    func contextualTarget() -> HUDTarget? {
+        guard !decorateModeEnabled, canRotate else { return nil }
+        let yaw = Double(cameraNode.eulerAngles.y)
+        guard abs(shortestDelta(from: yaw, to: facing.yaw)) < Self.hudFacingTolerance else { return nil }
+        let cell = currentCell, f = facing
+        // The elevator (its call/board path, or stepping back into an open cab).
+        if cell == endCell, f == elevatorMountDirection, elevatorLeftDoor != nil {
+            if canReenterArrivedElevator {
+                return HUDTarget(label: "ENTER", kind: "elevatorReenter") { [weak self] in self?.advance(source: "HUD_ENTER") }
+            }
+            if !elevatorInUse, !chuteInUse, !characterUsingElevator, elevatorAwaitingEntryDirection == nil,
+               elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") == nil,
+               isMissionComplete || !Self.missionGatesElevator, nextFloorNumber != floorNumber {
+                return HUDTarget(label: "OPEN", kind: "elevator") { [weak self] in self?.openElevator() }
+            }
+            return nil
+        }
+        // A closed door in front (never a guarded one: trying it is her cue).
+        if let door = closedDoor(from: cell, direction: f) {
+            switch door {
+            case .roomEntrance(let coord):
+                guard roomEntranceDoorGuarded?(coord) != true else { return nil }
+                return HUDTarget(label: "OPEN", kind: "roomEntranceDoor") { [weak self] in self?.openRoomEntranceDoor(at: coord) }
+            case .bathroom(let coord):
+                return HUDTarget(label: "OPEN", kind: "bathroomDoor") { [weak self] in self?.openBathroomDoor(at: coord) }
+            case .windowRoom(let coord):
+                return HUDTarget(label: "OPEN", kind: "windowRoomDoor") { [weak self] in self?.openWindowRoomDoor(at: coord) }
+            }
+        }
+        // A numbered room door (mail slot / knock).
+        if let door = roomDoors[cell], door.direction == f {
+            return HUDTarget(label: door.isDecorative ? "KNOCK" : "MAIL", kind: "roomDoor") { [weak self] in
+                self?.interactWithRoomDoor(at: cell)
+            }
+        }
+        // A wall fixture: photo booth or game terminal (still available).
+        for resolver in fixtureResolvers where wallInteractionDirection(resolver.kind, at: cell) == f {
+            let kind = resolver.kind, activate = resolver.activate
+            return HUDTarget(label: kind == .photoBooth ? "PHOTO" : "PLAY", kind: kind.rawValue) { [weak self] in
+                self?.composeWallView(kind, at: cell) { activate(cell) }
+            }
+        }
+        // The wall extinguisher.
+        if let coord = extinguisherAtCurrentCell {
+            return HUDTarget(label: "TAKE", kind: "extinguisher") { [weak self] in _ = self?.pickUpExtinguisher(at: coord) }
+        }
+        let ahead = GridCoordinate(row: cell.row + f.delta.row, col: cell.col + f.delta.col)
+        // A live fire, only with the extinguisher in hand.
+        if carryingExtinguisher {
+            for coord in [cell, ahead] where fireCoords.contains(coord) && !extinguishedFireCoords.contains(coord) && canReachFire(at: coord) {
+                return HUDTarget(label: "SPRAY", kind: "fire") { [weak self] in _ = self?.extinguishFire(at: coord) }
+            }
+        }
+        // A floor pickup (trash can, paint bucket) in the next cell.
+        if let kind = objectKinds[ahead], kind.requiresTapToCollect, !collectedCoords.contains(ahead) {
+            return HUDTarget(label: "TAKE", kind: "pickup") { [weak self] in _ = self?.collectByTap(at: ahead) }
+        }
+        // The player's office computer, from inside the office, facing the desk.
+        if floorNumber == PlayerOffice.floor, OfficeComputer.shared.phase == .off, let view = hudSceneView,
+           PlayerOffice.officeCells.subtracting(PlayerOffice.deskBayCells).contains(cell) {
+            let desk = PlayerOffice.deskCenter, p = cameraNode.position
+            let toDesk = atan2(-Double(desk.x - p.x), -Double(desk.y - p.z))
+            if abs(shortestDelta(from: yaw, to: toDesk)) < Self.hudFacingTolerance + 10 * .pi / 180 {
+                return HUDTarget(label: "USE", kind: "officeComputer") { [weak self, weak view] in
+                    guard let self, let view else { return }
+                    _ = OfficeComputer.shared.sitDown(controller: self, view: view)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The closed door (if any) across the edge `cell` -> `direction`.
+    private func closedDoor(from cell: GridCoordinate, direction: Direction) -> CruiseDoor? {
+        if let anchor = roomEntranceDoorAnchor(from: cell, direction: direction), !openRoomEntranceDoors.contains(anchor) {
+            return .roomEntrance(anchor)
+        }
+        if let anchor = bathroomDoorAnchor(from: cell, direction: direction), !openBathroomDoors.contains(anchor) {
+            return .bathroom(anchor)
+        }
+        if let anchor = windowRoomDoorAnchor(from: cell, direction: direction), !openWindowRoomDoors.contains(anchor) {
+            return .windowRoom(anchor)
+        }
+        return nil
+    }
+
+    /// Main thread: the walk is closing on a closed door. Ordinary doors open
+    /// through their own swing code; a guarded door stays shut (her reaction
+    /// plays when the walk stops at it); an intercept (someone answering)
+    /// behaves exactly as for a tap.
+    private func continuousWalkReachedDoor(_ door: CruiseDoor, session: Int) {
+        guard cruiseActive, cruiseSession == session else { return }
+        var result = "opened"
+        switch door {
+        case .roomEntrance(let coord):
+            if roomEntranceDoorGuarded?(coord) == true {
+                result = "guarded"
+                cruiseStopReaction = { [weak self] in self?.guardedRoomEntranceDoorTapped(coord) }
+            } else if let intercept = roomEntranceDoorIntercept, intercept(coord) {
+                result = "intercepted"
+                diag("roomEntranceDoor.intercepted", ["row": coord.row, "col": coord.col])
+            } else {
+                swingRoomEntranceDoorOpen(at: coord)
+            }
+        case .bathroom(let coord):
+            swingBathroomDoorOpen(at: coord)
+        case .windowRoom(let coord):
+            swingWindowRoomDoorOpen(at: coord)
+        }
+        diag("cruise.door", ["door": "\(door)", "result": result])
+        guard result == "opened" else { return }
+        let fresh = makeFreeWalkGeometry()
+        cruiseGeometryLock.lock()
+        cruisePendingGeometry = fresh
+        cruiseGeometryLock.unlock()
+    }
+
+    /// Main thread: the walk has stopped square in front of the elevator.
+    private func continuousWalkBoardElevator() {
+        guard currentCell == endCell, facing == elevatorMountDirection else {
+            diag("cruise.elevator", ["result": "notInFront", "cell": currentCell, "facing": "\(facing)"])
+            return
+        }
+        diag("cruise.elevator", ["result": canReenterArrivedElevator ? "reenter" : "open"])
+        if canReenterArrivedElevator { advance(source: "HUD_ENTER") } else { openElevator() }
+    }
+
+    /// LEFT/RIGHT in the elevator: the same free look the pan gesture drives
+    /// (beginElevatorCameraDrag/endElevatorCameraDrag), as a 90-degree turn.
+    private func elevatorHUDPivot(_ turn: ContinuousWalkTurn) {
+        if elevatorHUDPivotRunning { pendingHUDPivot = turn; return }
+        beginElevatorCameraDrag()
+        elevatorHUDPivotRunning = true
+        let start = Double(cameraNode.eulerAngles.y)
+        let base = start + shortestDelta(from: start, to: nearestCardinal(toYaw: start).yaw)
+        let target = base + (turn == .left ? .pi / 2 : -.pi / 2)
+        let duration = max(0.12, Self.pivotTurnDuration * abs(target - start) / (.pi / 2))
+        let spin = SCNAction.customAction(duration: duration) { node, elapsed in
+            let t = min(1, Double(elapsed) / duration)
+            node.eulerAngles = SCNVector3(0, Float(start + (target - start) * t * t * (3 - 2 * t)), 0)
+        }
+        diag("cruise.elevatorPivot", ["turn": "\(turn)"])
+        cameraNode.runAction(spin, forKey: Self.elevatorHUDPivotActionKey) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.elevatorHUDPivotRunning else { return }
+                self.cameraNode.eulerAngles = SCNVector3(0, Float(target), 0)
+                self.elevatorHUDPivotRunning = false
+                self.endElevatorCameraDrag()
+                if let next = self.pendingHUDPivot {
+                    self.pendingHUDPivot = nil
+                    self.continuousWalkTurnTapped(next)
+                }
+            }
+        }
+    }
+
+    /// LEFT / RIGHT.
+    func continuousWalkTurnTapped(_ turn: ContinuousWalkTurn) {
+        switch continuousWalkState {
+        case .stopped:
+            // In the elevator: the cab's own free look, as a quarter turn.
+            if isElevatorRideInProgress {
+                elevatorHUDPivot(turn)
+                return
+            }
+            // Stationary: the ordinary quarter-turn pivot; nothing queued.
+            // Mid-pivot: remember this press; it runs when the turn completes.
+            if isAnimating, hudPivotInFlight {
+                pendingHUDPivot = turn
+                diag("cruise.pivotQueued", ["turn": "\(turn)"])
+                return
+            }
+            let target = turn == .left ? facing.left : facing.right
+            // Smart WALK: stopped short of a decision, LEFT/RIGHT toward a way
+            // that is open there = walk on and take it (the queued-turn corner).
+            if let stop = cruiseDecisionStop,
+               hypotf(cameraNode.position.x - stop.x, cameraNode.position.z - stop.z) < 0.3,
+               makeFreeWalkGeometry().openEdges.contains(FreeWalkGeometry.Edge(cell: stop.cell, direction: target)) {
+                diag("cruise.decisionTurn", ["turn": "\(turn)", "toward": "\(target)", "decision": stop.cell])
+                startContinuousWalk()
+                if continuousWalkState != .stopped { queueContinuousWalkTurn(turn) }
+                return
+            }
+            cruiseDecisionStop = nil
+            diag("cruise.pivot", ["turn": "\(turn)", "from": "\(facing)", "to": "\(target)"])
+            rotate(toward: target, durationPerQuarterTurn: Self.pivotTurnDuration)
+            hudPivotInFlight = isAnimating && phase == .pivot
+        case .walking:
+            queueContinuousWalkTurn(turn)
+        case .walkingQueued(let pending):
+            if pending == turn {
+                cruiseRequestSerial += 1
+                cruiseRequest = nil
+                continuousWalkState = .walking
+                diag("cruise.turnCancelled", ["turn": "\(turn)"])
+            } else {
+                queueContinuousWalkTurn(turn)   // last press wins
+            }
+        }
+    }
+
+    private func queueContinuousWalkTurn(_ turn: ContinuousWalkTurn) {
+        cruiseRequestSerial += 1
+        cruiseRequest = (turn, cruiseRequestSerial)
+        continuousWalkState = .walkingQueued(turn)
+        diag("cruise.turnQueued", ["turn": "\(turn)", "cell": currentCell, "facing": "\(facing)"])
+    }
+
+    func startContinuousWalk() {
+        guard Self.continuousWalkExperimentOn, continuousWalkState == .stopped else { return }
+        pendingHUDPivot = nil
+        // A running tap walk ends in place first (same takeover a pinch uses).
+        if isFreeTapWalking { takeOverFreeTapWalkForPinch() }
+        cruiseRequestSerial += 1
+        cruiseRequest = nil
+        cruiseStopReaction = nil
+        if continuousWalkBlockReason == nil, canRotate {
+            beginContinuousWalkMovement()
+            return
+        }
+        // Oct 10 (Floor 2 report): WALK in the arrived cab used to do nothing.
+        // Not free YET (in the cab, a walk/turn/glide finishing): show STOP and
+        // start the walk the moment movement is the player's again.
+        guard continuousWalkCanWaitToStart else {
+            diag("cruise.refused", ["reason": continuousWalkBlockReason ?? "busy", "phase": "\(phase)"])
+            return
+        }
+        cruiseSession += 1
+        cruiseStartDeadline = Date().addingTimeInterval(Self.cruiseStartWaitLimit)
+        continuousWalkState = .walking
+        diag("cruise.startPending", ["inCab": elevatorAwaitingEntryDirection != nil, "blocked": continuousWalkBlockReason ?? "busy"])
+        scheduleContinuousWalkStartPoll(session: cruiseSession)
+    }
+
+    /// Waiting is only for states that end by themselves: the arrived/boarded
+    /// cab (WALK steps out) or a walk/turn/composition glide finishing.
+    private var continuousWalkCanWaitToStart: Bool {
+        if elevatorAwaitingEntryDirection != nil { return true }
+        guard let reason = continuousWalkBlockReason else { return true }
+        return reason == "wallInteraction"
+    }
+
+    private func scheduleContinuousWalkStartPoll(session: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self, self.cruiseSession == session, !self.cruiseActive,
+                  self.continuousWalkState != .stopped, let deadline = self.cruiseStartDeadline else { return }
+            if Date() > deadline {
+                self.stopContinuousWalk(reason: "startTimedOut")
+                return
+            }
+            if self.elevatorAwaitingEntryDirection != nil {
+                // Step out through the existing walk-out (what a tap through
+                // the doorway does), then walk on from the landing.
+                if self.canStartElevatorExit, !self.isAnimating {
+                    diag("cruise.exitCab")
+                    self.advance(source: "HUD_EXIT")
+                }
+                self.scheduleContinuousWalkStartPoll(session: session)
+                return
+            }
+            if self.continuousWalkBlockReason == nil, self.canRotate {
+                self.beginContinuousWalkMovement(preservingRequest: true)
+                return
+            }
+            guard self.continuousWalkCanWaitToStart else {
+                self.stopContinuousWalk(reason: "startBlocked:" + (self.continuousWalkBlockReason ?? "?"))
+                return
+            }
+            self.scheduleContinuousWalkStartPoll(session: session)
+        }
+    }
+
+    /// The walk itself (movement is free right now).
+    private func beginContinuousWalkMovement(preservingRequest: Bool = false) {
+        cruiseStartDeadline = nil
+        cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
+        freeWalkGeometry = makeFreeWalkGeometry()
+        let position = cameraNode.position
+        freeWalkCell = freeWalkGeometry?.containingCell(x: Double(position.x), z: Double(position.z), previous: currentCell) ?? currentCell
+        freeMoveHeld = false
+        freeTapWalkActive = false
+        manualFootstepsFromAutoWalk = false
+        cruiseSession += 1
+        if preservingRequest, cruiseRequest != nil {
+            cruiseConsumedSerial = -1                      // a turn queued while waiting stays live
+        } else {
+            cruiseRequestSerial += 1
+            cruiseRequest = nil
+            cruiseConsumedSerial = cruiseRequestSerial
+        }
+        cruiseArc = nil
+        cruiseSpeed = 0
+        cruiseDistance = 0
+        cruiseStall = 0
+        cruiseBumped = false
+        var skip: Set<GridCoordinate> = [freeWalkCell]
+        if let stop = cruiseDecisionStop,
+           hypotf(cameraNode.position.x - stop.x, cameraNode.position.z - stop.z) < 0.3 { skip.insert(stop.cell) }
+        cruiseDecisionSkip = skip
+        cruiseDecisionStop = nil
+        cruiseWalkAfterPivot = false
+        cruiseStartCell = freeWalkCell
+        cruiseGuidance = makeCruiseGuidance()
+        cruiseGeometryLock.lock()
+        cruisePendingGuidance = nil
+        cruiseGeometryLock.unlock()
+        cruiseDoorRequested = nil
+        cruiseClock = 0
+        cruiseDoorSlowUntil = 0
+        cruiseStopReaction = nil
+        let yaw = Double(cameraNode.eulerAngles.y)
+        cruiseHeadingYaw = yaw + shortestDelta(from: yaw, to: nearestCardinal(toYaw: yaw).yaw)
+        cruiseActive = true
+        phase = .freeMove
+        isAnimating = true
+        if let request = cruiseRequest, cruiseConsumedSerial == -1 {
+            continuousWalkState = .walkingQueued(request.turn)
+        } else {
+            continuousWalkState = .walking
+        }
+        diag("cruise.start", ["cell": currentCell, "heading": "\(nearestCardinal(toYaw: yaw))"])
+        scheduleContinuousWalkWatch(session: cruiseSession)
+    }
+
+    /// Ends the walk NOW, in place (main thread). A turn in progress settles
+    /// onto its new cardinal heading over a short glide so the view never
+    /// rests between corridors. Safe to call when nothing is running.
+    func stopContinuousWalk(reason: String) {
+        if reason != "stopButton" { pendingHUDPivot = nil }
+        let wasActive = cruiseActive
+        cruiseActive = false
+        cruiseSession += 1
+        cruiseRequestSerial += 1
+        cruiseRequest = nil
+        cruiseStartDeadline = nil
+        cruiseStopReaction = nil
+        if continuousWalkState != .stopped { continuousWalkState = .stopped }
+        guard wasActive else { return }
+        let arc = cruiseArc
+        cruiseArc = nil
+        cruiseSpeed = 0
+        if phase == .freeMove, !freeMoveHeld, !freeTapWalkActive {
+            isAnimating = false
+            phase = .translate
+            freeWalkFootstepsOn = false
+            freeWalkFootstepsReverse = false
+            SoundEffects.stopWalking()
+            movementPace = 1
+            SoundEffects.setWalkingPace(1)
+            if let arc {
+                // Mid-corner: finish the rotation (position is already legal).
+                let settle = SCNAction.rotateTo(x: 0, y: CGFloat(arc.endYaw), z: 0, duration: 0.18, usesShortestUnitArc: true)
+                settle.timingMode = .easeOut
+                cameraNode.runAction(settle, forKey: Self.freeLookAlignActionKey)
+                if facing != arc.endHeading { facing = arc.endHeading }
+            } else {
+                let heading = nearestCardinal(toYaw: Double(cameraNode.eulerAngles.y))
+                if facing != heading { facing = heading }
+            }
+        }
+        diag("cruise.stop", ["reason": reason, "cell": currentCell, "facing": "\(facing)", "midTurn": arc != nil])
+    }
+
+    /// Main-thread watchdog while walking: anything that takes movement away
+    /// (elevator, interaction, script, gesture, computer...) ends the walk;
+    /// doors and characters that change while walking are picked up here.
+    private func scheduleContinuousWalkWatch(session: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.cruiseActive, self.cruiseSession == session else { return }
+            if let reason = self.continuousWalkBlockReason {
+                self.stopContinuousWalk(reason: reason)
+                return
+            }
+            guard self.isAnimating, self.phase == .freeMove else {
+                self.stopContinuousWalk(reason: "movementTakenOver")
+                return
+            }
+            let fresh = self.makeFreeWalkGeometry()
+            let guidance = self.makeCruiseGuidance()
+            self.cruiseGeometryLock.lock()
+            self.cruisePendingGeometry = fresh
+            self.cruisePendingGuidance = guidance
+            self.cruiseGeometryLock.unlock()
+            self.scheduleContinuousWalkWatch(session: session)
+        }
+    }
+
+    /// Render thread: the walk ends by itself (dead end / blocked).
+    private func endContinuousWalkFromRenderer(reason: String, then follow: (() -> Void)? = nil) {
+        let session = cruiseSession
+        cruiseActive = false
+        cruiseArc = nil
+        cruiseSpeed = 0
+        finishFreeMove()
+        // Queued after finishFreeMove's own main-thread completion, so the
+        // player is stopped (isAnimating false, facing settled) when it runs.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.cruiseSession == session else { return }
+            self.cruiseRequestSerial += 1
+            self.cruiseRequest = nil
+            if self.continuousWalkState != .stopped { self.continuousWalkState = .stopped }
+            diag("cruise.stop", ["reason": reason, "cell": self.currentCell, "facing": "\(self.facing)"])
+            let reaction = follow ?? self.cruiseStopReaction
+            self.cruiseStopReaction = nil
+            reaction?()
+        }
+    }
+
+    private static func unit(_ d: Direction) -> (x: Double, z: Double) {
+        (Double(d.delta.col), Double(d.delta.row))
+    }
+
+    /// Distances (along `heading`, from `x,z`) to the end of the straight
+    /// corridor ahead (stopped at wall clearance) and to the entry point of
+    /// the first `side` opening whose entry point is still ahead.
+    private struct CruiseScan {
+        var stop: Double = .infinity       // distance to where the walk must stop
+        var turn: Double?                  // distance to a corner's entry point
+        var turnSide: Direction?
+        var turnFromRequest = false        // queued by the player (else a forced L)
+        var door: CruiseDoor?              // closed door ending the straight run
+        var elevator = false               // the run ends square at the elevator
+        var decision = false               // Smart WALK: `stop` is just short of a decision
+        var decisionCell: GridCoordinate?
+        var routeTurn = false              // the turn follows an escort's route
+    }
+
+    /// Looks down the corridor ahead (along `heading`, from `x,z`): where it
+    /// ends, the first `side` opening whose entry point is still ahead, and
+    /// what is at the end -- a closed door, the elevator, or a forced L-corner
+    /// (exactly one way on, nothing queued for it).
+    private func cruiseScan(_ g: FreeWalkGeometry, x: Double, z: Double, heading: Direction,
+                            side: Direction?, radius: Double,
+                            routeOnward: [GridCoordinate: Direction]? = nil, decisions: Bool = false) -> CruiseScan {
+        let u = Self.unit(heading)
+        var cell = freeWalkCell
+        var base = -((x - Double(cell.col) * g.cellSize) * u.x + (z - Double(cell.row) * g.cellSize) * u.z)
+        var result = CruiseScan()
+        func open(_ c: GridCoordinate, _ d: Direction) -> Bool {
+            g.openEdges.contains(FreeWalkGeometry.Edge(cell: c, direction: d))
+        }
+        // A side opening that is a BRANCH: open here but not from the cells
+        // just before/after along the walk (so a room's open floor, or a
+        // wide space, never reads as a choice).
+        func isBranch(_ c: GridCoordinate, _ s: Direction) -> Bool {
+            guard open(c, s) else { return false }
+            let before = GridCoordinate(row: c.row - heading.delta.row, col: c.col - heading.delta.col)
+            let after = GridCoordinate(row: c.row + heading.delta.row, col: c.col + heading.delta.col)
+            return !open(before, s) && !open(after, s)
+        }
+        for _ in 0..<16 {
+            if let side, result.turn == nil, g.openEdges.contains(FreeWalkGeometry.Edge(cell: cell, direction: side)) {
+                let d = base - radius
+                if d >= -1e-6 { result.turn = max(0, d); result.turnSide = side; result.turnFromRequest = true }
+            }
+            // Follow the leader: where an escort's route turns, turn (an
+            // explicit LEFT/RIGHT found above still wins).
+            if result.turn == nil, let onward = routeOnward?[cell], onward == heading.left || onward == heading.right,
+               open(cell, onward) {
+                let d = base - radius
+                if d >= -1e-6 { result.turn = max(0, d); result.turnSide = onward; result.turnFromRequest = false; result.routeTurn = true }
+            }
+            // Smart WALK: a genuine choice ahead -> stop on its centre. With a
+            // turn queued, only where that turn exists (pressed too late to
+            // corner: taken from the stop instead).
+            let short = base - (g.cellSize / 2 + Self.smartWalkDecisionStopShort)
+            if decisions, result.turn == nil, !cruiseDecisionSkip.contains(cell), short >= -0.01 {
+                let branches = [heading.left, heading.right].filter { isBranch(cell, $0) }
+                let straight = open(cell, heading)
+                if (straight && !branches.isEmpty) || branches.count >= 2, side.map({ branches.contains($0) }) ?? true {
+                    result.stop = max(0, short)
+                    result.decision = true
+                    result.decisionCell = cell
+                    return result
+                }
+            }
+            guard g.openEdges.contains(FreeWalkGeometry.Edge(cell: cell, direction: heading)) else {
+                result.stop = max(0, base + g.cellSize / 2 - g.wallMargin)
+                if cell == endCell, heading == elevatorMountDirection, elevatorLeftDoor != nil {
+                    result.elevator = true
+                    result.stop = max(0, base)                       // square in front of the doors
+                } else if let door = closedDoor(from: cell, direction: heading) {
+                    result.door = door
+                } else if result.turn == nil {
+                    // Only a CORRIDOR corner: the corner, the corridor it ends
+                    // and the one it turns into are all plain two-way passage
+                    // (never a room's open floor, where "the only way on" is
+                    // just its wall -- following those would circle the room).
+                    func openWays(_ c: GridCoordinate) -> Int {
+                        Direction.allCases.filter { g.openEdges.contains(FreeWalkGeometry.Edge(cell: c, direction: $0)) }.count
+                    }
+                    let ways = [heading.left, heading.right].filter { g.openEdges.contains(FreeWalkGeometry.Edge(cell: cell, direction: $0)) }
+                    let behind = GridCoordinate(row: cell.row - heading.delta.row, col: cell.col - heading.delta.col)
+                    if ways.count == 1, openWays(cell) == 2, openWays(behind) <= 2,
+                       openWays(GridCoordinate(row: cell.row + ways[0].delta.row, col: cell.col + ways[0].delta.col)) <= 2 {
+                        let d = base - radius
+                        if d >= -1e-6 { result.turn = max(0, d); result.turnSide = ways[0]; result.turnFromRequest = false }
+                    }
+                }
+                return result
+            }
+            cell = GridCoordinate(row: cell.row + heading.delta.row, col: cell.col + heading.delta.col)
+            base += g.cellSize
+        }
+        return result
+    }
+
+    /// Render thread: one frame of the continuous walk.
+    private func stepContinuousWalk(dt: Double) {
+        cruiseGeometryLock.lock()
+        if let fresh = cruisePendingGeometry { freeWalkGeometry = fresh; cruisePendingGeometry = nil }
+        if let guidance = cruisePendingGuidance { cruiseGuidance = guidance; cruisePendingGuidance = nil }
+        cruiseGeometryLock.unlock()
+        guard let g = freeWalkGeometry else { endContinuousWalkFromRenderer(reason: "noGeometry"); return }
+        cruiseClock += dt
+        let position = cameraNode.position
+        let px = Double(position.x), pz = Double(position.z)
+
+        if var arc = cruiseArc {
+            // ---- In the corner: follow the quarter circle at turn speed.
+            let turnSpeed = Self.cruiseTurnSpeed(radius: arc.radius)
+            cruiseSpeed += (turnSpeed - cruiseSpeed) * (1 - exp(-dt / 0.08))
+            let step = max(0.2, cruiseSpeed) * dt
+            arc.travelled = min(arc.length, arc.travelled + step)
+            let theta = arc.travelled / arc.radius
+            let tx = arc.centerX - arc.radius * arc.sideX * cos(theta) + arc.radius * arc.headX * sin(theta)
+            let tz = arc.centerZ - arc.radius * arc.sideZ * cos(theta) + arc.radius * arc.headZ * sin(theta)
+            let next = g.slideEndpoint(from: SCNVector3(position.x, eyeHeight, position.z), dx: tx - px, dz: tz - pz)
+            let moved = Double(hypotf(next.x - position.x, next.z - position.z))
+            let wanted = hypot(tx - px, tz - pz)
+            cameraNode.position = next
+            let f = arc.travelled / arc.length
+            let yaw = arc.startYaw + (arc.endYaw - arc.startYaw) * f
+            cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+            freeWalkTrackCell(next)
+            arc.stall = wanted > 0.001 && moved < wanted * 0.5 ? arc.stall + dt : 0
+            if arc.stall > 0.12 {
+                // Something (a character) stands in the corner: finish facing
+                // the new corridor and stop. Never forces through.
+                cameraNode.eulerAngles = SCNVector3(0, Float(arc.endYaw), 0)
+                cruiseHeadingYaw = arc.endYaw
+                cruiseArc = nil
+                endContinuousWalkFromRenderer(reason: "blockedInTurn")
+                return
+            }
+            if arc.travelled >= arc.length - 1e-9 {
+                cameraNode.eulerAngles = SCNVector3(0, Float(arc.endYaw), 0)
+                cruiseHeadingYaw = arc.endYaw
+                cruiseArc = nil
+                let serial = arc.serial, session = cruiseSession, heading = arc.endHeading
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.cruiseSession == session else { return }
+                    // Clear the lit arrow -- unless a NEW request came in meanwhile.
+                    if self.cruiseRequestSerial == serial, case .walkingQueued = self.continuousWalkState {
+                        self.cruiseRequest = nil
+                        self.continuousWalkState = .walking
+                    }
+                    diag("cruise.turnDone", ["cell": self.currentCell, "heading": "\(heading)"])
+                }
+            } else {
+                cruiseArc = arc
+            }
+            cruiseDistance += moved
+            setFreeWalkFootsteps(moved > 0.0005)
+            SoundEffects.setWalkingPace(Float(max(0.6, min(1.5, cruiseSpeed / travelSpeed))))
+            return
+        }
+
+        // ---- Straight: hold the cardinal heading (gently re-aligning).
+        var yaw = Double(cameraNode.eulerAngles.y)
+        if yaw != cruiseHeadingYaw {
+            yaw = Self.rateLimitedYaw(current: yaw, target: cruiseHeadingYaw, maxStep: Self.heldWalkMaxTurnRate * dt)
+            cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+        }
+        let heading = nearestCardinal(toYaw: cruiseHeadingYaw)
+        var request: (turn: ContinuousWalkTurn, serial: Int)?
+        if let r = cruiseRequest, r.serial != cruiseConsumedSerial { request = r }
+        let side: Direction? = request.map { $0.turn == .left ? heading.left : heading.right }
+        let band = g.cellSize / 2 - g.wallMargin - 0.02
+        let radius = max(0.05, min(Self.cruiseTurnRadius, band))
+        let routeOnward = cruiseGuidance.routeOnward
+        var scan = cruiseScan(g, x: px, z: pz, heading: heading, side: side, radius: radius, routeOnward: routeOnward,
+                              decisions: smartWalkDecisionStopsOn && routeOnward == nil)
+        // A capped landing spot ahead (Juanita's counter, Tinky's desk): the
+        // walk ends at its pose; the landing itself then runs as for a tap walk.
+        var landing = false
+        // It beats a forced corner (the cap lies before the corridor's end,
+        // so that corner is the room's wall round it -- e.g. round behind
+        // Tinky's desk); a turn the player queued still wins if it comes first.
+        if let cap = cruiseLandingCap(x: px, z: pz, heading: heading, cellSize: g.cellSize), cap < scan.stop,
+           !scan.turnFromRequest || (scan.turn.map({ cap < $0 }) ?? true) {
+            scan.stop = cap
+            scan.turn = nil
+            scan.door = nil
+            scan.elevator = false
+            scan.decision = false
+            landing = true
+        }
+
+        // Speed: sustained pace like a hold (1.5x after three cells), braking
+        // for the corridor's end and for a queued corner's entry speed.
+        let sustained = travelSpeed * (cruiseDistance >= 3 * g.cellSize ? 1.5 : 1.0)
+        var limit = min(sustained, (2 * Self.cruiseBrake * scan.stop).squareRoot())
+        let turnSpeed = Self.cruiseTurnSpeed(radius: radius)
+        if let t = scan.turn { limit = min(limit, (turnSpeed * turnSpeed + 2 * Self.cruiseBrake * t).squareRoot()) }
+        if cruiseClock < cruiseDoorSlowUntil { limit = min(limit, Self.cruiseDoorSpeed) }
+        // A closed door ahead: ask for it once, early enough to keep walking.
+        if let door = scan.door, door != cruiseDoorRequested,
+           scan.stop <= cruiseSpeed * cruiseSpeed / (2 * Self.cruiseBrake) + Self.cruiseDoorLead {
+            cruiseDoorRequested = door
+            cruiseDoorSlowUntil = cruiseClock + 0.9
+            let session = cruiseSession
+            DispatchQueue.main.async { [weak self] in self?.continuousWalkReachedDoor(door, session: session) }
+        }
+        if cruiseSpeed < limit { cruiseSpeed = min(limit, cruiseSpeed + Self.cruiseAccel * dt) } else { cruiseSpeed = limit }
+        var step = cruiseSpeed * dt
+
+        // The corner starts exactly at its entry point.
+        var startTurn = false
+        if let t = scan.turn, t <= step + 1e-6 { step = t; startTurn = true }
+        // A decision / landing stop is arrived at exactly (never overshot
+        // on a long frame) and ends the walk in the same frame.
+        let arriving = !startTurn && (scan.decision || landing) && step >= scan.stop - 0.01
+        if arriving { step = scan.stop }
+        // At the corridor's end with nothing to turn into: stop here.
+        if !startTurn, !arriving, scan.stop < 0.01 {
+            if scan.elevator {
+                endContinuousWalkFromRenderer(reason: "elevator") { [weak self] in self?.continuousWalkBoardElevator() }
+            } else {
+                endContinuousWalkFromRenderer(reason: "deadEnd")
+            }
+            return
+        }
+
+        let forward = FreeWalkGeometry.forward(yaw: yaw)
+        let next = g.slideEndpoint(from: SCNVector3(position.x, eyeHeight, position.z), dx: forward.x * step, dz: forward.z * step)
+        let moved = Double(hypotf(next.x - position.x, next.z - position.z))
+        cameraNode.position = next
+        cruiseDistance += moved
+        freeWalkTrackCell(next)
+        setFreeWalkFootsteps(moved > 0.0005)
+        SoundEffects.setWalkingPace(Float(max(0.6, min(1.5, cruiseSpeed / travelSpeed))))
+
+        if arriving {
+            if landing {
+                endContinuousWalkFromRenderer(reason: "landing")   // finishFreeMove -> landAtSpotIfApproaching
+            } else {
+                let late = request?.turn
+                let cell = scan.decisionCell ?? freeWalkCell
+                endContinuousWalkFromRenderer(reason: "decision") { [weak self] in self?.continuousWalkDecisionStop(cell: cell, late: late) }
+            }
+            return
+        }
+
+        if startTurn, let side = scan.turnSide {
+            // A queued turn is consumed; a forced L-corner leaves any queued
+            // request for a later opening untouched.
+            var serial = -1
+            if scan.turnFromRequest, let request { cruiseConsumedSerial = request.serial; serial = request.serial }
+            if !scan.turnFromRequest { diag(scan.routeTurn ? "cruise.routeTurn" : "cruise.forcedTurn", ["toward": "\(side)"]) }
+            let u = Self.unit(heading), s = Self.unit(side)
+            let endYaw = Self.yaw(facing: (x: s.x, z: s.z), near: cruiseHeadingYaw)
+            cruiseArc = CruiseArc(centerX: Double(next.x) + radius * s.x, centerZ: Double(next.z) + radius * s.z,
+                                  headX: u.x, headZ: u.z, sideX: s.x, sideZ: s.z, radius: radius,
+                                  startYaw: yaw, endYaw: endYaw, endHeading: side, serial: serial)
+            cruiseStall = 0
+            return
+        }
+
+        // Blocked (a character, a misaligned slide into a wall): stop once,
+        // never keep pushing. A character on guard gets her one reaction.
+        if step > 0.001, moved < step * 0.3 {
+            cruiseStall += dt
+            if !characterKeepOuts.isEmpty, !cruiseBumped,
+               segmentMeetsCharacter(x: Double(next.x), z: Double(next.z), dx: forward.x * 0.3, dz: forward.z * 0.3) {
+                cruiseBumped = true
+                DispatchQueue.main.async { [weak self] in self?.onCharacterBlockBump?() }
+            }
+            if cruiseStall > 0.12 { endContinuousWalkFromRenderer(reason: "blocked"); return }
+        } else {
+            cruiseStall = 0
+        }
+    }
+
+    /// Oct 10: set by the lobby's ceremonial walk; consumed when it finishes.
+    private var ceremonialElevatorAutoOpen = false
+    static let ceremonialElevatorOpenDelay: TimeInterval = 0.6
+
+    private func scheduleCeremonialElevatorOpen() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.ceremonialElevatorOpenDelay) { [weak self] in
+            guard let self, self.currentCell == self.endCell, self.canRotate, !self.elevatorInUse else {
+                diag("ceremony.elevatorAutoOpen", ["result": "skipped"])
+                return
+            }
+            diag("ceremony.elevatorAutoOpen", ["result": "opening"])
+            self.openElevator()
+        }
     }
 
     private var lastTime: TimeInterval = 0
@@ -3391,7 +4491,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Rotate in place to face a new compass direction — the left/right
     /// D-pad buttons. Pure pivot, no movement, and doesn't touch
     /// currentCell/history at all.
-    func rotate(toward direction: Direction) {
+    func rotate(toward direction: Direction, durationPerQuarterTurn: Double? = nil) {
         if activePictureMenu != nil { cancelPictureMenu() }
         if activePhotoBooth != nil, photoBoothCameraState != "captured" { cancelPhotoBooth() }
         if activeTicTacToeTerminal != nil { cancelTicTacToeTerminal() }
@@ -3414,6 +4514,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         segmentProgress = 0
         pivotStartYaw = Double(cameraNode.eulerAngles.y)
         pivotTargetYaw = pivotStartYaw + shortestDelta(from: pivotStartYaw, to: direction.yaw)
+        // Oct 10: gestures (no duration passed) keep the original quick pivot.
+        // The HUD passes a per-90-degree time, scaled by the actual angle
+        // (free look can leave the view a little off-cardinal).
+        if let perQuarter = durationPerQuarterTurn {
+            standalonePivotDuration = max(0.12, perQuarter * abs(pivotTargetYaw - pivotStartYaw) / (.pi / 2))
+        } else {
+            standalonePivotDuration = pivotDuration
+        }
         isAnimating = true
         navLog("rotate(toward: \(direction)) started from facing=\(facing)")
     }
@@ -4254,7 +5362,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             return
         }
         guard canGoForward else {
-            if forwardIsBlockedByWall { SoundEffects.playHitWall() }
+            if canRotate, isBlockedByCharacter(from: currentCell, direction: facing) {
+                onCharacterBlockBump?()                                  // Oct 9: Juanita, not a wall
+            } else if forwardIsBlockedByWall { SoundEffects.playHitWall() }
             navLog("advance() ignored -- canGoForward=false (isAnimating=\(isAnimating), isDragRotating=\(isDragRotating), elevatorInUse=\(elevatorInUse), facing=\(facing), open=\(openDirections))")
             return
         }
@@ -4376,6 +5486,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         do {
             var previousCell = currentCell
             for (index, step) in steps.enumerated() {
+                if isBlockedByCharacter(from: previousCell, direction: step.heading) {
+                    gatedSteps = Array(steps[0..<index])
+                    gatedOutcome = .steppedForward
+                    break
+                }
                 if let anchor = roomEntranceDoorAnchor(from: previousCell, direction: step.heading), !openRoomEntranceDoors.contains(anchor) {
                     gatedSteps = Array(steps[0..<index])
                     gatedOutcome = .steppedForward
@@ -4719,6 +5834,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // slower so the opening reveal has time to breathe."
         if isCeremonialEntrance {
             translateDurationScale = 1.7
+            ceremonialElevatorAutoOpen = true
         }
         phase = .translate
         // Free look: straighten to `facing` first if looking elsewhere.
@@ -4768,6 +5884,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// already-gobbled objects permanently missing.
     func reset() {
         defer { refreshElevatorMissionSign() }
+        stopContinuousWalk(reason: "reset")
         setWalkingHeld(false)
         heldEndpointLookActive = false
         freeDragMoveActive = false
@@ -5727,7 +6844,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// do it. Preserved exactly as it was in round 2 -- Eddie, round 3:
     /// "Preserve the existing bathroom-door OPENING animation."
     func openBathroomDoor(at coord: GridCoordinate) {
-        guard canRotate, !openBathroomDoors.contains(coord), let doorDirection = bathroomDoors[coord], isAdjacentToBathroomDoor(coord) else { return }
+        guard canRotate, !openBathroomDoors.contains(coord), bathroomDoors[coord] != nil, isAdjacentToBathroomDoor(coord) else { return }
+        swingBathroomDoorOpen(at: coord)
+    }
+
+    /// Oct 10: the swing itself, shared by a tap/OPEN at the door and a
+    /// continuous walk arriving at it (its own guards stay with the caller).
+    private func swingBathroomDoorOpen(at coord: GridCoordinate) {
+        guard !openBathroomDoors.contains(coord), let doorDirection = bathroomDoors[coord] else { return }
         openBathroomDoors.insert(coord)
         if let hinge = scene?.rootNode.childNode(withName: "bathroomDoor_\(coord.row)_\(coord.col)", recursively: true) {
             let swing = SCNAction.rotateBy(x: 0, y: bathroomDoorSwingAngle(for: doorDirection), z: 0, duration: 0.5)
@@ -5735,7 +6859,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             hinge.runAction(swing)
         }
         UISelectionFeedbackGenerator().selectionChanged()
-        showMessage("The door swings open.")
     }
 
     /// Eddie, Sept 14 (round 3): "close behind the player." The exact
@@ -5811,7 +6934,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// door -- "reusing the Bathroom Room's proven interaction model
     /// exactly," per Eddie, Sept 15.
     func openWindowRoomDoor(at coord: GridCoordinate) {
-        guard canRotate, !openWindowRoomDoors.contains(coord), let doorDirection = windowRooms[coord]?.direction, isAdjacentToWindowRoomDoor(coord) else { return }
+        guard canRotate, !openWindowRoomDoors.contains(coord), windowRooms[coord] != nil, isAdjacentToWindowRoomDoor(coord) else { return }
+        swingWindowRoomDoorOpen(at: coord)
+    }
+
+    /// Oct 10: shared swing (see swingBathroomDoorOpen).
+    private func swingWindowRoomDoorOpen(at coord: GridCoordinate) {
+        guard !openWindowRoomDoors.contains(coord), let doorDirection = windowRooms[coord]?.direction else { return }
         openWindowRoomDoors.insert(coord)
         if let hinge = scene?.rootNode.childNode(withName: "windowRoomDoor_\(coord.row)_\(coord.col)", recursively: true) {
             let swing = SCNAction.rotateBy(x: 0, y: bathroomDoorSwingAngle(for: doorDirection), z: 0, duration: 0.5)
@@ -5819,7 +6948,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             hinge.runAction(swing)
         }
         UISelectionFeedbackGenerator().selectionChanged()
-        showMessage("The door swings open.")
     }
 
     /// The exact reverse of openWindowRoomDoor's own rotation, only
@@ -5889,10 +7017,24 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard canRotate, !openRoomEntranceDoors.contains(coord), let doorDirection = roomEntranceDoors[coord], isAdjacentToRoomEntranceDoor(coord) else { return }
         // Oct 6 (Fredo, "kiosk first"): someone on the other side may answer
         // the door instead (FredDoorGuard). True = handled; nothing opens.
+        // Oct 9: belt and braces -- whatever path reaches here, a guarded
+        // door never opens for the player.
+        if roomEntranceDoorGuarded?(coord) == true {
+            guardedRoomEntranceDoorTapped(coord)
+            return
+        }
         if let intercept = roomEntranceDoorIntercept, intercept(coord) {
             diag("roomEntranceDoor.intercepted", ["row": coord.row, "col": coord.col])
             return
         }
+        swingRoomEntranceDoorOpen(at: coord)
+    }
+
+    /// Oct 10: the swing itself, shared by the player's own open (above, after
+    /// its guarded/intercept checks) and a continuous walk arriving at the
+    /// door (continuousWalkReachedDoor runs the same two checks first).
+    private func swingRoomEntranceDoorOpen(at coord: GridCoordinate) {
+        guard !openRoomEntranceDoors.contains(coord), let doorDirection = roomEntranceDoors[coord] else { return }
         openRoomEntranceDoors.insert(coord)
         // Sept 27 (Room Entrance open sound): fires exactly once per
         // real open transition -- this guard above already refuses to
@@ -5911,7 +7053,6 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             pair.runAction(swing)
         }
         UISelectionFeedbackGenerator().selectionChanged()
-        showMessage("The door swings open.")
     }
 
     /// Oct 6 (Candy goes home): the doors cycle for a character on his own --
@@ -5946,9 +7087,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             a.timingMode = .easeInEaseOut
             return a
         }
-        SoundEffects.playElevatorArrival()
+        // Oct 9: a CHARACTER's elevator call is a building sound heard from
+        // wherever the player is -- quieter with distance and behind walls or
+        // a shut door. (The player's own rides keep calling
+        // playElevatorArrival() at full volume.)
+        var chimeGain: Float = 1
+        if let frame = elevatorDoorwayFrame() {
+            let outside = frame.center + frame.outward * Float(cellSize) * 0.5     // the elevator's hallway cell
+            chimeGain = CritterAudio.buildingGain(at: SIMD3<Float>(outside.x, 1.5, outside.y))
+        }
+        SoundEffects.playElevatorArrival(gain: chimeGain)
         let delay = SCNAction.wait(duration: SoundEffects.elevatorDoorOpeningDelay)
-        diag("elevator.character.opening", [:])
+        diag("elevator.character.opening", ["chimeGain": Double(chimeGain)])
         left.runAction(.sequence([delay, move(left, leftOpen)]))
         right.runAction(.sequence([delay, move(right, rightOpen)])) { [weak self] in
             DispatchQueue.main.async {
@@ -5985,8 +7135,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Oct 6 (Fredo): asked first whenever the player opens a Room Entrance
     /// door; returning true means a character handled it (nothing opens).
     var roomEntranceDoorIntercept: ((GridCoordinate) -> Bool)?
+
+    /// Oct 9 (Juanita on guard): is this Room Entrance guarded by a
+    /// character right now? A pure question (asked while resolving taps) --
+    /// the answer comes from the guard's own state (AdministrationExitGuard).
+    var roomEntranceDoorGuarded: ((GridCoordinate) -> Bool)?
+    /// ...and what happens when the player tries those doors anyway.
+    var onGuardedRoomEntranceDoorTap: ((GridCoordinate) -> Void)?
+    static let guardedDoorKind = "roomEntranceDoorGuarded"
+
+    /// A guarded door was tried: it does not open; the guard reacts.
+    func guardedRoomEntranceDoorTapped(_ coord: GridCoordinate) {
+        diag("roomEntranceDoor.guardedTap", ["row": coord.row, "col": coord.col])
+        onGuardedRoomEntranceDoorTap?(coord)
+    }
+
+    /// Oct 9: a character shuts an open Room Entrance (Juanita taking her
+    /// post) -- the ordinary close swing and sound, nothing else.
+    func closeRoomEntranceDoorForCharacter(at coord: GridCoordinate) {
+        guard openRoomEntranceDoors.contains(coord), !cosmeticallyOpenRoomEntranceDoors.contains(coord) else { return }
+        closeRoomEntranceDoor(at: coord)
+        diag("roomEntranceDoor.closedByCharacter", ["row": coord.row, "col": coord.col])
+    }
     /// Doors a character is holding open for show only (never passable).
-    private var cosmeticallyOpenRoomEntranceDoors: Set<GridCoordinate> = []
+    private var cosmeticallyOpenRoomEntranceDoors: Set<GridCoordinate> = [] {
+        didSet { if cosmeticallyOpenRoomEntranceDoors != oldValue { publishAcousticDoors() } }
+    }
 
     /// Oct 6 (Fredo leads): a character pushes a Room Entrance door open for
     /// the player -- the same swing, sound and passability as the player's own
@@ -6460,6 +7634,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// outside an active ride.
     func beginElevatorCameraDrag() {
         guard isElevatorRideInProgress else { return }
+        // Oct 10: a finger takes over from a HUD cab pivot (and a HUD pivot
+        // starting replaces nothing: it calls this before running its spin).
+        cameraNode.removeAction(forKey: Self.elevatorHUDPivotActionKey)
+        elevatorHUDPivotRunning = false
         elevatorLookRevision += 1
         // Eddie: "the moment intentional player steering begins, the
         // current automatic camera rotation must yield... do not let
@@ -6612,6 +7790,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                   "hasClosedPositions": elevatorLeftClosedPosition != nil && elevatorRightClosedPosition != nil])
             return
         }
+        ElevatorCardReader.presentArrival(in: scene?.rootNode)              // Oct 9: still green from the trip
 
         // Eddie, Sept 16 (atomic arrival presentation): every property
         // set below is animatable, and SceneKit implicitly animates
@@ -6767,6 +7946,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
         controlledArrivalDoorsOpened = true
         onArrivalDoorsOpening?()
+        ElevatorCardReader.arrivalDoorsOpening(in: scene?.rootNode)         // Oct 9: trip over -> standby
 
         let alongWallX: CGFloat
         let alongWallZ: CGFloat
@@ -7911,6 +9091,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             diag("elevator.button.inert", ["button": best.floor, "floor": floorNumber])
             return true
         }
+        // Oct 9: the employee-ID reader (ElevatorCardReader). Refused: the
+        // button doesn't light, the car stays put, departure stays armed.
+        guard readEmployeeID(forFloor: best.floor, doors: "sealed") else { return true }
         // Light the chosen button (its own material copy -- the caps share one).
         let lit = SCNMaterial()
         lit.lightingModel = .physicallyBased
@@ -7968,6 +9151,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             diag("elevator.button.inert", ["button": best.floor, "floor": floorNumber, "doors": "open"])
             return true
         }
+        // Oct 9: the employee-ID reader. Refused: doors stay open, nothing moves.
+        guard readEmployeeID(forFloor: best.floor, doors: "open") else { return true }
         let lit = SCNMaterial()
         lit.lightingModel = .physicallyBased
         lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
@@ -8007,6 +9192,29 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Oct 5 (Admission): the same press a tap makes -- cap push, click, the
     /// button lights -- then the normal departure (elevatorDepart). Skipped
     /// if the car is no longer idle-waiting (e.g. the player pressed first).
+    /// Oct 9 -- the cab's employee-ID reader, for a PLAYER's button press
+    /// (automatic rides never come here). True = the trip may go: with an ID
+    /// the lamp blinks green; a visitor riding to the Lobby/Administration
+    /// gets no read at all. False = refused: a brief red blink and the
+    /// denial beep -- nothing else changes, so repeated presses are harmless.
+    private func readEmployeeID(forFloor floor: Int, doors: String) -> Bool {
+        let hasID = Admission.isCompleted
+        let root = scene?.rootNode
+        guard ElevatorAccess.permits(floor, hasEmployeeID: hasID) else {
+            ElevatorCardReader.tripAuthorized = false
+            ElevatorCardReader.flash(granted: false, in: root)
+            ElevatorCardReader.playDenied(on: cameraNode)
+            diag("elevator.access.denied", ["from": floorNumber, "to": floor, "doors": doors])
+            return false
+        }
+        // Oct 9: green the moment the floor is chosen, held for the whole trip
+        // (the arriving cab picks it up -- ElevatorCardReader.tripAuthorized).
+        ElevatorCardReader.tripAuthorized = hasID
+        if hasID { ElevatorCardReader.showGranted(in: root) }
+        diag("elevator.access.granted", ["from": floorNumber, "to": floor, "employeeID": hasID, "doors": doors])
+        return true
+    }
+
     private func autoPressElevatorButton(floor: Int) {
         guard isElevatorWaitingForFloor, elevatorInUse, elevatorDestinationFloor == nil,
               let depart = elevatorDepart else { return }
@@ -8023,6 +9231,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             cap.geometry?.materials = [lit]
         }
         ElevatorRideSound.click(on: cameraNode)
+        // Oct 9: cosmetic only (automatic rides are never gated): an ID holder
+        // riding sees their reader green like any authorized trip.
+        ElevatorCardReader.tripAuthorized = Admission.isCompleted
+        if Admission.isCompleted { ElevatorCardReader.showGranted(in: scene?.rootNode) }
         elevatorDepart = nil
         diag("elevator.button.autoPressed", ["from": floorNumber, "to": floor, "reason": "admission"])
         depart(floor)
@@ -8341,12 +9553,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// (~0.46) clamps to the 1.6x ceiling rather than scaling all the
     /// way up, so it stays a brightness fix and never turns into
     /// infinite draw distance.
+    private var appliedAspectMultiplier: Double = -1
     private func applyAspectCompensation(_ renderer: SCNSceneRenderer) {
         guard baseFogEnd > 0 || baseAttenEnd > 0 else { return }
         let viewport = renderer.currentViewport
         guard viewport.height > 0 else { return }
         let aspect = Double(viewport.width / viewport.height)
         let multiplier = min(1.6, max(1.0, 2.0 / max(aspect, 0.3)))
+        // Oct 9 (heating): same values every frame unless the viewport
+        // changes shape -- write them only when the multiplier changes,
+        // instead of re-setting fog and the headlamp 60 times a second.
+        guard multiplier != appliedAspectMultiplier else { return }
+        appliedAspectMultiplier = multiplier
 
         if baseFogEnd > 0, let scene {
             scene.fogStartDistance = Self.convert(baseFogStart * multiplier)
@@ -8370,6 +9588,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
 
     func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+        RenderHealth.shared.frameRendered()                               // Oct 9: measurement only
         if renderer.currentViewport.width > 0, renderer.currentViewport.height > 0 {
             let door = elevatorRightDoor?.presentation.position
             ElevatorArrivalTrace.shared.rendered(self, scene: scene, doorPosition: door.map { ($0.x, $0.z) })
@@ -8407,6 +9626,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             return
 
         case .freeMove:
+            // Oct 10: the continuous walk (WALK button) owns this movement.
+            if cruiseActive { stepContinuousWalk(dt: dt); return }
             guard let geometry = freeWalkGeometry else { finishFreeMove(); return }
             if freeMoveHeld {
                 // Released: stop right here. No completion, no snap.
@@ -8430,12 +9651,21 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 let moved = Double(hypotf(next.x - position.x, next.z - position.z))
                 cameraNode.position = next
                 if throttle > 0 { heldDistance += moved }
+                // Oct 9: holding into a character on guard -- she reacts.
+                if throttle > 0, !characterKeepOuts.isEmpty, moved < step * 0.5,
+                   segmentMeetsCharacter(x: Double(next.x), z: Double(next.z), dx: forward.x * 0.3, dz: forward.z * 0.3) {
+                    onCharacterBlockBump?()
+                }
                 // Footsteps whenever this hold is actually moving (Oct 3
                 // stabilization: a long-press walk from standing is no longer
                 // silent); silent while stopped or pressed against a wall.
                 setFreeWalkFootsteps(moved > 0.0005, reverse: throttle < 0)
                 freeWalkTrackCell(next)
             } else {
+                // Oct 10: only a live tap walk drives this branch (a movement
+                // just stopped in place from the main thread must not replay
+                // a stale tap path on a frame already in flight).
+                guard freeTapWalkActive else { return }
                 // Tap-to-stop: end right here -- this position, this yaw.
                 if freeTapStopRequested {
                     freeTapStopRequested = false
@@ -8465,7 +9695,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             }
 
         case .pivot:
-            segmentProgress += dt / pivotDuration
+            segmentProgress += dt / (standaloneRotation ? standalonePivotDuration : pivotDuration)
             let t = min(1.0, segmentProgress)
             let eased = t * t * (3 - 2 * t)
             let yaw = pivotStartYaw + eased * (pivotTargetYaw - pivotStartYaw)
@@ -8504,6 +9734,17 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                             self.activateCheckersTerminal(at: self.currentCell)
                             self.activateWoidleTerminal(at: self.currentCell)
                             self.logNavSync("TURN COMPLETE")
+                            // Oct 10: a LEFT/RIGHT pressed during this pivot
+                            // runs now, after it -- never overlapping it.
+                            self.hudPivotInFlight = false
+                            let walkOn = self.cruiseWalkAfterPivot
+                            self.cruiseWalkAfterPivot = false
+                            if let next = self.pendingHUDPivot {
+                                self.pendingHUDPivot = nil
+                                self.continuousWalkTurnTapped(next)
+                            } else if walkOn {
+                                self.startContinuousWalk()      // Smart WALK: turned at a decision -- go
+                            }
                         }
                         navLog("rotate complete -- now facing \(newFacing)")
                     }
@@ -8589,6 +9830,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                             self.activateCheckersTerminal(at: newCell)
                             self.activateWoidleTerminal(at: newCell)
                             self.logNavSync("WALK FINISHED — outcome=\(outcome)")
+                            // Oct 10 (contextual navigation): the lobby's
+                            // ceremonial walk no longer waits for a tap at the
+                            // elevator -- the doors open on their own and the
+                            // ordinary boarding sequence continues.
+                            if self.ceremonialElevatorAutoOpen {
+                                self.ceremonialElevatorAutoOpen = false
+                                if newCell == self.endCell { self.scheduleCeremonialElevatorOpen() }
+                            }
                             navLog("walk finished at \(newCell) facing \(newFacing), outcome=\(outcome)")
                             // Eddie, Sept 6: wanted a cue the moment the
                             // walk locks into an intersection (a real fork
@@ -8659,6 +9908,39 @@ struct FreeWalkGeometry {
     /// Collision sampling step along a movement segment.
     var sampleStep: Double = 0.02
 
+    /// Oct 9 (Juanita in the doorway): a circle around a CHARACTER the
+    /// player's eyes may not enter -- a conversational distance, so the
+    /// camera never reaches her body. Unlike walls it is never "slid into":
+    /// a player already inside one (she arrived next to them) may only move
+    /// AWAY from its centre, never closer.
+    struct KeepOut: Hashable {
+        let x: Double
+        let z: Double
+        let radius: Double
+    }
+    var keepOuts: [KeepOut] = []
+
+    func insideKeepOut(x: Double, z: Double) -> Bool {
+        keepOuts.contains { k in ((x - k.x) * (x - k.x) + (z - k.z) * (z - k.z)).squareRoot() < k.radius }
+    }
+
+    /// The keep-out rule for one step: entering is refused; inside, only
+    /// steps that do not get closer to the centre.
+    private func keepOutAllows(fromX: Double, fromZ: Double, toX: Double, toZ: Double) -> Bool {
+        for k in keepOuts {
+            let to = ((toX - k.x) * (toX - k.x) + (toZ - k.z) * (toZ - k.z)).squareRoot()
+            guard to < k.radius else { continue }
+            let from = ((fromX - k.x) * (fromX - k.x) + (fromZ - k.z) * (fromZ - k.z)).squareRoot()
+            if to < from - 1e-9 { return false }
+        }
+        return true
+    }
+
+    /// One movement step: walls exactly as before, plus the keep-outs.
+    func canStep(fromX: Double, fromZ: Double, toX: Double, toZ: Double) -> Bool {
+        isWallLegal(x: toX, z: toZ) && keepOutAllows(fromX: fromX, fromZ: fromZ, toX: toX, toZ: toZ)
+    }
+
     /// Camera forward on the floor plane for a SceneKit yaw (0 = north = -z,
     /// +pi/2 = west), matching Direction.yaw.
     static func forward(yaw: Double) -> (x: Double, z: Double) {
@@ -8682,7 +9964,14 @@ struct FreeWalkGeometry {
         return Self.containingCell(x: x, z: z, cellSize: cellSize)
     }
 
+    /// A position the player may occupy: walls and every keep-out.
     func isLegal(x: Double, z: Double) -> Bool {
+        isWallLegal(x: x, z: z) && !insideKeepOut(x: x, z: z)
+    }
+
+    /// The building alone (cells, closed sides, corners) -- the rule
+    /// isLegal was before keep-outs existed.
+    func isWallLegal(x: Double, z: Double) -> Bool {
         let cell = Self.containingCell(x: x, z: z, cellSize: cellSize)
         guard cells.contains(cell) else { return false }
         let dx = x - Double(cell.col) * cellSize
@@ -8763,7 +10052,7 @@ struct FreeWalkGeometry {
     func slidePath(from start: SCNVector3, dx: Double, dz: Double) -> [SCNVector3] {
         let length = (dx * dx + dz * dz).squareRoot()
         guard length > 0 else { return [start] }
-        guard isLegal(x: Double(start.x), z: Double(start.z)) else {
+        guard isWallLegal(x: Double(start.x), z: Double(start.z)) else {
             let end = SCNVector3(start.x + Float(dx), start.y, start.z + Float(dz))
             return [start, legalEndpoint(from: start, to: end)]
         }
@@ -8772,13 +10061,13 @@ struct FreeWalkGeometry {
         var x = Double(start.x), z = Double(start.z)
         var path = [start]
         for _ in 0..<count {
-            if isLegal(x: x + sx, z: z + sz) {
+            if canStep(fromX: x, fromZ: z, toX: x + sx, toZ: z + sz) {
                 x += sx; z += sz
             } else if let corner = cornerSlideStep(x: x, z: z, sx: sx, sz: sz) {
                 x += corner.dx; z += corner.dz
             } else {
-                let xOK = abs(sx) > 1e-9 && isLegal(x: x + sx, z: z)
-                let zOK = abs(sz) > 1e-9 && isLegal(x: x, z: z + sz)
+                let xOK = abs(sx) > 1e-9 && canStep(fromX: x, fromZ: z, toX: x + sx, toZ: z)
+                let zOK = abs(sz) > 1e-9 && canStep(fromX: x, fromZ: z, toX: x, toZ: z + sz)
                 if xOK, !zOK || abs(sx) >= abs(sz) { x += sx }
                 else if zOK { z += sz }
                 else { break }
@@ -8797,14 +10086,16 @@ struct FreeWalkGeometry {
         let dx = Double(end.x - start.x), dz = Double(end.z - start.z)
         let length = (dx * dx + dz * dz).squareRoot()
         guard length > 0 else { return start }
-        let strict = isLegal(x: Double(start.x), z: Double(start.z))
+        let strict = isWallLegal(x: Double(start.x), z: Double(start.z))
         let count = max(1, Int((length / sampleStep).rounded(.up)))
         var last = start
         for i in 1...count {
             let f = Double(i) / Double(count)
             let x = Double(start.x) + dx * f, z = Double(start.z) + dz * f
-            let ok = strict ? isLegal(x: x, z: z)
-                            : cells.contains(Self.containingCell(x: x, z: z, cellSize: cellSize))
+            // Oct 9: keep-outs hold in both modes (never closer to a character).
+            let keep = keepOutAllows(fromX: Double(last.x), fromZ: Double(last.z), toX: x, toZ: z)
+            let ok = keep && (strict ? isWallLegal(x: x, z: z)
+                                     : cells.contains(Self.containingCell(x: x, z: z, cellSize: cellSize)))
             guard ok else { return last }
             last = SCNVector3(Float(x), end.y, Float(z))
         }

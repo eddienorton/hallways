@@ -72,15 +72,16 @@ final class PhoneApps: ObservableObject {
         guard Admission.isCompleted else { return }
         MailStore.shared.deliverInitialIfNeeded()
         ChatStore.shared.deliverDue()
+        BuildingDispatch.evaluate(reason: "phone")           // Oct 8 (Phase 1): anything the story now sends
     }
 
     /// Open mail `id` on the phone: exactly what the computer does when a
     /// message is opened -- mark it read in the shared store and record the
     /// fact (on the floor the player is on).
-    func showMail(_ id: String, floor: Int) {
+    func showMail(_ id: String, floor: Int, mail: MailStore = .shared, history: PlayerHistory = .shared) {
         mailMessage = id
-        MailStore.shared.markRead(id)
-        PlayerHistory.shared.record(.mailMessageRead, subject: id, floor: floor, detail: ["device": "phone"])
+        mail.markRead(id)
+        history.record(.mailMessageRead, subject: id, floor: floor, detail: ["device": "phone"])
     }
 
     func resetGPSView() {
@@ -157,14 +158,24 @@ nonisolated struct ChatThreadInfo: Identifiable, Sendable {
     let symbol: String
 }
 
+/// Oct 8 (Phase 1): how an authored HallChat message reaches the player --
+/// the same idea as MailDelivery.
+nonisolated enum ChatDelivery: Sendable, Equatable {
+    /// Arrives with the phone, once the player is an admitted employee
+    /// (ChatStore.deliverDue). Every notice before Phase 1 is this.
+    case withPhone
+    /// Arrives ONLY when BuildingDispatch.sendChat sends it -- never by itself.
+    case byEvent
+}
+
 nonisolated struct AuthoredChatMessage: Sendable {
     let id: String
     let thread: String
     /// May use {employeeNumber}.
     let text: String
-    /// Arrives once the player is an admitted employee; `order` keeps the
-    /// messages of one delivery in sequence.
+    /// Keeps the messages of one `.withPhone` delivery in sequence.
     let order: Int
+    var delivery: ChatDelivery = .withPhone
 }
 
 nonisolated struct ChatMessage: Identifiable, Sendable, Equatable {
@@ -195,6 +206,7 @@ enum ChatCatalog {
     ]
 
     static func thread(_ id: String) -> ChatThreadInfo? { threads.first { $0.id == id } }
+    static func message(_ id: String) -> AuthoredChatMessage? { messages.first { $0.id == id } }
 }
 
 /// The player's HallChat state: which notices have arrived (and when) and
@@ -208,33 +220,52 @@ final class ChatStore: ObservableObject {
     @Published private(set) var delivered: [String: Date] = [:]
     @Published private(set) var read: Set<String> = []
 
-    private init() {
-        if let data = UserDefaults.standard.data(forKey: Self.deliveredKey),
+    /// Oct 8: where this state is saved, and the ledger reads are recorded in.
+    /// The app's store (`shared`) uses the real ones; tests pass throwaways.
+    private let defaults: UserDefaults
+    private let history: PlayerHistory
+    /// The authored messages this store can deliver (the app: ChatCatalog;
+    /// tests may add their own `.byEvent` fixtures without authoring story text).
+    let catalog: [AuthoredChatMessage]
+
+    init(defaults: UserDefaults = .standard, history: PlayerHistory = .shared,
+         catalog: [AuthoredChatMessage] = ChatCatalog.messages) {
+        self.defaults = defaults
+        self.history = history
+        self.catalog = catalog
+        if let data = defaults.data(forKey: Self.deliveredKey),
            let map = try? JSONDecoder().decode([String: Date].self, from: data) {
             delivered = map
         }
-        read = Set(UserDefaults.standard.stringArray(forKey: Self.readKey) ?? [])
+        read = Set(defaults.stringArray(forKey: Self.readKey) ?? [])
     }
 
-    /// Everything in the catalog not here yet arrives now (in order).
+    /// Every `.withPhone` notice not here yet arrives now (in order).
+    /// `.byEvent` messages never arrive here -- only through Dispatch.
     func deliverDue(now: Date = Date()) {
         var changed = false
-        for m in ChatCatalog.messages where delivered[m.id] == nil {
+        for m in catalog where delivered[m.id] == nil && m.delivery == .withPhone {
             delivered[m.id] = now.addingTimeInterval(Double(m.order))
             changed = true
         }
         if changed { save(); diag("hallchat.delivered", ["count": delivered.count]) }
     }
 
-    /// The hook for authored, event-driven notices later. Idempotent.
-    func deliver(_ id: String, at date: Date = Date()) {
-        guard ChatCatalog.messages.contains(where: { $0.id == id }), delivered[id] == nil else { return }
+    /// The hook for authored, event-driven notices (BuildingDispatch.sendChat).
+    /// Idempotent: true only the first time `id` arrives.
+    @discardableResult
+    func deliver(_ id: String, at date: Date = Date()) -> Bool {
+        guard catalog.contains(where: { $0.id == id }), delivered[id] == nil else { return false }
         delivered[id] = date
         save()
+        diag("hallchat.delivered", ["id": id])
+        return true
     }
 
+    func isDelivered(_ id: String) -> Bool { delivered[id] != nil }
+
     func messages(in thread: String) -> [ChatMessage] {
-        ChatCatalog.messages.compactMap { a -> ChatMessage? in
+        catalog.compactMap { a -> ChatMessage? in
             guard a.thread == thread, let date = delivered[a.id] else { return nil }
             return ChatMessage(id: a.id, thread: a.thread,
                                text: a.text.replacingOccurrences(of: "{employeeNumber}", with: EmployeeID.number ?? "(pending)"),
@@ -258,20 +289,20 @@ final class ChatStore: ObservableObject {
         guard !ids.isEmpty else { return }
         read.formUnion(ids)
         save()
-        PlayerHistory.shared.record(HistoryEventKind("hallchat.thread.read"), subject: thread, detail: ["count": "\(ids.count)"])
+        history.record(HistoryEventKind("hallchat.thread.read"), subject: thread, detail: ["count": "\(ids.count)"])
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(delivered) { UserDefaults.standard.set(data, forKey: Self.deliveredKey) }
-        UserDefaults.standard.set(Array(read).sorted(), forKey: Self.readKey)
+        if let data = try? JSONEncoder().encode(delivered) { defaults.set(data, forKey: Self.deliveredKey) }
+        defaults.set(Array(read).sorted(), forKey: Self.readKey)
     }
 
     /// DEV (New Player reset): nothing has arrived yet.
     func resetForNewPlayer() {
         delivered = [:]
         read = []
-        UserDefaults.standard.removeObject(forKey: Self.deliveredKey)
-        UserDefaults.standard.removeObject(forKey: Self.readKey)
+        defaults.removeObject(forKey: Self.deliveredKey)
+        defaults.removeObject(forKey: Self.readKey)
     }
 }
 
@@ -452,7 +483,7 @@ struct PhoneNotificationBanners: View {
 
     private func banner(_ note: PhoneNotification) -> some View {
         HStack(spacing: 10) {
-            PhoneAppIcon(art: .mail).frame(width: 34, height: 34)
+            PhoneAppIcon(art: { () -> PhoneAppIcon.Art in if case .chat = note.opens { return .chat } else { return .mail } }()).frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 1) {
                 Text(note.source).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(.white)
                 Text(note.title).font(.system(size: 14, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.9))
@@ -472,6 +503,10 @@ struct PhoneNotificationBanners: View {
             case .mail(let id):
                 PhoneApps.shared.showMail(id, floor: mazeStore.currentMazeID)
                 phone.open(.mail)
+            case .chat(let thread):
+                // The thread view marks itself read when it appears.
+                PhoneApps.shared.chatThread = thread
+                phone.open(.hallChat)
             case nil:
                 break
             }

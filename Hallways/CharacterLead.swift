@@ -86,6 +86,10 @@ final class CharacterLead {
         /// Oct 6: a pace stop on a long straight corridor -- only made at all
         /// if the player has fallen well behind (else he runs straight on).
         var isPace = false
+        /// Oct 9: also released when the player is standing in any of these
+        /// cells (a room the stop is waiting for them to come into), however
+        /// far that is from the stop point or the character.
+        var releaseCells: Set<GridCoordinate>? = nil
     }
 
     enum Step {
@@ -129,6 +133,9 @@ final class CharacterLead {
     private var settledHeading: Float?
     var onFinish: (() -> Void)?
     var onFinalRelease: (() -> Void)?
+    /// Oct 9: the character's body left the scene (a rebuild, a floor change)
+    /// while the lead was still running -- the lead cancels itself.
+    var onLost: (() -> Void)?
     var name = "lead"
 
     init(performer: LeadPerformer, context: Context, steps: [Step]) {
@@ -139,8 +146,20 @@ final class CharacterLead {
 
     var isRunning: Bool { timer != nil && !finished }
 
+    /// Oct 10 (Smart WALK -- follow the leader): the grid route this lead
+    /// escorts the player along, if it is an escort. While such a lead runs,
+    /// the HUD WALK follows the route's turns (no decision stops) -- it only
+    /// steers the player's own walk; doors, guards and scripts are untouched.
+    var guidedRoute: [GridCoordinate]?
+    private static weak var guiding: CharacterLead?
+    static var activeGuidedRoute: [GridCoordinate]? {
+        guard let lead = guiding, lead.isRunning else { return nil }
+        return lead.guidedRoute
+    }
+
     func start() {
         guard timer == nil else { return }
+        if guidedRoute != nil { CharacterLead.guiding = self }
         leadLog("lead.start", ["name": name, "steps": steps.count])
         timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] t in
             MainActor.assumeIsolated {
@@ -229,7 +248,13 @@ final class CharacterLead {
     // MARK: Polling (main thread)
 
     private func poll() {
-        guard let me = performer.groundPosition else { cancel(); return }
+        guard let me = performer.groundPosition else {
+            let wasFinished = finished
+            cancel()
+            leadLog("lead.lost", ["name": name, "finished": wasFinished])
+            onLost?()
+            return
+        }
         guard let pose = context.playerPose() else { return }
         let now = CACurrentMediaTime()
         if finished {
@@ -252,10 +277,13 @@ final class CharacterLead {
         // Released: the player has come close -- or is already further along.
         let near = simd_distance(pose.position, stop.point) < stop.release
             || (stop.isFinal && simd_distance(pose.position, me) < stop.release)
+        let inside = stop.releaseCells?.contains(cell(of: pose.position)) ?? false
         let ahead = nextStopPoint().map { simd_distance(pose.position, $0) + 0.5 < simd_distance(me, $0) } ?? false
-        if near || ahead {
+            || playerReachedLaterStop(pose.position)
+        if near || inside || ahead {
             waiting = nil
-            leadLog("lead.released", ["name": name, "row": stop.cell.row, "col": stop.cell.col, "ahead": ahead])
+            leadLog("lead.released", ["name": name, "row": stop.cell.row, "col": stop.cell.col, "ahead": ahead,
+                                      "near": near, "inside": inside])
             if stop.isFinal {
                 finished = true
                 onFinalRelease?()
@@ -289,6 +317,20 @@ final class CharacterLead {
             return
         }
         performer.watch(pose.position)
+    }
+
+    /// Oct 10 (Smart WALK follows escorts): the player has already reached a
+    /// LATER stop's release area (walked on ahead of him -- e.g. into the
+    /// destination office). He stops waiting here and carries on after them,
+    /// instead of calling from a junction the player left long ago.
+    private func playerReachedLaterStop(_ player: SIMD2<Float>) -> Bool {
+        guard index + 1 < steps.count else { return false }
+        for step in steps[(index + 1)...] {
+            guard case .stop(let s) = step else { continue }
+            if simd_distance(player, s.point) < s.release { return true }
+            if let cells = s.releaseCells, cells.contains(cell(of: player)) { return true }
+        }
+        return false
     }
 
     private func nextStopPoint() -> SIMD2<Float>? {

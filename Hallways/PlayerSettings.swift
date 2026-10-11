@@ -95,8 +95,14 @@ struct PlayerSettingsButton: View {
             }
         }
         .padding(.leading, 20)
-        .padding(.bottom, 28)
-        .sheet(isPresented: $showingSettings) { PlayerSettingsSheet(store: store, onStartOver: onStartOver) }
+        .padding(.bottom, ContinuousWalkControls.bottomPadding)   // Oct 10: same (lower) line as the HUD row
+        .sheet(isPresented: $showingSettings) {
+            PlayerSettingsSheet(store: store, onStartOver: onStartOver)
+                // Oct 9: the game goes quiet while Settings is up (not Mute:
+                // the player's Mute setting is untouched) and resumes after.
+                .onAppear { HallwaysAudio.shared.setSuppressed(true, reason: "settings") }
+                .onDisappear { HallwaysAudio.shared.setSuppressed(false, reason: "settings") }
+        }
     }
 }
 

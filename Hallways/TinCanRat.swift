@@ -748,6 +748,15 @@ enum TinCanRatModel {
         shadow.renderingOrder = 1
         root.addChildNode(shadow)
 
+        // Oct 9: Mr. Tinky, Hallwaysian -- the modeled body (same joints,
+        // proportions and forward), unless the classic one is asked for.
+        if HallwaysianTinky.isEnabled, let modeled = HallwaysianTinky.makeBody() {
+            modeled.position = SCNVector3(0, bodyHeight, 0)
+            root.addChildNode(modeled)
+            root.enumerateHierarchy { node, _ in node.categoryBitMask = TinCanRat.categoryBit }
+            return root
+        }
+
         // Body: a can lying on its side along z.
         let body = SCNNode()
         body.name = "tinCanRatBody"

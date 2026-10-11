@@ -24,6 +24,9 @@ nonisolated final class HallwaysAudio: ObservableObject, @unchecked Sendable {
     private var _isMuted: Bool
     private var players: [ObjectIdentifier: (player: Weak<AVAudioPlayer>, volume: Float)] = [:]
     private var engines: [Weak<AVAudioEngine>] = []
+    /// Oct 9: temporary silences that are NOT the player's Mute (Settings
+    /// open). Never persisted; Mute's own state is untouched by them.
+    private var suppressions: Set<String> = []
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -33,18 +36,41 @@ nonisolated final class HallwaysAudio: ObservableObject, @unchecked Sendable {
     var isMuted: Bool { lock.withLock { _isMuted } }
 
     func setMuted(_ muted: Bool) {
-        let (ps, es): ([(AVAudioPlayer, Float)], [AVAudioEngine]) = lock.withLock {
+        let (ps, es, silent): ([(AVAudioPlayer, Float)], [AVAudioEngine], Bool) = lock.withLock {
             _isMuted = muted
             players = players.filter { $0.value.player.value != nil }
             engines.removeAll { $0.value == nil }
             return (players.values.compactMap { e in e.player.value.map { ($0, e.volume) } },
-                    engines.compactMap(\.value))
+                    engines.compactMap(\.value), muted || !suppressions.isEmpty)
         }
         defaults.set(muted, forKey: Self.mutedKey)
-        for (player, volume) in ps { player.volume = muted ? 0 : volume }
-        for engine in es { engine.mainMixerNode.outputVolume = muted ? 0 : 1 }
-        diag("audio.mute", ["muted": muted, "players": ps.count, "engines": es.count])
+        for (player, volume) in ps { player.volume = silent ? 0 : volume }
+        for engine in es { engine.mainMixerNode.outputVolume = silent ? 0 : 1 }
+        diag("audio.mute", ["muted": muted, "silent": silent, "players": ps.count, "engines": es.count])
         DispatchQueue.main.async { self.objectWillChange.send() }
+    }
+
+    /// Oct 9: is any temporary silence (not Mute) on right now?
+    var isSuppressed: Bool { lock.withLock { !suppressions.isEmpty } }
+
+    /// Oct 9 -- a temporary silence for `reason` (Settings open): every
+    /// Hallways sound goes quiet exactly as Mute does it, and comes back when
+    /// the last reason is lifted -- unless the player has Mute on. Mute's
+    /// state and its saved setting are never changed by this.
+    func setSuppressed(_ on: Bool, reason: String) {
+        let result: (ps: [(AVAudioPlayer, Float)], es: [AVAudioEngine], silent: Bool)? = lock.withLock {
+            let was = !suppressions.isEmpty
+            if on { suppressions.insert(reason) } else { suppressions.remove(reason) }
+            guard was != !suppressions.isEmpty else { return nil }
+            players = players.filter { $0.value.player.value != nil }
+            engines.removeAll { $0.value == nil }
+            return (players.values.compactMap { e in e.player.value.map { ($0, e.volume) } },
+                    engines.compactMap(\.value), _isMuted || !suppressions.isEmpty)
+        }
+        guard let result else { return }
+        for (player, volume) in result.ps { player.volume = result.silent ? 0 : volume }
+        for engine in result.es { engine.mainMixerNode.outputVolume = result.silent ? 0 : 1 }
+        diag("audio.suppressed", ["on": on, "reason": reason, "silent": result.silent])
     }
 
     func toggle() { setMuted(!isMuted) }
@@ -56,7 +82,7 @@ nonisolated final class HallwaysAudio: ObservableObject, @unchecked Sendable {
         let muted: Bool = lock.withLock {
             players[ObjectIdentifier(player)] = (Weak(player), player.volume)
             if players.count > 64 { players = players.filter { $0.value.player.value != nil } }
-            return _isMuted
+            return _isMuted || !suppressions.isEmpty
         }
         if muted { player.volume = 0 }
         return player
@@ -67,7 +93,7 @@ nonisolated final class HallwaysAudio: ObservableObject, @unchecked Sendable {
     func setVolume(_ player: AVAudioPlayer, _ volume: Float) {
         let muted: Bool = lock.withLock {
             players[ObjectIdentifier(player)] = (Weak(player), volume)
-            return _isMuted
+            return _isMuted || !suppressions.isEmpty
         }
         player.volume = muted ? 0 : volume
     }
@@ -76,10 +102,11 @@ nonisolated final class HallwaysAudio: ObservableObject, @unchecked Sendable {
     func attach(engine: AVAudioEngine) {
         let muted: Bool = lock.withLock {
             if !engines.contains(where: { $0.value === engine }) { engines.append(Weak(engine)) }
-            return _isMuted
+            return _isMuted || !suppressions.isEmpty
         }
         let level: Float = muted ? 0 : 1
         if engine.mainMixerNode.outputVolume != level { engine.mainMixerNode.outputVolume = level }
+        AudioHealth.shared.watch(engine: engine)                       // Oct 9: static investigation, measurement only
     }
 
     /// Tests: the volume a managed player will return to.

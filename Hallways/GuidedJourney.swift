@@ -184,6 +184,12 @@ enum GuidedJourney {
         if case .some(.stop(var last)) = steps.last {
             last.waitsForPlayer = true
             last.release = 2.0
+            // Oct 9 (stuck-guide fix): "until you come in" means IN THE OFFICE.
+            // The 2 m radius alone missed a player who had already walked on
+            // past him to the far side of the 2 x 2 office (> 2 m from both
+            // him and his spot): he waited and called forever, the journey
+            // stayed `guiding`, and the computer stayed locked.
+            last.releaseCells = PlayerOffice.officeCells
             steps[steps.count - 1] = .stop(last)
         }
         // Out through the doors, then a first look back just outside them.
@@ -195,7 +201,11 @@ enum GuidedJourney {
         ], at: 0)
         let lead = CharacterLead(performer: performer, context: context, steps: steps)
         lead.name = "orientation.floor\(floor)"
+        lead.guidedRoute = route                     // Oct 10: WALK follows him
         lead.onFinalRelease = { goodbye() }
+        // Oct 9: his body left the scene mid-lead (a rebuild, a floor change):
+        // the journey can't go on, so it ends instead of staying `guiding`.
+        lead.onLost = { abandon(reason: "guide left the scene while guiding") }
         self.lead = lead
         log("arrival.leading", ["route": route.map { "\($0.row),\($0.col)" }.joined(separator: " "), "steps": steps.count])
         Cast.setJeff(.leading, body: guide, "out of the cab first, floor \(floor)")
@@ -213,6 +223,7 @@ enum GuidedJourney {
         }
         t.stage = .goodbye
         trip = t
+        goodbyeStartedAt = CACurrentMediaTime()
         Cast.setJeff(.waitingAtJourneyEnd, body: guide, "the player is in their office")
         func player() -> SIMD2<Float> { context.playerPose()?.position ?? PlayerOffice.doorCenter }
         let lamp = SIMD2<Float>(lampWorld.x, lampWorld.z)
@@ -388,6 +399,44 @@ enum GuidedJourney {
     }
 
     // MARK: Helpers
+
+    // MARK: Oct 9 -- an interrupted journey never locks the office
+
+    /// When the goodbye began (it takes ~15 s; see goodbyeLimit).
+    private static var goodbyeStartedAt: CFTimeInterval = 0
+    /// A goodbye still running after this long has lost an animation
+    /// completion somewhere: it is finished for him.
+    static let goodbyeLimit: CFTimeInterval = 60
+
+    /// Is the guide still performing in the office -- the only reason the
+    /// office computer waits? Checked when the player taps the computer.
+    /// A journey that can no longer finish (his body is gone from the scene,
+    /// or the goodbye has stalled) is wrapped up here instead of blocking.
+    static func isPerformingInOffice(now: CFTimeInterval = CACurrentMediaTime()) -> Bool {
+        guard let t = trip, t.stage == .guiding || t.stage == .goodbye else { return false }
+        guard guide?.parent != nil, performer?.groundPosition != nil else {
+            abandon(reason: "guide not in the scene")
+            return false
+        }
+        if t.stage == .goodbye, now - goodbyeStartedAt > goodbyeLimit {
+            log("goodbye.stalled", ["seconds": Int(now - goodbyeStartedAt)])
+            // He had already shown the player their office: onboarding is done.
+            if !Admission.isPrologueCompleted { Admission.isPrologueCompleted = true }
+            vanish()
+            return false
+        }
+        return true
+    }
+
+    /// The journey can't go on: end it (onboarding stays as it was -- an
+    /// unfinished prologue resumes in Administration, as after a relaunch).
+    private static func abandon(reason: String) {
+        guard let t = trip else { return }
+        log("abandoned", ["reason": reason, "from": t.stage.rawValue])
+        guide?.removeFromParentNode()
+        Cast.setJeff(.absent, body: nil, "journey abandoned: \(reason)")
+        end()
+    }
 
     static func end() {
         lead?.cancel(); lead = nil

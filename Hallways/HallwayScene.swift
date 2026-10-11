@@ -2976,6 +2976,23 @@ enum HallwayScene {
                 )
                 shaft.addChildNode(plate)
 
+                // Oct 9: the employee-ID proximity reader (ElevatorCardReader)
+                // -- a separate small fixture on the same wall, just to the
+                // passenger's RIGHT of the plate (shaft -X; their left is +X,
+                // see above). Oct 9 (raised): its centre level with the 8-9
+                // button row -- halfway up the panel -- or the panel's centre
+                // when the building has no 8-9 row. The plate, its buttons
+                // and the indicator are untouched.
+                let cardReader = ElevatorCardReader.make()
+                let readerRowOffset: CGFloat = panelRows.firstIndex(where: { $0.contains(8) || $0.contains(9) })
+                    .map { plateHeight / 2 - marginY - CGFloat($0) * rowSpacing } ?? 0
+                cardReader.position = SCNVector3(
+                    plate.position.x - Float(plateWidth) / 2 - 0.07 - ElevatorCardReader.baseWidth * ElevatorCardReader.scale / 2,
+                    plate.position.y + Float(readerRowOffset),
+                    linerInteriorFaceZ - 0.002 - ElevatorCardReader.baseDepth * ElevatorCardReader.scale / 2
+                )
+                shaft.addChildNode(cardReader)
+
                 // Oct 4: the physical floor indicator -- a dark display just
                 // above the panel, same wall, facing the passenger. Its face
                 // is a texture (HallwayScene.elevatorIndicatorImage) that

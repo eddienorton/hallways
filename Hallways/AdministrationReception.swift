@@ -108,6 +108,7 @@ enum AdministrationReception {
         clerk.position = SCNVector3(boundaryX + 0.6, 0, z)
         clerk.eulerAngles.y = faceWest
         root.addChildNode(clerk)
+        AdministrationExitGuard.install(standIn: clerk, cellSize: s)     // Oct 9: her post, for the exit guard
 
         // Back-office life: a row of filing cabinets against the back wall
         // of the south staff bay with a clock above (the north bay's back
@@ -397,6 +398,27 @@ enum AdministrationReception {
     /// counter. Breathes slowly, tilts its head now and then. Local +Z is
     /// the front; its right arm (local -X) is the pointing arm.
     private static func makeAdministratorStandIn() -> SCNNode {
+        // Oct 9: Juanita, Hallwaysian (the modeled living-object character,
+        // same named joints), unless the classic stand-in is asked for or the
+        // asset is unusable.
+        if HallwaysianJuanita.isEnabled, let model = HallwaysianJuanita.makeNode() {
+            let root = SCNNode()
+            root.name = standInName
+            root.addChildNode(model)
+            usesModeledBody = true
+            if let body = root.childNode(withName: "adminBody", recursively: true),
+               let head = root.childNode(withName: "adminHead", recursively: true) {
+                let breathe = SCNAction.sequence([.scale(to: 1.012, duration: 2.2), .scale(to: 1.0, duration: 2.4)])
+                breathe.timingMode = .easeInEaseOut
+                body.runAction(.repeatForever(breathe))
+                head.runAction(idleTilt, forKey: idleTiltKey)
+            }
+            setStanding(isStanding, on: root, duration: 0)
+            diag("juanita.model", ["kind": "hallwaysian"])
+            return root
+        }
+        usesModeledBody = false
+        diag("juanita.model", ["kind": "classic"])
         let root = SCNNode()
         root.name = standInName
         let uniform = material(UIColor(red: 0.26, green: 0.28, blue: 0.31, alpha: 1))
@@ -465,6 +487,41 @@ enum AdministrationReception {
     }
 
     private static let armRest = SCNVector3(-1.1, 0, 0)          // forward and down onto the counter
+    /// Oct 9 (Juanita 2.0): standing away from the counter (in the exit, or
+    /// walking) her arms hang at her sides, a little out from the hips --
+    /// not stuck straight forward onto a counter that isn't there (the
+    /// "pointing with both arms" look). Pointing arm = her right (local -X).
+    private static let armStandPoint = SCNVector3(0.08, 0, -0.22)
+    private static let armStandOther = SCNVector3(0.08, 0, 0.22)
+    /// Is she standing away from the counter (arms at her sides)?
+    private(set) static var isStanding = false
+
+    private static func restPose(pointArm: Bool) -> SCNVector3 {
+        // The modeled Juanita's arms hang from brackets on her pillar: they
+        // rest at her sides behind the counter rather than reaching through it.
+        isStanding || usesModeledBody ? (pointArm ? armStandPoint : armStandOther) : armRest
+    }
+    /// Oct 9: the current stand-in is the modeled Hallwaysian Juanita (else the classic one).
+    private(set) static var usesModeledBody = false
+
+    /// Oct 9: arms to her sides (leaving the counter) or forward onto the
+    /// counter (back at her post). Only the shoulders move.
+    static func setStanding(_ standing: Bool, on standIn: SCNNode, duration: Double = 0.45) {
+        isStanding = standing
+        for (name, pointArm) in [("adminArmPoint", true), ("adminArmRest", false)] {
+            guard let arm = standIn.childNode(withName: name, recursively: true) else { continue }
+            let pose = restPose(pointArm: pointArm)
+            arm.removeAllActions()
+            if duration <= 0 {
+                arm.eulerAngles = pose
+            } else {
+                let move = SCNAction.rotateTo(x: CGFloat(pose.x), y: CGFloat(pose.y), z: CGFloat(pose.z),
+                                              duration: duration, usesShortestUnitArc: true)
+                move.timingMode = .easeInEaseOut
+                arm.runAction(move)
+            }
+        }
+    }
     private static let armPoint = SCNVector3(0, 0, -1.75)        // straight out to its right (local -X), a touch up
     /// Oct 5 (post-ID): the OTHER arm (local +X, her left) out toward Fred's
     /// office door -- mirrored, a touch up, and swung a little forward (the
@@ -526,6 +583,10 @@ enum AdministrationReception {
                                 "target": directionsTarget?.rawValue ?? "none"])
         guard let standIn = root.childNode(withName: standInName, recursively: true) else {
             diag("juanita.noResponse", ["reason": "standInMissing", "requested": requested])
+            return
+        }
+        guard !AdministrationExitGuard.isAway else {                 // Oct 9: she's out in the doorway
+            diag("juanita.noResponse", ["reason": "awayAtExit", "requested": requested])
             return
         }
         guard directionsTarget != nil else {                         // prologue complete: no routing
@@ -622,7 +683,9 @@ enum AdministrationReception {
     /// how many times she has already repeated herself this visit (0 = only
     /// the greeting so far). Once she has reached the scream, nothing more.
     /// (var only so tests can shorten it.)
-    static var patienceIntervals: [TimeInterval] = [8, 7, 6, 5]
+    /// Oct 10 (playthrough): tightened from [8, 7, 6, 5] -- she escalated
+    /// too slowly. Same routines, same order; just less dead air between.
+    static var patienceIntervals: [TimeInterval] = [4.5, 4, 3.5, 3]
     /// The ask count at which she has hit her final mood (the scream).
     static let finalPatienceStage = 4
     /// Is the visitor still standing at the counter? (ContentView wires it;
@@ -657,6 +720,16 @@ enum AdministrationReception {
         diag("administration.patience.scheduled", ["after": done, "in": delay])
     }
 
+    /// Oct 9 (AdministrationExitGuard): Juanita, standing in the exit, points
+    /// the visitor back toward the office -- her RIGHT arm, since she faces
+    /// into the room there. False (nothing done) while a routine still plays.
+    @discardableResult
+    static func performExitRefusal(_ mood: Mood, silent: Bool, on standIn: SCNNode) -> Bool {
+        guard CACurrentMediaTime() >= busyUntil else { return false }
+        perform(mood, on: standIn, pointRight: true, silent: silent)
+        return true
+    }
+
     static func cancelPatienceTimer() {
         patienceGeneration += 1
         isPatienceTimerPending = false
@@ -689,7 +762,7 @@ enum AdministrationReception {
 
     enum Mood { case welcome, friendly, lessEnthused, impatient, exasperated }
 
-    private enum Notice { case full, small, grumble, shriek }
+    private enum Notice { case full, small, grumble, shriek, glare }
 
     /// One telling of the directions: an opening "notice", the voice, a
     /// look off to its right, and the point with `jabs` little stabs.
@@ -736,27 +809,52 @@ enum AdministrationReception {
         }
     }
 
-    private static func perform(_ mood: Mood, on standIn: SCNNode) {
+    /// Oct 9 (exit guard, after the voiced escalation): the deliberate
+    /// SILENT response. Nothing in it reads as speech -- no grumble
+    /// head-shake, no buzzing antenna, no rapid jabs timed to syllables:
+    /// she GLARES (eyes narrowed and held, chin down, antenna laid back),
+    /// then slowly raises her arm toward Tinky's office, holds it, lowers it.
+    private static let silentPoint = Telling(voice: nil, notice: .glare,
+                                             lookAt: 0.3, lookDuration: 0.4, lookYaw: -0.8,
+                                             raiseAt: 0.35, raiseDuration: 0.6,
+                                             jabGap: 0, jabs: 0, jabAmount: 0, jabDuration: 0, hold: 1.8)
+
+    /// Oct 9 (tests): what an exit-guard reaction does -- whether she speaks,
+    /// how many syllable-jabs, and whether the opening reads as talking.
+    static func exitReaction(_ mood: Mood, silent: Bool) -> (speaks: Bool, jabs: Int, talkingNotice: Bool) {
+        let t = silent ? silentPoint : telling(mood)
+        return (t.voice != nil, t.jabs, t.notice == .grumble || t.notice == .shriek)
+    }
+
+    /// `pointRight` (Oct 9, exit guard): force the gesture side regardless
+    /// of `directionsTarget` (true = her right arm and a look right). `silent`
+    /// (Oct 9): a deliberate wordless point (`silentPoint`) instead of the
+    /// mood's spoken telling -- never the talking gesture with the voice
+    /// missing. Defaults = unchanged.
+    private static func perform(_ mood: Mood, on standIn: SCNNode, pointRight: Bool? = nil, silent: Bool = false) {
         guard let body = standIn.childNode(withName: "adminBody", recursively: true),
               let head = standIn.childNode(withName: "adminHead", recursively: true),
               let eyes = standIn.childNode(withName: "adminEyes", recursively: true),
-              let pupils = standIn.childNode(withName: "adminPupils", recursively: true),
-              let antenna = standIn.childNode(withName: "adminAntenna", recursively: true) else {
+              let pupils = standIn.childNode(withName: "adminPupils", recursively: true) else {
             diag("juanita.noResponse", ["reason": "rigMissing", "mood": "\(mood)"])
             return
         }
+        // Oct 9: the antenna is optional -- Cartoon Juanita has none (the
+        // classic stand-in still does). Without one, its moves animate a
+        // detached placeholder: nothing is seen, every other beat is unchanged.
+        let antenna = standIn.childNode(withName: "adminAntenna", recursively: true) ?? SCNNode()
         // Oct 5 (post-ID): kiosk = her right arm and a look to her right;
         // Fred's office = her left arm and a wider look to her left.
-        let toOffice = directionsTarget == .office
+        let toOffice = pointRight.map { !$0 } ?? (directionsTarget == .office)
         guard let arm = standIn.childNode(withName: toOffice ? "adminArmRest" : "adminArmPoint", recursively: true) else {
             diag("juanita.noResponse", ["reason": "armMissing", "mood": "\(mood)"])
             return
         }
         let pointPose = toOffice ? armPointOffice : armPoint
         let mirror: CGFloat = toOffice ? -1 : 1
-        let t = telling(mood)
+        let t = silent ? silentPoint : telling(mood)
         diag("juanita.gesture", ["mood": "\(mood)", "target": directionsTarget?.rawValue ?? "none",
-                                 "voice": t.voice != nil, "jabs": t.jabs, "duration": t.total])
+                                 "voice": t.voice != nil, "silent": silent, "jabs": t.jabs, "duration": t.total])
         busyUntil = CACurrentMediaTime() + t.total
         func rot(_ x: CGFloat = 0, _ y: CGFloat = 0, _ z: CGFloat = 0, _ d: Double) -> SCNAction {
             .rotateTo(x: x, y: y, z: z, duration: d, usesShortestUnitArc: true)
@@ -782,6 +880,19 @@ enum AdministrationReception {
         case .grumble:
             antenna.runAction(.sequence([rot(-0.6, 0, 0, 0.12), .wait(duration: t.total - 0.4), rot(0, 0, 0, 0.25)]))
             headNotice = .sequence([rot(0, 0.15, 0, 0.07), rot(0, -0.15, 0, 0.1), rot(0, 0.1, 0, 0.08), rot(0, 0, 0, 0.08)])
+        case .glare:
+            // Oct 9: narrowed eyes held through the whole response -- a look,
+            // not a word. Slow, still, deliberate.
+            func squint(from a: Float, to b: Float, _ d: Double) -> SCNAction {
+                .customAction(duration: d) { node, e in
+                    let u = Float(e / CGFloat(d))
+                    node.scale = SCNVector3(1, a + (b - a) * u, 1)
+                }
+            }
+            eyes.runAction(.sequence([squint(from: 1, to: 0.5, 0.3),
+                                      .wait(duration: max(0.2, t.total - 0.7)), squint(from: 0.5, to: 1, 0.35)]))
+            antenna.runAction(.sequence([rot(-0.5, 0, 0, 0.45), .wait(duration: max(0.2, t.total - 0.9)), rot(0, 0, 0, 0.4)]))
+            headNotice = .sequence([rot(0.14, 0, 0, 0.35), .wait(duration: 0.15)])
         case .shriek:
             eyes.runAction(.sequence([.scale(to: 1.35, duration: 0.1), .wait(duration: t.total - 0.5), .scale(to: 1, duration: 0.3)]))
             var buzz: [SCNAction] = []
@@ -794,7 +905,17 @@ enum AdministrationReception {
             body.runAction(.sequence(shake))
             headNotice = .sequence([rot(-0.35, 0, 0, 0.15), .wait(duration: 0.5), rot(0, 0, 0, 0.12)])
         }
-        if let voice = t.voice { CritterAudio.play(voice, on: standIn) }
+        if !silent, let voice = t.voice { CritterAudio.play(voice, on: standIn) }
+        // Oct 9 -- her signature: the telescoping neck rises with her temper
+        // (the modeled body only; the classic stand-in has no neck sections).
+        // Impatient: a short hitch up. The scream: SHOOTS up and stays up
+        // through the stabs. The silent glare: a slow, looming rise.
+        switch (mood, silent) {
+        case (_, true): HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.08, up: 0.7, hold: max(0, t.lowerAt - 0.7), down: 0.8)
+        case (.exasperated, _): HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.12, up: 0.14, hold: max(0, t.lowerAt - 0.14))
+        case (.impatient, _): HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.05, up: 0.12, hold: max(0, t.lowerAt - 0.12), down: 0.35)
+        default: break
+        }
 
         // 2. Look off to its right (the visitor's left) and point; then back
         // to the visitor as the arm comes down, and the idle tilt resumes.
@@ -812,7 +933,8 @@ enum AdministrationReception {
         raise.timingMode = .easeOut
         let jab = SCNAction.sequence([.rotateBy(x: 0, y: 0, z: t.jabAmount * mirror, duration: t.jabDuration * 0.45),
                                       .rotateBy(x: 0, y: 0, z: -t.jabAmount * mirror, duration: t.jabDuration * 0.55)])
-        let lower = rot(CGFloat(armRest.x), CGFloat(armRest.y), CGFloat(armRest.z), 0.55)
+        let rest = restPose(pointArm: !toOffice)
+        let lower = rot(CGFloat(rest.x), CGFloat(rest.y), CGFloat(rest.z), 0.55)
         lower.timingMode = .easeInEaseOut
         var armSteps: [SCNAction] = [.wait(duration: t.raiseAt), raise, .wait(duration: t.jabGap)]
         armSteps += Array(repeating: jab, count: t.jabs)
@@ -1291,7 +1413,9 @@ nonisolated enum AdministratorVoice {
     /// Repeat #4+ -- she loses it: a wobbling shriek that climbs, warbles
     /// and collapses, then three shrieked "DIT!"s with the stabs. Funny,
     /// not frightening -- a kettle of a receptionist boiling over.
-    static let exasperated: SCNAudioSource? = MenagerieSound.source("admin-dir-scream-v1", volume: 1.0) {
+    /// Oct 9 (playtest: "very loud"): same sound, played at 0.7 instead of
+    /// 1.0 -- still her loudest by a margin, no longer a jolt at arm's length.
+    static let exasperated: SCNAudioSource? = MenagerieSound.source("admin-dir-scream-v1", volume: 0.7) {
         MenagerieSound.mix([
             (at: 0.00, samples: MenagerieSound.sweep(300, 1400, seconds: 0.35, wobble: 4.0, curve: 0.6), gain: 1.0),
             (at: 0.33, samples: MenagerieSound.sweep(1400, 1250, seconds: 0.45, wobble: 6.0), gain: 1.0),

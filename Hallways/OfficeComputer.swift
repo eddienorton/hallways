@@ -141,8 +141,9 @@ final class OfficeComputer: ObservableObject {
             diag("computer.sit.declined", ["reason": "busy", "blockers": controller.diagCanRotateBlockers])
             return false
         }
-        if let stage = GuidedJourney.trip?.stage, stage == .guiding || stage == .goodbye {
-            diag("computer.sit.declined", ["reason": "guide performing in the office"])
+        if GuidedJourney.isPerformingInOffice() {
+            diag("computer.sit.declined", ["reason": "guide performing in the office",
+                                           "stage": GuidedJourney.trip?.stage.rawValue ?? "none"])
             return false
         }
         guard let seat = seatedView(controller: controller, view: view) else {
@@ -208,6 +209,7 @@ final class OfficeComputer: ObservableObject {
     private func seated() {
         guard phase == .sittingDown else { return }
         MailStore.shared.deliverInitialIfNeeded()
+        BuildingDispatch.evaluate(reason: "computer")        // Oct 8 (Phase 1)
         sessionSpan = PlayerHistory.shared.begin(.computerSessionBegan, endKind: .computerSessionEnded,
                                                  subject: "computer.office", floor: PlayerOffice.floor)
         phase = .on

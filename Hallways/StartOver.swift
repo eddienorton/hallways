@@ -17,6 +17,7 @@ import Foundation
 ///   mail.delivered / mail.read     office-computer mail
 ///   hallchat.delivered / hallchat.read   phone chat
 ///   tinCanRat.enabled              companion back to its fresh default
+///   story.beats                    story milestones (StoryBeats)
 ///   in memory: accepted ID photo, Posse records (Freddy met/following),
 ///   guided journey in flight, office computer session + games in
 ///   progress, phone screen/notifications, Juanita's pending patience.
@@ -41,6 +42,7 @@ enum StartOver {
         "mail.delivered", "mail.read",
         "hallchat.delivered", "hallchat.read",
         TinCanRat.enabledKey,
+        StoryBeats.storageKey,
     ]
     static let hasSeenNavGestureHintKey = "hasSeenNavGestureHint"
 
@@ -66,6 +68,7 @@ enum StartOver {
         OfficeComputer.shared.discardAllGames()
         PlayerHistory.shared.resetForNewPlayer()
         MailStore.shared.resetForNewPlayer()
+        StoryBeats.shared.resetForNewPlayer()               // Oct 8: story.beats
         HallPhone.shared.resetForNewPlayer()                // also ChatStore + PhoneApps
         AdministrationReception.resetForNewPlayer()
         defaults.removeObject(forKey: TinCanRat.enabledKey)

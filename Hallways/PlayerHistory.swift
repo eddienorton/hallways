@@ -88,7 +88,7 @@ nonisolated struct HistorySpan: Sendable {
 }
 
 final class PlayerHistory {
-    static let shared = PlayerHistory()
+    static let shared = PlayerHistory(fileURL: PlayerHistory.defaultFileURL)
 
     private(set) var events: [HistoryEvent] = []
     private(set) var aggregates = HistoryAggregates()
@@ -100,10 +100,16 @@ final class PlayerHistory {
     }
     private static let schema = 1
 
-    private let fileURL: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+    /// The real ledger's file. Oct 8: the store's location is injectable so
+    /// tests can use a throwaway one (or none) and never touch the player's.
+    static let defaultFileURL: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
         .appendingPathComponent("PlayerHistory.json")
 
-    private init() {
+    private let fileURL: URL?
+
+    /// `fileURL` nil = in memory only (tests). The app uses `shared`.
+    init(fileURL: URL?) {
+        self.fileURL = fileURL
         load()
     }
 

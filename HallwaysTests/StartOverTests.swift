@@ -11,7 +11,8 @@ struct StartOverTests {
         let cleared = Set(StartOver.clearedDefaultsKeys)
         for key in ["admission.completed", "prologue.completed", "hasCompletedInitialEntrance",
                     "hasSeenNavGestureHint", "admission.employeeNumber",
-                    "mail.delivered", "mail.read", "hallchat.delivered", "hallchat.read"] {
+                    "mail.delivered", "mail.read", "hallchat.delivered", "hallchat.read",
+                    "story.beats"] {
             #expect(cleared.contains(key), "Start Over must clear \(key)")
         }
     }

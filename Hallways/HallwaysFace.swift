@@ -34,6 +34,35 @@ nonisolated enum HallwaysFace {
         let applied: Bool
         /// The preset used (internal; diagnostics only, never shown).
         let variant: Variant
+        /// Oct 10 (ID kiosk): where the face sat in the capture.
+        var framing: Framing = .ok
+    }
+
+    /// Oct 10 (ID kiosk face framing): is the face placed well enough for an
+    /// ID photo? Checked on Vision's (normalized, origin bottom-left) box.
+    /// Tuning lives in `framing(of:mouthFound:)`.
+    nonisolated enum Framing: String {
+        case ok, noFace, tooLow, tooHigh, tooFar, offCenter
+        /// The kiosk's on-screen prompt (two short lines).
+        var prompt: (String, String) {
+            switch self {
+            case .ok: return ("", "")
+            case .noFace: return ("NO FACE DETECTED", "LOOK INTO THE CAMERA")
+            case .tooLow: return ("FACE TOO LOW", "RAISE THE CAMERA A LITTLE")
+            case .tooHigh: return ("FACE TOO HIGH", "LOWER THE CAMERA A LITTLE")
+            case .tooFar: return ("TOO FAR AWAY", "MOVE A LITTLE CLOSER")
+            case .offCenter: return ("FACE OFF CENTER", "CENTER YOUR FACE")
+            }
+        }
+    }
+
+    nonisolated static func framing(of box: CGRect?, mouthFound: Bool) -> Framing {
+        guard let b = box else { return .noFace }
+        if b.minY < 0.03 || b.midY < 0.33 || (!mouthFound && b.midY < 0.45) { return .tooLow }
+        if b.maxY > 0.97 || b.midY > 0.8 { return .tooHigh }
+        if b.width < 0.15 { return .tooFar }
+        if b.midX < 0.2 || b.midX > 0.8 { return .offCenter }
+        return .ok
     }
 
     /// The curated family. Internal names -- never on screen.
@@ -190,7 +219,12 @@ nonisolated enum HallwaysFace {
         do { try VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:]).perform([request]) }
         catch { visionError = "\(error)" }
         let faces = request.results ?? []
-        if let face = faces.max(by: { $0.boundingBox.width < $1.boundingBox.width }) {
+        let biggest = faces.max(by: { $0.boundingBox.width < $1.boundingBox.width })
+        let framing = Self.framing(of: biggest?.boundingBox, mouthFound: (biggest?.landmarks?.outerLips?.pointCount ?? 0) > 0)
+        diag("hallwaysFace.framing", ["framing": framing.rawValue,
+                                      "box": biggest.map { String(format: "%.2f,%.2f %.2fx%.2f", $0.boundingBox.minX, $0.boundingBox.minY,
+                                                                  $0.boundingBox.width, $0.boundingBox.height) } ?? "none"])
+        if let face = biggest {
             let b = face.boundingBox
             faceBox = CGRect(x: b.minX * w, y: b.minY * h, width: b.width * w, height: b.height * h)
             let imageSize = CGSize(width: w, height: h)
@@ -335,14 +369,18 @@ nonisolated enum HallwaysFace {
         crop = crop.integral.intersection(CGRect(x: 0, y: 0, width: w, height: h))
         guard let out = CIContext().createCGImage(image.cropped(to: crop), from: crop) else {
             diag("hallwaysFace.failed", ["reason": "render"])
-            return Output(image: upright, applied: false, variant: variant)
+            var failed = Output(image: upright, applied: false, variant: variant)
+            failed.framing = framing
+            return failed
         }
         // How much the rule actually changed the portrait (0 = identical, 1 = inverted).
         let before = cg.cropping(to: CGRect(x: crop.minX, y: h - crop.maxY, width: crop.width, height: crop.height))
         let delta = before.map { Self.meanDifference($0, out) } ?? -1
         diag("hallwaysFace.done", ["applied": true, "variant": variant.rawValue, "out": "\(out.width)x\(out.height)", "crop": Self.describe(crop),
                                    "meanDelta": delta, "ms": ((CFAbsoluteTimeGetCurrent() - started) * 1000).rounded()])
-        return Output(image: UIImage(cgImage: out), applied: true, variant: variant)
+        var output = Output(image: UIImage(cgImage: out), applied: true, variant: variant)
+        output.framing = framing
+        return output
     }
 
     // MARK: The critter eyeball

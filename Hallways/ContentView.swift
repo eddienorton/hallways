@@ -599,6 +599,14 @@ struct ContentView: View {
                     if shown { SoundEffects.startStreetAudio() }
                     // Oct 5 (clean onboarding): outside = street ambience only.
                     CritterAudio.setSuppressed(shown, reason: shown ? "opening screen up" : "entered building")
+                    // Oct 8 (Phone & Communications, Phase 1): a natural moment
+                    // for the building to send what the story now calls for.
+                    if !shown { BuildingDispatch.evaluate(reason: "enteredBuilding") }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // Oct 8 (Phase 1): back in the app, inside the building.
+                    // Only what is due NOW; app-closed time means nothing yet.
+                    if phase == .active && !showIntroScreen { BuildingDispatch.evaluate(reason: "appActive") }
                 }
                 // Cold launch: showIntroScreen already starts true, so
                 // the onChange above can't fire -- start the street
@@ -616,6 +624,11 @@ struct ContentView: View {
 
             if let navController = navBridge.controller {
                 NavigationOverlay(controller: navController)
+                // Oct 10 experiment: LEFT | WALK/STOP | RIGHT.
+                if TapNavigationController.continuousWalkExperimentOn && !showIntroScreen {
+                    ContinuousWalkControls(controller: navController)
+                        .zIndex(12)
+                }
                 MirrorCommentOverlay(controller: navController, state: mirrorComments, mirrors: mazeStore.mirrors,
                     gameplayActive: scenePhase == .active && !showGridEditor && !showIntroScreen)
                     .zIndex(10)
@@ -791,6 +804,21 @@ struct ContentView: View {
                 // it used to, because the pill was .fixedSize(), and an
                 // overflowing HStack spills off BOTH edges.
                 HStack(spacing: 8) {
+                    // Oct 10: the FLOOR N pill lives here now, top-left (it
+                    // used to sit at the bottom centre, where the walk
+                    // buttons are). The top row is inside the safe area, so
+                    // it stays below the status bar / Dynamic Island.
+                    if let controller = navBridge.controller, !showIntroScreen {
+                        Text(controller.floorLabel)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.black.opacity(0.62), in: Capsule())
+                            .fixedSize()
+                            .layoutPriority(2)
+                            .accessibilityIdentifier("gameplayFloorLabel")
+                    }
                     // Oct 4: the old money total and mission/inventory progress
                     // pill are retired from the screen (the game is no longer
                     // economy/mission driven). Their state is untouched;
@@ -896,6 +924,8 @@ struct ContentView: View {
             let traceChange = ElevatorArrivalTrace.shared.beginPhase("ContentView.floorOnChange")
             defer { ElevatorArrivalTrace.shared.endPhase("ContentView.floorOnChange", traceChange) }
             diag("scene.floorChanged", ["floor": mazeStore.currentMazeID, "mazeVersion": mazeStore.version])
+            // Oct 8 (Phase 1): arriving on a floor is a natural moment to check.
+            if !showIntroScreen { BuildingDispatch.evaluate(reason: "floorArrival") }
             navLog("[PERSISTENTVIEW] floor changed -> \(mazeStore.currentMazeID), mazeStore.version \(mazeStore.version) -- the mounted TouchTrackingSCNView keeps its gestures; only its scene/controller contents are reinstalled")
         }
         .onAppear {
@@ -1018,14 +1048,12 @@ private struct NavigationOverlay: View {
                 label(message, systemImage: "exclamationmark.bubble.fill")
                     .transition(.opacity)
             }
-            Text(controller.floorLabel)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.black.opacity(0.62), in: Capsule())
-                .padding(.top, 4)
-                .accessibilityIdentifier("gameplayFloorLabel")
+            // Oct 10 (continuous walk): the FLOOR N pill moved to the top-left
+            // of the top HUD row (ContentView, FloorLabelPill); this line keeps
+            // the status message clear of the WALK/LEFT/RIGHT row below it.
+            if TapNavigationController.continuousWalkExperimentOn {
+                Color.clear.frame(height: ContinuousWalkControls.rowHeight + ContinuousWalkControls.bottomPadding + 10)
+            }
         }
         // Sept 24 pass per Eddie (accepted on device): this pill has
         // ONE fixed position -- bottom edge about 8pt above the
@@ -1940,6 +1968,9 @@ struct HallwaySceneView: UIViewRepresentable {
             if floor == PlayerOffice.floor {                               // Oct 6: the player's office
                 PlayerOffice.install(into: result.scene.rootNode, cellSize: cellSize, cells: c.cells)
             }
+            if floor == ConferenceRoom.floor {                             // Oct 8: the conference room
+                ConferenceRoom.install(into: result.scene.rootNode, cellSize: cellSize, cells: c.cells)
+            }
             staged.build = result
             diag("elevator.staging.sceneBuilt", ["to": floor, "chunkMs": staged.ms(since: buildStarted), "sincePressMs": staged.ms(since: staged.pressedAt)])
             // Chunk 2: the LivingWorld population (Menagerie + Bobbins) into
@@ -2135,6 +2166,9 @@ struct HallwaySceneView: UIViewRepresentable {
                 if mazeStore.currentMazeID == PlayerOffice.floor {          // Oct 6: the player's office
                     PlayerOffice.install(into: scene.rootNode, cellSize: mazeStore.cellSize, cells: mazeStore.cells)
                 }
+                if mazeStore.currentMazeID == ConferenceRoom.floor {        // Oct 8: the conference room
+                    ConferenceRoom.install(into: scene.rootNode, cellSize: mazeStore.cellSize, cells: mazeStore.cells)
+                }
             }
             ElevatorArrivalTrace.shared.endPhase("install.pointOfViewAndFloorGlow", traceFloorGlow)
             // Oct 3 TIN CAN RAT prototype 1: read-only visual follower +
@@ -2329,11 +2363,15 @@ struct HallwaySceneView: UIViewRepresentable {
                     .subtracting(AdministrationReception.officeDeskBayCells) : mazeStore.cells
             // Oct 6: the player's desk bay is seen, not walked (like Candy's).
             if mazeStore.currentMazeID == PlayerOffice.floor { navigationCells.subtract(PlayerOffice.deskBayCells) }
+            // Oct 8: the conference table bay is seen, not walked.
+            if mazeStore.currentMazeID == ConferenceRoom.floor { navigationCells.subtract(ConferenceRoom.tableBayCells) }
             // Oct 7 (F): a new controller/scene replaces the one the office
             // computer was seated in -- close the computer without a camera move.
             OfficeComputer.shared.forceClose(reason: "sceneRebuilt")
             let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: navigationCells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: worldMissionSigns, exitSigns: mazeStore.exitSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors.mapValues { $0.direction }, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
             ElevatorArrivalTrace.shared.endPhase("install.navigationController", traceNavCreate)
+            // Oct 9: this floor's shut doors into the critter/building sound model.
+            navController.publishAcousticDoors()
             // Oct 3 TIN CAN RAT 1.1: he watches (read-only) where an accepted tap walk is headed.
             TinCanRat.observeTapWalk(in: scene) { [weak navController] in navController?.tapWalkDestination }
             // Sept 29 FREE-WALK EXPERIMENT: player-controlled taps/holds walk
@@ -2455,6 +2493,7 @@ struct HallwaySceneView: UIViewRepresentable {
                     if cell != AdministrationReception.deskLanding.coord {
                         AdministrationReception.cancelPatienceTimer()
                     }
+                    AdministrationExitGuard.playerCellChanged(cell)          // Oct 9: Juanita keeps the exit
                 }
                 navController.landingSpots = [
                     // After the desk landing, the Administrator acknowledges you
@@ -2479,7 +2518,10 @@ struct HallwaySceneView: UIViewRepresentable {
                     .init(kind: FredOfficeEncounter.landingKind, face: FredOfficeEncounter.landing,
                           standOff: FredOfficeEncounter.landingStandOff,
                           onLanded: { FredOfficeEncounter.begin() },
-                          isAvailable: { FredOfficeEncounter.isAvailable })
+                          isAvailable: { FredOfficeEncounter.isAvailable },
+                          // Oct 10 (Smart WALK): walking up to his desk stops
+                          // here, in front of it -- never on round behind it.
+                          capsApproach: true)
                 ]
                 // Oct 6 (Fredo: "kiosk first" / "follow me" prototype): the lead
                 // engine's view of this floor -- where he may walk (everything but
@@ -2499,6 +2541,31 @@ struct HallwaySceneView: UIViewRepresentable {
                     navController?.swingRoomEntranceDoorCosmetically(at: coord, open: open)
                 }
                 navController.roomEntranceDoorIntercept = { coord in FredDoorGuard.intercept(coord) }
+                // Oct 9 (Juanita in the doorway): while she stands in the exit,
+                // its boundary is closed to the player like a wall -- the doors
+                // themselves open and close as always.
+                AdministrationExitGuard.setExitBlocked = { [weak navController] blocked in
+                    guard let navController else { return }
+                    if blocked {
+                        // Oct 9: taking her post she pulls the doors to (if open).
+                        navController.closeRoomEntranceDoorForCharacter(at: AdministrationExitGuard.exitDoor)
+                        navController.characterBlockedEdges.insert(AdministrationExitGuard.exitEdge)
+                    } else {
+                        navController.characterBlockedEdges.remove(AdministrationExitGuard.exitEdge)
+                    }
+                }
+                navController.onCharacterBlockBump = { AdministrationExitGuard.bumped() }
+                // Oct 9: the exit doors she guards don't open; trying them is an attempt to leave.
+                navController.roomEntranceDoorGuarded = { AdministrationExitGuard.guardsDoor($0) }
+                navController.onGuardedRoomEntranceDoorTap = { _ in AdministrationExitGuard.doorTried() }
+                // Oct 9: her conversational distance -- the free walk stops
+                // short of her instead of gliding the camera into her.
+                AdministrationExitGuard.setKeepOut = { [weak navController] k in
+                    navController?.characterKeepOuts = k.map {
+                        [FreeWalkGeometry.KeepOut(x: Double($0.center.x), z: Double($0.center.y), radius: Double($0.radius))]
+                    } ?? []
+                }
+                AdministrationExitGuard.sync(playerCell: navController.currentCell)
             }
             // Oct 6 (guided journey -- player follows character across floors):
             // every floor tells the journey about itself; on the destination
@@ -2644,6 +2711,7 @@ struct HallwaySceneView: UIViewRepresentable {
             view.delegate = navController
             let traceReplaceController = ElevatorArrivalTrace.shared.beginPhase("install.replaceCoordinatorController")
             context.coordinator.navigationController = navController
+            navController.hudSceneView = view   // Oct 10: the HUD's USE (office computer) needs the view
             ElevatorArrivalTrace.shared.endPhase("install.replaceCoordinatorController", traceReplaceController)
             context.coordinator.navBridge = navBridge
             navController.onHandheldMapOpened = { [weak coordinator = context.coordinator] in
@@ -2808,6 +2876,11 @@ struct HallwaySceneView: UIViewRepresentable {
         view.allowsCameraControl = false // our own touch/tap handling must be the only thing driving the camera
         view.isPlaying = true
         view.rendersContinuously = true
+        // Oct 9 (30 FPS experiment): only when the launch argument asks for it.
+        if let fps = RenderHealth.testFramesPerSecond {
+            view.preferredFramesPerSecond = fps
+            diag("render.fpsSetting", ["preferredFramesPerSecond": fps])
+        }
         HallwaysAudio.shared.attach(engine: view.audioEngine)   // Oct 8: the mute switch covers SceneKit audio
 
         ElevatorArrivalTrace.shared.endPhase("install.viewConfiguration", traceViewConfig)
@@ -3531,6 +3604,11 @@ struct HallwaySceneView: UIViewRepresentable {
                 diag("tap.stoppedFreeTapWalk")
                 return
             }
+            // Oct 10 (continuous walk): same brake for the WALK-button walk.
+            if controller.continuousWalkState != .stopped {
+                controller.stopContinuousWalk(reason: "tap")
+                return
+            }
             // Oct 7 (F, physical monitor): seated at the office computer, the
             // monitor's own screen (a SwiftUI surface laid exactly over the
             // 3D screen) takes taps inside it. A tap that reaches the world
@@ -3604,6 +3682,13 @@ struct HallwaySceneView: UIViewRepresentable {
                                                            options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
                                                                      .ignoreHiddenNodes: true])).first,
                AdministrationReception.isAdministrator(hit.node) {
+                // Oct 9: she's out in the doorway (or on her way) -- no glide
+                // to an empty counter; she answers where she stands.
+                if AdministrationExitGuard.isAway {
+                    AdministrationExitGuard.tapped()
+                    diag("tap.consumed", ["by": "administrator (in the exit)"])
+                    return
+                }
                 AdministrationReception.directionsRequested = true
                 if controller.isInLandingPose("receptionDesk"), let root = view.scene?.rootNode {
                     diag("juanita.tapped", ["atCounter": true])
@@ -4096,6 +4181,7 @@ struct HallwaySceneView: UIViewRepresentable {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             diagGesture("pinch", gesture)
             guard let controller = navigationController else { return }
+            if gesture.state == .began { controller.stopContinuousWalk(reason: "pinch") }   // Oct 10: gestures take over
             let fraction = (Double(gesture.scale) - 1.0) / pinchScalePerCell
             let velocityFraction = Double(gesture.velocity) / pinchScalePerCell
             switch gesture.state {
@@ -4141,6 +4227,7 @@ struct HallwaySceneView: UIViewRepresentable {
             navLog("two-finger tap (turn around)")
             diag("gesture.twoFingerTap", ["cell": navigationController?.currentCell, "facing": navigationController?.facing])
             guard let controller = navigationController else { return }
+            controller.stopContinuousWalk(reason: "turnAround")   // Oct 10
             controller.rotate(toward: controller.facing.opposite)
         }
 
@@ -4148,6 +4235,7 @@ struct HallwaySceneView: UIViewRepresentable {
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             diagGesture("pan", gesture)
             guard let controller = navigationController, let view = gesture.view else { return }
+            if gesture.state == .began { controller.stopContinuousWalk(reason: "pan") }   // Oct 10: gestures take over
             let tracePan = ElevatorArrivalTrace.shared.samplePan(changed: gesture.state == .changed)
             let before = controller.cameraNode.eulerAngles
             if tracePan { ElevatorArrivalTrace.shared.event("pan.callback", "state=\(gesture.state.rawValue) controller=\(ObjectIdentifier(controller))") }
@@ -4303,6 +4391,7 @@ struct HallwaySceneView: UIViewRepresentable {
             navLog("swipe down (turn around)")
             diag("gesture.swipeDown", ["cell": navigationController?.currentCell, "facing": navigationController?.facing])
             guard let controller = navigationController else { return }
+            controller.stopContinuousWalk(reason: "turnAround")   // Oct 10
             controller.rotate(toward: controller.facing.opposite)
         }
 
@@ -4315,6 +4404,7 @@ struct HallwaySceneView: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 navLog("long-press forward began")
+                navigationController?.stopContinuousWalk(reason: "hold")   // Oct 10: gestures take over
                 beginHold(at: gesture.location(in: gesture.view)) { [weak gesture] in gesture?.location(in: gesture?.view) }
             case .changed:
                 updateHold(at: gesture.location(in: gesture.view))

@@ -121,6 +121,27 @@ enum MailCatalog {
             All new employees are invited to attend a staff meeting.
             Further details will follow.
             """,
+            delivery: .byEvent),
+        // Oct 8 (Phone & Communications, Phase 1 F): the real invitation.
+        // Sent ONCE by BuildingDispatch's rules after admission is complete;
+        // never at first login. It waits unread; there is no reply or RSVP,
+        // and reading it accepts nothing. The meeting itself (time, room,
+        // what happens if it's missed) arrives in Phase 2 -- this text
+        // deliberately promises no time or place yet.
+        AuthoredMail(
+            id: BuildingDispatch.staffMeetingInvitationMailID,
+            sender: "Administration",
+            senderAddress: "administration@hallways.internal",
+            subject: "New Employee Staff Meeting",
+            body: """
+            Welcome to the Hallways Building, employee {employeeNumber}.
+
+            All new employees are invited to a staff meeting in the conference room.
+
+            The time will be announced shortly.
+
+            Administration
+            """,
             delivery: .byEvent)
     ]
 
@@ -136,12 +157,17 @@ final class MailStore: ObservableObject {
     @Published private(set) var delivered: [String: Date] = [:]
     @Published private(set) var read: Set<String> = []
 
-    private init() {
-        if let data = UserDefaults.standard.data(forKey: Self.deliveredKey),
+    /// Oct 8: where this mailbox is saved. The app's mailbox (`shared`) uses
+    /// the standard defaults; tests pass a throwaway suite.
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.deliveredKey),
            let map = try? JSONDecoder().decode([String: Date].self, from: data) {
             delivered = map
         }
-        read = Set(UserDefaults.standard.stringArray(forKey: Self.readKey) ?? [])
+        read = Set(defaults.stringArray(forKey: Self.readKey) ?? [])
     }
 
     /// The inbox, newest first.
@@ -192,8 +218,8 @@ final class MailStore: ObservableObject {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(delivered) { UserDefaults.standard.set(data, forKey: Self.deliveredKey) }
-        UserDefaults.standard.set(Array(read).sorted(), forKey: Self.readKey)
+        if let data = try? JSONEncoder().encode(delivered) { defaults.set(data, forKey: Self.deliveredKey) }
+        defaults.set(Array(read).sorted(), forKey: Self.readKey)
     }
 
     #if DEBUG
@@ -211,8 +237,8 @@ final class MailStore: ObservableObject {
     func resetForNewPlayer() {
         delivered = [:]
         read = []
-        UserDefaults.standard.removeObject(forKey: Self.deliveredKey)
-        UserDefaults.standard.removeObject(forKey: Self.readKey)
+        defaults.removeObject(forKey: Self.deliveredKey)
+        defaults.removeObject(forKey: Self.readKey)
     }
 }
 

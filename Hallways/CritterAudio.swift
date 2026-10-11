@@ -49,6 +49,9 @@ nonisolated enum CritterAudio {
         var cells: Set<Int64> = []          // walkable grid cells (row/col keys)
         var cellSize: Float = 3.52
         var hallwayCell: (row: Int, col: Int) = (0, 0)
+        /// Oct 9: walkable-to-walkable edges blocked by a CLOSED door (room
+        /// entrances: offices, Administration, the conference room).
+        var closedDoorEdges: Set<DoorEdge> = []
         var lastPlayLine: CFTimeInterval = 0
         var suppressed = false
         // TEMP diagnostics (Oct 5 silence investigation): outcome counts,
@@ -122,13 +125,39 @@ nonisolated enum CritterAudio {
 
     private enum Separation { case connected, oneWall, walls }
 
+    /// Oct 9 (closed doors): an edge between two grid cells, order-free.
+    struct DoorEdge: Hashable, Sendable {
+        let a: Int64
+        let b: Int64
+        init(_ r1: Int, _ c1: Int, _ r2: Int, _ c2: Int) {
+            let k1 = CritterAudio.key(r1, c1), k2 = CritterAudio.key(r2, c2)
+            a = min(k1, k2)
+            b = max(k1, k2)
+        }
+    }
+
+    /// Oct 9: the doors that are shut right now, as (anchor cell, wall it is
+    /// in). Pushed by the navigation controller whenever a door opens or
+    /// closes, and on every floor install. A closed door between two
+    /// otherwise-joined cells now counts as one solid band (oneWallGain):
+    /// before this, the separation test only knew walkable cells, so a room
+    /// behind a shut door was "connected" and heard at full volume.
+    static func setClosedDoors(_ doors: [(row: Int, col: Int, dRow: Int, dCol: Int)]) {
+        let edges = Set(doors.map { DoorEdge($0.row, $0.col, $0.row + $0.dRow, $0.col + $0.dCol) })
+        state.lock.lock()
+        let changed = state.closedDoorEdges != edges
+        state.closedDoorEdges = edges
+        state.lock.unlock()
+        if changed { diag("critterAudio.closedDoors", ["count": edges.count]) }
+    }
+
     /// Grid-level acoustic separation between two cells. Connected when a
     /// walk through walkable cells joins them within the straight grid route
     /// plus connectedDetourCells (straight hall, corner, opening). Otherwise
     /// the straight line between the cell centres is sampled and the solid
     /// (non-walkable) bands it crosses are counted.
     private static func separation(from a: (row: Int, col: Int), to b: (row: Int, col: Int),
-                                   cells: Set<Int64>) -> Separation {
+                                   cells: Set<Int64>, closedDoors: Set<DoorEdge> = []) -> Separation {
         if a == b { return .connected }
         let manhattan = abs(a.row - b.row) + abs(a.col - b.col)
         let limit = manhattan + connectedDetourCells
@@ -144,6 +173,7 @@ nonisolated enum CritterAudio {
                     for (dr, dc) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                         let n = key(r + dr, c + dc)
                         guard cells.contains(n), !seen.contains(n) else { continue }
+                        if !closedDoors.isEmpty, closedDoors.contains(DoorEdge(r, c, r + dr, c + dc)) { continue }
                         if n == target { return .connected }
                         seen.insert(n)
                         next.append((r + dr, c + dc))
@@ -179,8 +209,16 @@ nonisolated enum CritterAudio {
         let size = state.cellSize
         let hallway = state.hallwayCell
         let suppressed = state.suppressed
+        let closedDoors = state.closedDoorEdges
         state.lock.unlock()
         if suppressed { report("SUPPRESSED_OPENING", ["critter": node.name ?? "?"]); return }
+        // Oct 9 (heating): with Mute on (or Settings open) every sound is
+        // silent anyway -- don't build, attach and run a positional player
+        // into the 3D audio graph just to play it at zero. Audibly identical.
+        if HallwaysAudio.shared.isMuted || HallwaysAudio.shared.isSuppressed {
+            report("SUPPRESSED_MUTED", ["critter": node.name ?? "?"])
+            return
+        }
         guard let listener else {
             report("PLAY", ["why": "no listener yet", "gain": 1.0])
             node.runAction(.playAudio(source, waitForCompletion: false))
@@ -211,7 +249,7 @@ nonisolated enum CritterAudio {
         // Wall separation.
         var wallFactor: Float = 1
         if !cells.isEmpty, !(earInCab && meInCab) {
-            switch separation(from: earCell, to: meCell, cells: cells) {
+            switch separation(from: earCell, to: meCell, cells: cells, closedDoors: closedDoors) {
             case .connected: break
             case .oneWall: wallFactor = oneWallGain
             case .walls: report("SUPPRESSED_WALLS", sample(0)); return
@@ -228,16 +266,56 @@ nonisolated enum CritterAudio {
             (player?.audioNode as? AVAudioMixing)?.volume = gain
         }
         player.didFinishPlayback = { [weak node, weak player] in
+            AudioHealth.shared.critterPlayerFinished()                  // Oct 9: measurement only
             guard let player else { return }
             DispatchQueue.main.async { node?.removeAudioPlayer(player) }
         }
         (player.audioNode as? AVAudioMixing)?.volume = gain
         node.addAudioPlayer(player)
+        AudioHealth.shared.critterPlayerStarted()                       // Oct 9: measurement only
         let mixer = player.audioNode as? AVAudioMixing
         mixer?.volume = gain
         playLine(distance: distance, desired: desired, level: level, wallFactor: wallFactor, gain: gain,
                  sourceVolume: source.volume, appliedVolume: mixer?.volume, critter: node.name ?? "?")
         report("PLAY", sample(gain))
+    }
+
+    // MARK: Oct 9 -- building sounds that aren't critters (the elevator)
+
+    /// A building sound heard from `point` (world): full within
+    /// `fullWithin` metres, falling linearly to `floorGain` at
+    /// `farDistance` (a building's elevator chime carries -- it never fades
+    /// to nothing by distance alone), then the SAME grid separation critters
+    /// use, closed doors included: one wall/door 0.2, more 0.1. Returns 1
+    /// before any floor has been installed (no listener yet).
+    static func buildingGain(at point: SIMD3<Float>, fullWithin: Float = 3.5, farDistance: Float = 20,
+                             floorGain: Float = 0.25) -> Float {
+        state.lock.lock()
+        let listener = state.listener
+        let cab = state.cab
+        let cells = state.cells
+        let size = state.cellSize
+        let hallway = state.hallwayCell
+        let closedDoors = state.closedDoorEdges
+        state.lock.unlock()
+        guard let listener else { return 1 }
+        let e = listener.presentation.worldPosition
+        let ear = SIMD3<Float>(e.x, e.y, e.z)
+        let distance = simd_distance(SIMD2<Float>(ear.x, ear.z), SIMD2<Float>(point.x, point.z))
+        let t = min(1, max(0, (distance - fullWithin) / max(0.01, farDistance - fullWithin)))
+        let distanceGain = 1 - t * (1 - floorGain)
+        let earInCab = cab?.contains(ear) ?? false
+        let earCell = earInCab ? hallway : (row: Int((ear.z / size).rounded()), col: Int((ear.x / size).rounded()))
+        let pointCell = (row: Int((point.z / size).rounded()), col: Int((point.x / size).rounded()))
+        var wallFactor: Float = 1
+        if !cells.isEmpty {
+            switch separation(from: earCell, to: pointCell, cells: cells, closedDoors: closedDoors) {
+            case .connected: break
+            case .oneWall: wallFactor = oneWallGain
+            case .walls: wallFactor = 0.1
+            }
+        }
+        return distanceGain * wallFactor
     }
 
     /// TEMP: full / half / quarter / very faint (proves volume is honoured).

@@ -38,7 +38,11 @@ import Combine
 /// announces already lives in its own store (Mail, later HallChat).
 nonisolated struct PhoneNotification: Identifiable, Equatable, Sendable {
     /// Where tapping the notification takes the player.
-    enum Opens: Equatable, Sendable { case mail(String) }
+    enum Opens: Equatable, Sendable {
+        case mail(String)
+        /// Oct 8 (Phase 1 C): a HallChat thread (by thread ID).
+        case chat(String)
+    }
     let id: UUID
     let source: String
     let title: String
@@ -95,7 +99,8 @@ final class HallPhone: ObservableObject {
     private var litToken = 0
     private let buzzHaptic = UIImpactFeedbackGenerator(style: .rigid)
 
-    private init() {}
+    /// Internal (not private) only so tests can use their own phone; the app uses `shared`.
+    init() {}
 
     // MARK: Holding the phone
 

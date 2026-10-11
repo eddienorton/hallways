@@ -138,7 +138,7 @@ enum FredOfficeEncounter {
                 var footfalls: [SCNAction] = []
                 for _ in 0..<(cycles * 2) {
                     footfalls.append(.run { node in
-                        if let step = steps.randomElement() { node.runAction(.playAudio(step, waitForCompletion: false)) }
+                        if let step = steps.randomElement() { CritterAudio.play(step, on: node) }
                     })
                     footfalls.append(.wait(duration: half))
                 }
@@ -151,7 +151,7 @@ enum FredOfficeEncounter {
             return .group([move, trot(d)])
         }
         func say(_ source: SCNAudioSource?) -> SCNAction {
-            .run { node in if let source { node.runAction(.playAudio(source, waitForCompletion: false)) } }
+            .run { node in if let source { CritterAudio.play(source, on: node) } }
         }
         func ear(_ i: Int, up: CGFloat, _ d: Double) -> SCNAction? {
             guard i < ears.count else { return nil }
@@ -167,10 +167,12 @@ enum FredOfficeEncounter {
         beats.append(.wait(duration: 0.3))
         beats.append(.group([face(player, from: start, 0.45), tilt(0.1, 0.45),
                              .sequence([.wait(duration: 0.22), say(FredSound.query)])]))
-        beats.append(.wait(duration: 0.45))
+        // Oct 10 (playthrough): every hold below trimmed -- he sat too long
+        // before the hop. Same beats, same order, same jump.
+        beats.append(.wait(duration: 0.3))
         // 3. DOUBLE TAKE: papers, you, papers, you. Hold.
-        beats += [tilt(-0.32, 0.16), .wait(duration: 0.34), tilt(0.1, 0.16), .wait(duration: 0.36),
-                  tilt(-0.32, 0.12), .wait(duration: 0.24), tilt(0.12, 0.12), .wait(duration: 0.7)]
+        beats += [tilt(-0.32, 0.16), .wait(duration: 0.24), tilt(0.1, 0.16), .wait(duration: 0.26),
+                  tilt(-0.32, 0.12), .wait(duration: 0.18), tilt(0.12, 0.12), .wait(duration: 0.4)]
         // 4. RECOGNITION: ears up, tail stiff, a little lift. A two-note tin sound.
         beats.append(.run { _ in
             for i in 0..<ears.count {
@@ -183,7 +185,7 @@ enum FredOfficeEncounter {
             body.runAction(.sequence([.moveBy(x: 0, y: 0.012, z: 0, duration: 0.12), .moveBy(x: 0, y: -0.012, z: 0, duration: 0.2)]))
         })
         beats.append(say(FredSound.realize))
-        beats.append(.wait(duration: 0.75))
+        beats.append(.wait(duration: 0.45))
         // 5. END OF WORKDAY: onto the desk (the top binder skids), to the lamp, nose-bump, CLICK, dark.
         beats.append(.group([tilt(0, 0.2), face(onDesk, from: start, 0.25)]))
         beats.append(.run { _ in
@@ -200,7 +202,7 @@ enum FredOfficeEncounter {
         })
         beats.append(say(FredSound.click))
         beats.append(.move(to: atLamp, duration: 0.16))
-        beats.append(.wait(duration: 0.6))                           // a moment with the dark lamp
+        beats.append(.wait(duration: 0.35))                          // a moment with the dark lamp
         // 6. DISMOUNT: from the desk's back-east corner (the lamp is out of reach
         // from the booster, so he crossed onto the desk): peer down, wobble, HOP
         // down to the floor east of his chair.
@@ -209,11 +211,11 @@ enum FredOfficeEncounter {
         beats.append(walk(corner, 0.3))
         beats.append(.rotateTo(x: 0, y: CGFloat(heading(corner, landed)), z: 0, duration: 0.18, usesShortestUnitArc: true))
         beats.append(tilt(-0.38, 0.22))
-        beats.append(.wait(duration: 0.22))
+        beats.append(.wait(duration: 0.14))
         let wobbleH = CGFloat(heading(corner, landed))
         beats.append(.sequence([.rotateTo(x: 0, y: wobbleH, z: 0.07, duration: 0.08), .rotateTo(x: 0, y: wobbleH, z: -0.07, duration: 0.1),
                                 .rotateTo(x: 0, y: wobbleH, z: 0.05, duration: 0.09), .rotateTo(x: 0, y: wobbleH, z: 0, duration: 0.08)]))
-        beats.append(.wait(duration: 0.2))
+        beats.append(.wait(duration: 0.12))
         beats.append(.group([tilt(0, 0.12), hop(from: corner, to: landed, apex: 0.25, duration: 0.42)]))
         beats.append(say(FredSound.tonk))
         beats.append(.run { _ in
@@ -275,6 +277,7 @@ enum FredOfficeEncounter {
             // Oct 6 (orientation trip): this lead continues by elevator.
             GuidedJourney.begin(guide: fred, lead: lead, fromFloor: floor,
                                 toFloor: FredLead.orientationFloor)
+            AdministrationExitGuard.release(reason: "Tinky is leading")      // Oct 9: she never blocks his way
         } else {
             readyToPet = fred                                        // not wired: the old behaviour
         }
@@ -293,7 +296,7 @@ enum FredOfficeEncounter {
         activeLead = nil
         Admission.isPrologueCompleted = true                         // Fred and I became a pair
         diag("fred.pet", ["prologueCompleted": Admission.isPrologueCompleted])
-        if let happy = FredSound.happy { fred.runAction(.playAudio(happy, waitForCompletion: false)) }
+        if let happy = FredSound.happy { CritterAudio.play(happy, on: fred) }
         let restY = body.position.y
         body.runAction(.sequence([
             .group([.move(to: SCNVector3(0, restY + 0.02, 0), duration: 0.1),

@@ -1,0 +1,69 @@
+{
+ "id": "night-porter",
+ "title": "Night Porter",
+ "subtitle": "Hallways Originals #3",
+ "genre": "Soul-jazz blues",
+ "order": 4,
+ "bpm": 100,
+ "beatsPerBar": 4,
+ "loopFrames": 2540160,
+ "sampleRate": 44100,
+ "parts": [
+  {
+   "id": "organ",
+   "musician": "Organ",
+   "instrument": "Hammond organ",
+   "color": "#C8553D",
+   "loop": "lab-nightporter-loop-organ.caf",
+   "performance": "lab-nightporter-perf-organ.m4a"
+  },
+  {
+   "id": "guitar",
+   "musician": "Guitar",
+   "instrument": "electric guitar",
+   "color": "#9C5B3B",
+   "loop": "lab-nightporter-loop-guitar.caf",
+   "performance": "lab-nightporter-perf-guitar.m4a"
+  },
+  {
+   "id": "bass",
+   "musician": "Bass",
+   "instrument": "electric bass",
+   "color": "#5B4B8A",
+   "loop": "lab-nightporter-loop-bass.caf",
+   "performance": "lab-nightporter-perf-bass.m4a"
+  },
+  {
+   "id": "drums",
+   "musician": "Drums",
+   "instrument": "drum kit",
+   "color": "#8A9BA8",
+   "loop": "lab-nightporter-loop-drums.caf",
+   "performance": "lab-nightporter-perf-drums.m4a"
+  },
+  {
+   "id": "trumpet",
+   "musician": "Trumpet",
+   "instrument": "trumpet",
+   "color": "#D49A2A",
+   "loop": "lab-nightporter-loop-trumpet.caf",
+   "performance": "lab-nightporter-perf-trumpet.m4a"
+  },
+  {
+   "id": "sax",
+   "musician": "Sax",
+   "instrument": "tenor sax",
+   "color": "#2E8B6E",
+   "loop": "lab-nightporter-loop-sax.caf",
+   "performance": "lab-nightporter-perf-sax.m4a"
+  },
+  {
+   "id": "trombone",
+   "musician": "Trombone",
+   "instrument": "trombone",
+   "color": "#B0517E",
+   "loop": "lab-nightporter-loop-trombone.caf",
+   "performance": "lab-nightporter-perf-trombone.m4a"
+  }
+ ]
+}

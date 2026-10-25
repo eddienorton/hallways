@@ -38,18 +38,15 @@ nonisolated struct CritterID: Hashable, Sendable, CustomStringConvertible {
     var description: String { rawValue }
     /// The tin-can character (code: Noodle / TinCanRat / Fred; story: Jeff, for now).
     static let jeff = CritterID(rawValue: "jeff")
-    /// The fire extinguisher (Posse member).
-    static let freddy = CritterID(rawValue: "freddy")
 }
 
 /// Collision/probe identity: each story critter has its own category bit.
 nonisolated enum CritterCategory {
     /// Jeff's bodies (historically TinCanRat.categoryBit).
     static let jeff = 1 << 9
-    /// Freddy's body (Oct 6: his own bit; he used to borrow Jeff's).
-    static let freddy = 1 << 13
     /// Story critters every wall/sight probe looks straight through.
-    static let storyCritters = jeff | freddy
+    /// (Oct 17: Freddy, who had 1 << 13, is removed from the game.)
+    static let storyCritters = jeff
 }
 
 /// Which nodes are which critter. Thread-safe (the ecosystem reads it on the
@@ -134,6 +131,9 @@ enum Cast {
     /// beats that ask for it; no floor build installs it by default.)
     static func jeffPlacement(floor: Int) -> JeffRole {
         if GuidedJourney.guidesOn(floor: floor) { return .journeyGuide }
+        // Oct 12 (escort resume): out leading from this floor -- not at his desk
+        // or door (GuidedJourney puts his body back with the player).
+        if GuidedJourney.leadsFrom(floor: floor) { return .leading }
         if floor == AdministrationReception.floor {
             if Admission.isPrologueCompleted { return .officeDesk }      // home at Orientation
             return Admission.isCompleted ? .officeDesk : .doorGuard
@@ -229,7 +229,7 @@ enum Cast {
             if jeffRole != .absent { jeffRole = .absent; CritterTags.setEcosystemBody(nil, for: .jeff) }
         }
         let jeff = jeffBody.map { "\(jeffRole.rawValue) \(tag($0)) at=\(where_($0))" } ?? "absent"
-        log("floor \(floor) ready -- jeff: \(jeff) | freddy: \(Posse.castSummary(Freddy.memberID, floor: floor))")
+        log("floor \(floor) ready -- jeff: \(jeff)")
     }
 
     // MARK: Helpers

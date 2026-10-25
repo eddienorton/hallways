@@ -1,0 +1,45 @@
+{
+ "id": "night-shift-waltz",
+ "title": "The Night Shift Waltz",
+ "subtitle": "Hallways Originals #1",
+ "genre": "Jazz waltz",
+ "order": 1,
+ "bpm": 120,
+ "beatsPerBar": 3,
+ "loopFrames": 3175200,
+ "sampleRate": 44100,
+ "parts": [
+  {
+   "id": "juanita",
+   "musician": "Juanita",
+   "instrument": "clarinet",
+   "color": "#C8553D",
+   "loop": "lab-nightshift-loop-juanita.caf",
+   "performance": "lab-nightshift-perf-juanita.m4a"
+  },
+  {
+   "id": "tinky",
+   "musician": "Tinky",
+   "instrument": "kalimba & tin",
+   "color": "#8A9BA8",
+   "loop": "lab-nightshift-loop-tinky.caf",
+   "performance": "lab-nightshift-perf-tinky.m4a"
+  },
+  {
+   "id": "gloria",
+   "musician": "Gloria",
+   "instrument": "upright bass",
+   "color": "#5B4B8A",
+   "loop": "lab-nightshift-loop-gloria.caf",
+   "performance": "lab-nightshift-perf-gloria.m4a"
+  },
+  {
+   "id": "eileen",
+   "musician": "Eileen",
+   "instrument": "nylon guitar",
+   "color": "#2E8B6E",
+   "loop": "lab-nightshift-loop-eileen.caf",
+   "performance": "lab-nightshift-perf-eileen.m4a"
+  }
+ ]
+}

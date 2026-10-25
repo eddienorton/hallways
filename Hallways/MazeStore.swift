@@ -1777,12 +1777,72 @@ final class MazeStore: ObservableObject {
     /// makes that panel always match however many floors actually
     /// exist instead of a number hardcoded here.
     var floorCount: Int {
-        max(library.keys.max() ?? 1, currentMazeID)
+        // Oct 23 (ten-floor experiment, ActiveBuilding): only the floors in use.
+        let inUse = library.keys.filter(ActiveBuilding.isActive)
+        return max(inUse.max() ?? 1, ActiveBuilding.isActive(currentMazeID) ? currentMazeID : 1)
     }
 
     /// Oct 4 (interactive elevator): every floor that actually exists.
     var floorIDs: Set<Int> {
-        Set(library.keys).union([currentMazeID])
+        Set(library.keys).union([currentMazeID]).filter(ActiveBuilding.isActive)   // (Oct 23: only the floors in use)
+    }
+
+    /// Oct 18 (building life): any floor's walkable plan -- for residents
+    /// living on floors the player isn't on. The live floor comes from the
+    /// live state (unsaved edits included); the others from the library.
+    /// Read only: nothing about the floors changes.
+    func floorPlan(for id: Int) -> FloorPlan? {
+        guard ActiveBuilding.isActive(id) else { return nil }              // Oct 23 (ten-floor experiment): out of use
+        let elevator = id == 1 ? Self.elevatorCoordinate : Self.floor2ElevatorCoordinate
+        if id == currentMazeID {
+            guard !cells.isEmpty else { return nil }
+            var furnished = Set(tables.keys).union(desks.keys).union(waterCoolers.keys).union(officeChairs.keys)
+            furnished.formUnion(floorLamps.keys)
+            furnished.formUnion(aquariums.keys)
+            furnished.formUnion(filingCabinets.keys)
+            var plan = FloorPlan(floor: id, cells: cells, doors: roomEntranceDoors.mapValues { $0.direction },
+                                 bathroomDoors: bathroomDoors, elevator: cells.contains(elevator) ? elevator : nil, furnished: furnished,
+                                 cellSize: Float(cellSize), windowDoors: windowRooms.mapValues { $0.direction })
+            // Oct 18 (open the building): which furniture is where (names the open-plan places).
+            var kinds: [GridCoordinate: String] = [:]
+            for c in tables.keys { kinds[c] = "table" }
+            for c in desks.keys { kinds[c] = "desk" }
+            for c in waterCoolers.keys { kinds[c] = "waterCooler" }
+            for c in officeChairs.keys { kinds[c] = "officeChair" }
+            for c in floorLamps.keys { kinds[c] = "floorLamp" }
+            for c in aquariums.keys { kinds[c] = "aquarium" }
+            for c in filingCabinets.keys { kinds[c] = "filingCabinet" }
+            plan.furnitureKinds = kinds
+            return plan
+        }
+        guard let record = library[id], !record.cells.isEmpty else { return nil }
+        let cellSet = Set(record.cells)
+        var doors: [GridCoordinate: Direction] = [:]
+        for d in record.roomEntranceDoors { doors[d.coord] = d.direction }
+        var bathroom: [GridCoordinate: Direction] = [:]
+        for d in record.bathroomDoors { bathroom[d.coord] = d.direction }
+        var furnished = Set(record.tables.map { $0.coord })
+        furnished.formUnion(record.desks.map { $0.coord })
+        furnished.formUnion(record.waterCoolers.map { $0.coord })
+        furnished.formUnion(record.officeChairs.map { $0.coord })
+        furnished.formUnion(record.floorLamps.map { $0.coord })
+        furnished.formUnion(record.aquariums.map { $0.coord })
+        furnished.formUnion(record.filingCabinets.map { $0.coord })
+        var windows: [GridCoordinate: Direction] = [:]
+        for w in record.windowRooms { windows[w.coord] = w.direction }
+        var plan = FloorPlan(floor: id, cells: cellSet, doors: doors, bathroomDoors: bathroom, elevator: cellSet.contains(elevator) ? elevator : nil,
+                             furnished: furnished, cellSize: Float(cellSize), windowDoors: windows)
+        // Oct 18 (open the building): which furniture is where (names the open-plan places).
+        var kinds: [GridCoordinate: String] = [:]
+        for f in record.tables { kinds[f.coord] = "table" }
+        for f in record.desks { kinds[f.coord] = "desk" }
+        for f in record.waterCoolers { kinds[f.coord] = "waterCooler" }
+        for f in record.officeChairs { kinds[f.coord] = "officeChair" }
+        for f in record.floorLamps { kinds[f.coord] = "floorLamp" }
+        for f in record.aquariums { kinds[f.coord] = "aquarium" }
+        for f in record.filingCabinets { kinds[f.coord] = "filingCabinet" }
+        plan.furnitureKinds = kinds
+        return plan
     }
 
     /// Running total of all cash absorbed this run, across every floor
@@ -1791,7 +1851,11 @@ final class MazeStore: ObservableObject {
     /// doesn't). Not yet persisted to disk, so it resets if the app is
     /// force-quit mid-run — acceptable for now since there's no broader
     /// "save game" system yet either; revisit once one exists.
-    @Published private(set) var moneyTotal = 0
+    /// Oct 11 (resume): now persisted (ResumeState.moneyKey) -- restored at
+    /// launch, saved on every change while ResumeState is recording.
+    @Published private(set) var moneyTotal = UserDefaults.standard.integer(forKey: ResumeState.moneyKey) {
+        didSet { if ResumeState.isRecording { UserDefaults.standard.set(moneyTotal, forKey: ResumeState.moneyKey) } }
+    }
 
     /// One "a cash pickup just happened" event -- purely for
     /// ContentView's screen-space celebration (gold flash, a flying
@@ -1977,6 +2041,13 @@ final class MazeStore: ObservableObject {
             if Admission.resumesInAdministration, loaded[Admission.administrationFloor] != nil {
                 startID = Admission.administrationFloor
             }
+            // Oct 11 (resume): reopen on the floor the player left, at their
+            // saved spot (placed by the first build; see ResumeState).
+            if let resumeFloor = ResumeState.launchFloor(available: Set(loaded.keys).filter(ActiveBuilding.isActive)) {   // (Oct 23: never above the floors in use)
+                startID = resumeFloor
+                ResumeState.pendingPlacement = ResumeState.point
+                diag("resume.launch", ["floor": resumeFloor])
+            }
             #if DEBUG
             // Dev-only override: if the "Start on last dev floor"
             // toggle is on and that floor still exists in what was
@@ -1985,7 +2056,7 @@ final class MazeStore: ObservableObject {
             // (and every Release build) are completely unaffected.
             if UserDefaults.standard.bool(forKey: Self.devStartOnLastFloorKey) {
                 let lastID = UserDefaults.standard.integer(forKey: Self.devLastJumpedFloorKey)
-                if loaded[lastID] != nil {
+                if loaded[lastID] != nil, ActiveBuilding.isActive(lastID) {
                     startID = lastID
                 }
             }
@@ -3104,6 +3175,67 @@ final class MazeStore: ObservableObject {
         version += 1
     }
 
+    /// Oct 18 (Connected-Area fill): the same per-cell override write as
+    /// setCellSurfaceTexture, for many cells and surfaces in ONE change (one
+    /// version bump, so one scene rebuild). Returns how many cell-surfaces changed.
+    @discardableResult
+    func setCellSurfaceTextures(_ name: String?, for surfaces: [CellSurfaceKind], at coords: [GridCoordinate]) -> Int {
+        var changed = 0
+        for coord in coords where cells.contains(coord) {
+            var value = cellSurfaces[coord] ?? CellSurfaceOverride()
+            for surface in surfaces where cellSurfaceTexture(surface, at: coord) != name {
+                switch surface {
+                case .wall: value.wallTexture = name
+                case .floor: value.floorTexture = name
+                case .ceiling: value.ceilingTexture = name
+                }
+                changed += 1
+            }
+            if value.isEmpty { cellSurfaces.removeValue(forKey: coord) } else { cellSurfaces[coord] = value }
+        }
+        if changed > 0 { version += 1 }
+        return changed
+    }
+
+    /// Oct 18 (Connected-Area fill): is there a doorway on the edge between two
+    /// side-by-side open cells? The floor's data records every doorway between
+    /// open cells on one of its two sides -- a room entrance, a bathroom door or
+    /// a window-room door (each keyed by its cell, facing the other). Open or
+    /// shut makes no difference: a doorway is a boundary.
+    func hasDoorway(between a: GridCoordinate, and b: GridCoordinate) -> Bool {
+        func faces(_ from: GridCoordinate, _ to: GridCoordinate) -> Direction? {
+            Direction.allCases.first { from.row + $0.delta.row == to.row && from.col + $0.delta.col == to.col }
+        }
+        guard let ab = faces(a, b), let ba = faces(b, a) else { return false }
+        return roomEntranceDoors[a]?.direction == ab || roomEntranceDoors[b]?.direction == ba
+            || bathroomDoors[a] == ab || bathroomDoors[b] == ba
+            || windowRooms[a]?.direction == ab || windowRooms[b]?.direction == ba
+    }
+
+    /// Oct 18 (Connected-Area fill): every open cell of this floor reachable
+    /// from `start` without crossing a wall (a side whose neighbour isn't an
+    /// open cell -- exactly where HallwayScene builds walls) or a doorway.
+    /// Plain breadth-first search over the floor's own cells: any size, any
+    /// extent (Floor 5 past 15 x 15), no room names or numbers. Empty if
+    /// `start` isn't an open cell.
+    func connectedArea(from start: GridCoordinate) -> Set<GridCoordinate> {
+        guard cells.contains(start) else { return [] }
+        var area: Set<GridCoordinate> = [start]
+        var queue = [start]
+        var index = 0
+        while index < queue.count {
+            let here = queue[index]
+            index += 1
+            for direction in Direction.allCases {
+                let next = GridCoordinate(row: here.row + direction.delta.row, col: here.col + direction.delta.col)
+                guard cells.contains(next), !area.contains(next), !hasDoorway(between: here, and: next) else { continue }
+                area.insert(next)
+                queue.append(next)
+            }
+        }
+        return area
+    }
+
     fileprivate static func tableDictionary(_ placements: [TablePlacement], cells: Set<GridCoordinate>) -> [GridCoordinate: FurnitureTable] {
         var result: [GridCoordinate: FurnitureTable] = [:]
         for placement in placements where cells.contains(placement.coord) {
@@ -3835,6 +3967,34 @@ final class MazeStore: ObservableObject {
     /// with Claude, who turns it into a bundled seed/default maze set
     /// shipped with the app -- decoded through the identical
     /// JSONDecoder path MazeLibrary.loadAll() already uses.
+    /// Oct 17 (My Photos deletion rules, see MyPhotoUsage): readable places a
+    /// texture name is used in one building JSON (floor-wide surfaces, cell
+    /// surface overrides, room entrance doors); nil if the JSON can't be read.
+    static func texturePlaces(_ id: String, inLibraryJSON data: Data) -> [String]? {
+        guard let records = try? JSONDecoder().decode([MazeRecord].self, from: data) else { return nil }
+        var out: [String] = []
+        for r in records.sorted(by: { $0.id < $1.id }) {
+            for (value, label) in [(r.wallTexture, "wall"), (r.floorTexture, "floor"), (r.ceilingTexture, "ceiling")] where value == id {
+                out.append("Floor \(r.id) \u{2014} default \(label) texture")
+            }
+            for c in r.cellSurfaces.sorted(by: { ($0.coord.row, $0.coord.col) < ($1.coord.row, $1.coord.col) }) {
+                let parts = [(c.wallTexture, "walls"), (c.floorTexture, "floor"), (c.ceilingTexture, "ceiling")]
+                    .filter { $0.0 == id }.map { $0.1 }
+                if !parts.isEmpty {
+                    out.append("Floor \(r.id), cell (row \(c.coord.row), col \(c.coord.col)) \u{2014} \(parts.joined(separator: ", "))")
+                }
+            }
+            for d in r.roomEntranceDoors where d.textureName == id {
+                out.append("Floor \(r.id), cell (row \(d.coord.row), col \(d.coord.col)) \u{2014} room door")
+            }
+        }
+        // (belt and braces: mentioned somewhere not listed above -- still a use)
+        if out.isEmpty, let text = String(data: data, encoding: .utf8), text.contains(id) {
+            out.append("Another setting in the building")
+        }
+        return out
+    }
+
     func exportLibraryJSON() -> String? {
         save()
         let encoder = JSONEncoder()
@@ -4087,7 +4247,8 @@ final class MazeStore: ObservableObject {
             id: id,
             cells: cells,
             nextMazeID: record.nextMazeID,
-            objects: Dictionary(uniqueKeysWithValues: record.objects.map { ($0.coord, $0.kind) }),
+            objects: ResumeState.unconsumed(objects: Dictionary(uniqueKeysWithValues: record.objects.map { ($0.coord, $0.kind) }),
+                                            floor: id),   // Oct 11 (resume): collected stays collected
             floorObjectPlacements: Dictionary(uniqueKeysWithValues: record.objects.filter { $0.kind == .trashCan }.map { ($0.coord, FloorObjectPlacement(position: $0.floorPosition ?? .center, orientation: $0.floorOrientation ?? .northSouth)) }),
             destinations: Dictionary(uniqueKeysWithValues: record.destinations.map { ($0.coord, $0.kind) }),
             exitSigns: Dictionary(uniqueKeysWithValues: record.exitSigns.map { ($0.coord, $0.direction) }),
@@ -4113,7 +4274,7 @@ final class MazeStore: ObservableObject {
             connectFourTerminals: Dictionary(uniqueKeysWithValues: record.connectFourTerminals.map { ($0.coord, $0.direction) }),
             checkersTerminals: Dictionary(uniqueKeysWithValues: record.checkersTerminals.map { ($0.coord, $0.direction) }),
             woidleTerminals: Dictionary(uniqueKeysWithValues: record.woidleTerminals.map { ($0.coord, $0.direction) }),
-            fires: Set(record.fires.map(\.coord)),
+            fires: ResumeState.unconsumed(fires: Set(record.fires.map(\.coord)), floor: id),   // Oct 11 (resume)
             tables: Self.tableDictionary(record.tables, cells: cells),
             desks: Self.deskDictionary(record.desks, cells: cells),
             waterCoolers: Self.waterCoolerDictionary(record.waterCoolers, cells: cells),
@@ -4141,13 +4302,13 @@ final class MazeStore: ObservableObject {
 
     /// Oct 8 (the phone's Building GPS): every floor the building has, for
     /// its floor picker. Read-only.
-    var buildingFloorIDs: [Int] { library.filter { !$0.value.cells.isEmpty }.keys.sorted() }
+    var buildingFloorIDs: [Int] { library.filter { !$0.value.cells.isEmpty && ActiveBuilding.isActive($0.key) }.keys.sorted() }   // (Oct 23: in use)
 
     /// Oct 8 (Building GPS): the plain plan of ANY floor -- corridors,
     /// elevator, doors, exit signs and wall objects -- straight from the
     /// stored floor data, read-only. Nothing is loaded, built or changed.
     func floorPlan(id: Int) -> BuildingFloorPlan? {
-        guard let r = library[id], !r.cells.isEmpty else { return nil }
+        guard ActiveBuilding.isActive(id), let r = library[id], !r.cells.isEmpty else { return nil }   // (Oct 23: in use)
         let faces: (Direction, GridCoordinate) -> WallFace = { WallFace(coord: $1, direction: $0) }
         let wallObjects = Set(r.pictures.map { faces($0.direction, $0.coord) })
             .union(r.mirrors.map { faces($0.direction, $0.coord) })
@@ -4190,7 +4351,12 @@ final class MazeStore: ObservableObject {
     /// floor authored without a next-floor link just quietly stays on
     /// the existing "You made it!" screen instead of going anywhere.
     func advanceToNextMaze() {
-        guard let next = nextMazeID else { diag("maze.advanceToNextMaze", ["from": currentMazeID, "next": "none"]); return }
+        guard var next = nextMazeID else { diag("maze.advanceToNextMaze", ["from": currentMazeID, "next": "none"]); return }
+        // Oct 23 (ten-floor experiment): a link to a floor out of use leads to the lobby instead.
+        if !ActiveBuilding.isActive(next) {
+            diag("maze.advanceToNextMaze.outOfUse", ["from": currentMazeID, "next": next, "instead": 1])
+            next = 1
+        }
         diag("maze.advanceToNextMaze", ["from": currentMazeID, "next": next])
         switchTo(id: next)
     }
@@ -4214,6 +4380,27 @@ final class MazeStore: ObservableObject {
     }
 
     var canUndo: Bool { !undoStack.isEmpty }
+
+    /// Oct 17 (My Photos deletion): whether an Undo step on this floor could put
+    /// `texture` back on a cell surface or room door (floor-wide textures aren't
+    /// in Undo), and dropping that step and everything older (Undo is a stack,
+    /// so newer steps stay usable) -- a deleted photo can't come back by Undo.
+    func undoHistoryMentions(_ texture: String) -> Bool { lastUndoIndex(mentioning: texture) != nil }
+
+    @discardableResult
+    func dropUndoHistory(mentioning texture: String) -> Int {
+        guard let last = lastUndoIndex(mentioning: texture) else { return 0 }
+        undoStack.removeFirst(last + 1)
+        return last + 1
+    }
+
+    private func lastUndoIndex(mentioning texture: String) -> Int? {
+        undoStack.lastIndex { step in
+            step.additionalContent.cellSurfaces.values.contains {
+                $0.wallTexture == texture || $0.floorTexture == texture || $0.ceilingTexture == texture
+            } || step.roomEntranceDoors.values.contains { $0.textureName == texture }
+        }
+    }
 
     func undo() {
         guard let previous = undoStack.popLast() else { return }

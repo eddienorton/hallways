@@ -1,0 +1,86 @@
+{
+ "id": "lantern-room",
+ "title": "The Lantern Room",
+ "subtitle": "Hallways Originals #4",
+ "genre": "Cinematic waltz",
+ "order": 5,
+ "bpm": 76,
+ "beatsPerBar": 3,
+ "loopFrames": 3342316,
+ "sampleRate": 44100,
+ "parts": [
+  {
+   "id": "glock",
+   "musician": "Glockenspiel",
+   "instrument": "the music box",
+   "color": "#D49A2A",
+   "loop": "lab-lanternroom-loop-glock.m4a",
+   "performance": "lab-lanternroom-perf-glock.m4a"
+  },
+  {
+   "id": "harp",
+   "musician": "Harp",
+   "instrument": "harp",
+   "color": "#9C5B3B",
+   "loop": "lab-lanternroom-loop-harp.m4a",
+   "performance": "lab-lanternroom-perf-harp.m4a"
+  },
+  {
+   "id": "flute",
+   "musician": "Flute",
+   "instrument": "flute",
+   "color": "#3C7DBF",
+   "loop": "lab-lanternroom-loop-flute.m4a",
+   "performance": "lab-lanternroom-perf-flute.m4a"
+  },
+  {
+   "id": "violin",
+   "musician": "Violin",
+   "instrument": "solo violin",
+   "color": "#C8553D",
+   "loop": "lab-lanternroom-loop-violin.m4a",
+   "performance": "lab-lanternroom-perf-violin.m4a"
+  },
+  {
+   "id": "violins",
+   "musician": "Violins",
+   "instrument": "violin section",
+   "color": "#B0517E",
+   "loop": "lab-lanternroom-loop-violins.m4a",
+   "performance": "lab-lanternroom-perf-violins.m4a"
+  },
+  {
+   "id": "violas",
+   "musician": "Violas",
+   "instrument": "viola section",
+   "color": "#8A9BA8",
+   "loop": "lab-lanternroom-loop-violas.m4a",
+   "performance": "lab-lanternroom-perf-violas.m4a"
+  },
+  {
+   "id": "cellos",
+   "musician": "Cellos",
+   "instrument": "cello section",
+   "color": "#2E8B6E",
+   "loop": "lab-lanternroom-loop-cellos.m4a",
+   "performance": "lab-lanternroom-perf-cellos.m4a"
+  },
+  {
+   "id": "basses",
+   "musician": "Double bass",
+   "instrument": "contrabass",
+   "color": "#5B4B8A",
+   "loop": "lab-lanternroom-loop-basses.m4a",
+   "performance": "lab-lanternroom-perf-basses.m4a"
+  },
+  {
+   "id": "horn",
+   "musician": "Horn",
+   "instrument": "French horn",
+   "color": "#6E7F8D",
+   "loop": "lab-lanternroom-loop-horn.m4a",
+   "performance": "lab-lanternroom-perf-horn.m4a"
+  }
+ ],
+ "loopStartFrame": 4096
+}

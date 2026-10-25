@@ -1,0 +1,93 @@
+{
+ "id": "rua-das-lampadas",
+ "title": "Rua das Lâmpadas",
+ "subtitle": "Hallways Originals #5 · with singers",
+ "genre": "Bossa nova",
+ "order": 3,
+ "bpm": 140,
+ "beatsPerBar": 4,
+ "loopFrames": 2419200,
+ "sampleRate": 44100,
+ "parts": [
+  {
+   "id": "lead",
+   "musician": "Singer A",
+   "instrument": "lead vocal (temporary)",
+   "color": "#C8553D",
+   "loop": "lab-ruadaslampadas-loop-lead.caf",
+   "performance": "lab-ruadaslampadas-perf-lead.m4a"
+  },
+  {
+   "id": "harmony",
+   "musician": "Singer B",
+   "instrument": "harmony vocal (temporary)",
+   "color": "#B0517E",
+   "loop": "lab-ruadaslampadas-loop-harmony.caf",
+   "performance": "lab-ruadaslampadas-perf-harmony.m4a"
+  },
+  {
+   "id": "flute",
+   "musician": "Flute",
+   "instrument": "flute",
+   "color": "#3C7DBF",
+   "loop": "lab-ruadaslampadas-loop-flute.caf",
+   "performance": "lab-ruadaslampadas-perf-flute.m4a"
+  },
+  {
+   "id": "guitar",
+   "musician": "Guitar",
+   "instrument": "nylon-string guitar",
+   "color": "#9C5B3B",
+   "loop": "lab-ruadaslampadas-loop-guitar.caf",
+   "performance": "lab-ruadaslampadas-perf-guitar.m4a"
+  },
+  {
+   "id": "piano",
+   "musician": "Piano",
+   "instrument": "grand piano",
+   "color": "#2E8B6E",
+   "loop": "lab-ruadaslampadas-loop-piano.caf",
+   "performance": "lab-ruadaslampadas-perf-piano.m4a"
+  },
+  {
+   "id": "bass",
+   "musician": "Bass",
+   "instrument": "double bass",
+   "color": "#5B4B8A",
+   "loop": "lab-ruadaslampadas-loop-bass.caf",
+   "performance": "lab-ruadaslampadas-perf-bass.m4a"
+  },
+  {
+   "id": "congas",
+   "musician": "Congas",
+   "instrument": "congas",
+   "color": "#D49A2A",
+   "loop": "lab-ruadaslampadas-loop-congas.caf",
+   "performance": "lab-ruadaslampadas-perf-congas.m4a"
+  },
+  {
+   "id": "bongos",
+   "musician": "Bongos",
+   "instrument": "bongos",
+   "color": "#C27A2C",
+   "loop": "lab-ruadaslampadas-loop-bongos.caf",
+   "performance": "lab-ruadaslampadas-perf-bongos.m4a"
+  },
+  {
+   "id": "shaker",
+   "musician": "Shaker",
+   "instrument": "shaker",
+   "color": "#8A9BA8",
+   "loop": "lab-ruadaslampadas-loop-shaker.caf",
+   "performance": "lab-ruadaslampadas-perf-shaker.m4a"
+  },
+  {
+   "id": "claves",
+   "musician": "Claves",
+   "instrument": "claves",
+   "color": "#6E7F8D",
+   "loop": "lab-ruadaslampadas-loop-claves.caf",
+   "performance": "lab-ruadaslampadas-perf-claves.m4a"
+  }
+ ]
+}

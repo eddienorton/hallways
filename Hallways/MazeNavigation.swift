@@ -37,8 +37,23 @@ import Foundation
 /// how many steps a single advance() actually queued up.
 func navLog(_ message: @autoclosure () -> String) {
     #if DEBUG
-    print("[Nav] \(message())")
+    let text = message()
+    // Oct 18 (console cleanup): finished investigations stay quiet unless asked for.
+    if !DevLog.verbose, DevLog.quietPrefixes.contains(where: { text.hasPrefix($0) }) { return }
+    print("[Nav] \(text)")
     #endif
+}
+
+/// Oct 18 (console cleanup): old, high-volume investigation channels (photo
+/// paths, the photo booth, mirror faces, lighting determinism, the
+/// extinguisher census) are off in the console unless the launch argument
+/// -HallwaysVerboseLogs YES is set. Nothing else changes: the flight
+/// recorder still gets whatever it got, and every other console line --
+/// navigation, elevators ([ELEVATOR]), leads ([Lead]), informants, scene
+/// lifecycle, residents ([Life]) -- is untouched.
+enum DevLog {
+    nonisolated static var verbose: Bool { UserDefaults.standard.bool(forKey: "HallwaysVerboseLogs") }
+    nonisolated static let quietPrefixes = ["PHOTO-PATH-V1", "PHOTODIAG", "PBDIAG", "MIRRORDIAG", "[LIGHTBUILD"]
 }
 
 /// Oct 2 (beta: Carol stuck behind the arrival curtain): elevator-arrival

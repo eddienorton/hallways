@@ -254,13 +254,8 @@ enum HallwayScene {
         return root
     }
 
-    static func makeCarriedFireExtinguisherNode() -> SCNNode {
-        let node = makeFireExtinguisherNode(at: GridCoordinate(row: 0, col: 0), direction: .north, cellSize: 0)
-        node.position = SCNVector3(0.42, -0.32, -0.72)
-        node.eulerAngles = SCNVector3(0, Float.pi / 8, 0)
-        node.scale = SCNVector3(0.28, 0.28, 0.28)
-        return node
-    }
+    // (Oct 16 II: makeCarriedFireExtinguisherNode -- the old camera-attached
+    // carried extinguisher -- removed. A carried extinguisher is ToolBelt's.)
 
     static func makePhotoBoothNode(at coord: GridCoordinate, direction: Direction, expression: PhotoBoothExpression, cellSize: CGFloat) -> SCNNode {
         let root = SCNNode()
@@ -1688,6 +1683,43 @@ enum HallwayScene {
     /// wallSurface identity, see DecoratorTarget) and every other
     /// parameter is exactly what that closure used to capture.
     @discardableResult
+    /// Oct 18 (wallpaper seams around doorways and pictures): ordinary wall
+    /// panels each span one cell -- two pattern repeats, starting at a cell
+    /// edge -- so along any wall the pattern's phase is simply (distance along
+    /// the wall) / (half a cell), and from the top, (depth below the ceiling) /
+    /// (half the wall height). A smaller piece (a doorway's side strip, a
+    /// picture's backing) used to start its pattern fresh at its own edge,
+    /// which broke the wallpaper wherever it met the next panel -- the
+    /// "doorway-shaped" outline. This is that phase at the piece's visible
+    /// face's top-left corner (texture u runs to the viewer's right, v down),
+    /// so its pattern continues the wall's. `facingOwner`: the face looks into
+    /// the cell whose `direction` side the wall is on (else the other cell).
+    static func wallPatternPhase(direction: Direction, facingOwner: Bool, centerX: CGFloat, centerZ: CGFloat,
+                                 length: CGFloat, top: CGFloat, cellSize: CGFloat, wallHeight: CGFloat) -> (u: Float, v: Float) {
+        func frac(_ x: CGFloat) -> CGFloat { x - x.rounded(.down) }
+        let sign: CGFloat = facingOwner ? -1 : 1                         // the face's outward normal = sign x delta
+        let nx = CGFloat(direction.delta.col) * sign, nz = CGFloat(direction.delta.row) * sign
+        let rightX = nz, rightZ = -nx                                    // the viewer's right, looking at that face
+        let along = centerX * rightX + centerZ * rightZ - length / 2     // the face's left edge
+        let u = frac(along / (cellSize / 2))
+        let v = frac((wallHeight - top) / (wallHeight / 2))
+        return (Float(u), Float(v))
+    }
+
+    /// The wall repeat (scale) plus that phase (added after scaling).
+    static func wallRepeatTransform(_ s: Float, _ t: Float, _ phase: (u: Float, v: Float)) -> SCNMatrix4 {
+        var m = SCNMatrix4MakeScale(s, t, 1)
+        m.m41 = phase.u
+        m.m42 = phase.v
+        return m
+    }
+
+    /// "wallRepeat:SxT@UxV" -- a live re-skin (ContentView.repeatTransform)
+    /// rebuilds the transform from this name, phase included.
+    static func wallRepeatName(_ s: Float, _ t: Float, _ phase: (u: Float, v: Float)) -> String {
+        "wallRepeat:\(s)x\(t)@\(phase.u)x\(phase.v)"
+    }
+
     static func buildWallPanel(coord: GridCoordinate, direction: Direction, width: CGFloat, length: CGFloat, x: CGFloat, z: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, floorNumber: Int, root: SCNNode, wallMaterials: inout [SCNMaterial]) -> SCNNode {
         let geo = SCNBox(width: width, height: wallHeight, length: length, chamferRadius: 0)
         let material = makeWallMaterial(imageName: effectiveWallImageName)
@@ -1718,19 +1750,35 @@ enum HallwayScene {
     /// later without a second identity mechanism of its own -- see
     /// PictureBackfillTarget and buildPictureBackfill just below.
     @discardableResult
-    static func buildDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, cellSize: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, root: SCNNode, wallMaterials: inout [SCNMaterial], tag: ((SCNNode) -> Void)? = nil) -> [SCNNode] {
+    /// Oct 18 (doorway wall sides): `backSide` -- for a doorway between two
+    /// open cells -- builds each strip as two half-thickness pieces back to
+    /// back, filling exactly the space the one strip did: the owner's half
+    /// (facing the owner cell) as before, and a half facing the other cell,
+    /// named and textured for THAT cell (its own wall texture or the floor's
+    /// default). So each side of a doorway wall follows the cell it faces,
+    /// through every existing path that goes by the cellWall- name (build,
+    /// live re-skin, the paint mission). nil = one strip, unchanged.
+    static func buildDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, cellSize: CGFloat, wallHeight: CGFloat, effectiveWallImageName: String?, root: SCNNode, wallMaterials: inout [SCNMaterial], tag: ((SCNNode) -> Void)? = nil,
+                               backSide: (imageName: String?, owner: GridCoordinate)? = nil) -> [SCNNode] {
         let thick: CGFloat = 0.1
         let doorTop = doorCenterY + doorHeight / 2
         let doorBottom = doorCenterY - doorHeight / 2
         let sideStripWidth = (cellSize - doorWidth) / 2
         var createdStrips: [SCNNode] = []
+        let owner = GridCoordinate(row: Int((wallCenterZ / cellSize - CGFloat(direction.delta.row) / 2).rounded()),
+                                   col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
 
-        func stripMaterial(width: CGFloat, height: CGFloat) -> SCNMaterial {
-            let material = makeWallMaterial(imageName: effectiveWallImageName)
+        /// `centerX/Z`, `top`, `facingOwner`: where the piece's visible face is, so its
+        /// pattern continues the wall's own (Oct 18 -- see wallPatternPhase).
+        func stripMaterial(width: CGFloat, height: CGFloat, imageName: String?? = nil,
+                           centerX: CGFloat, centerZ: CGFloat, top: CGFloat, facingOwner: Bool) -> SCNMaterial {
+            let material = makeWallMaterial(imageName: imageName ?? effectiveWallImageName)
             let sScale = Float(2 * width / cellSize)
             let tScale = Float(2 * height / wallHeight)
-            material.diffuse.contentsTransform = SCNMatrix4MakeScale(sScale, tScale, 1)
-            material.name = "wallRepeat:\(sScale)x\(tScale)"
+            let phase = wallPatternPhase(direction: direction, facingOwner: facingOwner, centerX: centerX, centerZ: centerZ,
+                                         length: width, top: top, cellSize: cellSize, wallHeight: wallHeight)
+            material.diffuse.contentsTransform = wallRepeatTransform(sScale, tScale, phase)
+            material.name = wallRepeatName(sScale, tScale, phase)
             wallMaterials.append(material)
             return material
         }
@@ -1738,7 +1786,47 @@ enum HallwayScene {
         func strip(alongLength: CGFloat, verticalHeight: CGFloat, alongOffset: CGFloat, verticalCenter: CGFloat) {
             guard verticalHeight > 0, alongLength > 0 else { return }
             let isTop = verticalCenter > doorTop
-            let stripThickness = thick + (isTop ? topFrontExtension : 0)
+            if let backSide, interiorMaterial == nil {
+                // Along the wall's normal n (owner -> other cell) the single strip
+                // spanned [-thick/2 - ext, +thick/2] (ext: the top strip's front
+                // extension, on the owner's side). Owner half: [-thick/2 - ext, 0];
+                // other half: [0, +thick/2].
+                let ext = isTop ? topFrontExtension : 0
+                let nx = CGFloat(direction.delta.col), nz = CGFloat(direction.delta.row)
+                func half(thickness: CGFloat, offset: CGFloat, imageName: String?, cell: GridCoordinate) {
+                    let geo: SCNBox
+                    var x = wallCenterX, z = wallCenterZ
+                    switch direction {
+                    case .north, .south:
+                        geo = SCNBox(width: alongLength, height: verticalHeight, length: thickness, chamferRadius: 0)
+                        x += alongOffset
+                    case .east, .west:
+                        geo = SCNBox(width: thickness, height: verticalHeight, length: alongLength, chamferRadius: 0)
+                        z += alongOffset
+                    }
+                    geo.materials = [stripMaterial(width: alongLength, height: verticalHeight, imageName: .some(imageName),
+                                                   centerX: x, centerZ: z, top: verticalCenter + verticalHeight / 2,
+                                                   facingOwner: cell == owner)]
+                    let node = SCNNode(geometry: geo)
+                    node.name = WallPainter.nodeName(cell)
+                    node.position = SCNVector3(Float(x + nx * offset), Float(verticalCenter), Float(z + nz * offset))
+                    tag?(node)
+                    root.addChildNode(node)
+                    createdStrips.append(node)
+                }
+                half(thickness: thick / 2 + ext, offset: -(thick / 2 + ext) / 2, imageName: effectiveWallImageName, cell: owner)
+                half(thickness: thick / 2, offset: thick / 4, imageName: backSide.imageName, cell: backSide.owner)
+                return
+            }
+            // Oct 22 (stability pass): the elevator's top strip used to be thickened by its
+            // front extension along its WHOLE length (the full cell width) -- a 4 cm ledge
+            // standing proud of the wallpaper on both sides of the doors, its underside and
+            // ends in the shaft's dark interior material: the thin dark line from the
+            // elevator header across the wall on every floor. Now the strip stays flush
+            // with the wall and the extension is a short lip over the doorway only (the
+            // exterior header's width and height), hidden behind that header.
+            let lip = isTop && topFrontExtension > 0
+            let stripThickness = thick
             let geo: SCNBox
             let x: CGFloat
             let z: CGFloat
@@ -1752,7 +1840,8 @@ enum HallwayScene {
                 x = wallCenterX
                 z = wallCenterZ + alongOffset
             }
-            let exterior = stripMaterial(width: alongLength, height: verticalHeight)
+            let exterior = stripMaterial(width: alongLength, height: verticalHeight, centerX: x, centerZ: z,
+                                         top: verticalCenter + verticalHeight / 2, facingOwner: true)
             if let interiorMaterial {
                 let outsideFace: Int
                 switch direction {
@@ -1768,17 +1857,31 @@ enum HallwayScene {
                 geo.materials = [exterior]
             }
             let node = SCNNode(geometry: geo)
-            let owner = GridCoordinate(row: Int((wallCenterZ / cellSize - CGFloat(direction.delta.row) / 2).rounded()),
-                                       col: Int((wallCenterX / cellSize - CGFloat(direction.delta.col) / 2).rounded()))
             node.name = WallPainter.nodeName(owner)
             node.position = SCNVector3(Float(x), Float(verticalCenter), Float(z))
-            if isTop {
-                node.position.x -= Float(direction.delta.col) * Float(topFrontExtension / 2)
-                node.position.z -= Float(direction.delta.row) * Float(topFrontExtension / 2)
-            }
             tag?(node)
             root.addChildNode(node)
             createdStrips.append(node)
+            if lip {
+                let lipWidth = min(alongLength, doorWidth + 0.12)
+                let lipHeight = min(verticalHeight, 0.24)
+                let lipGeo: SCNBox
+                switch direction {
+                case .north, .south: lipGeo = SCNBox(width: lipWidth, height: lipHeight, length: topFrontExtension, chamferRadius: 0)
+                case .east, .west: lipGeo = SCNBox(width: topFrontExtension, height: lipHeight, length: lipWidth, chamferRadius: 0)
+                }
+                lipGeo.materials = geo.materials
+                let lipNode = SCNNode(geometry: lipGeo)
+                lipNode.name = WallPainter.nodeName(owner)
+                // In front of the wall face (toward the hallway), from the door's top up.
+                let out = Float(thick / 2 + topFrontExtension / 2)
+                lipNode.position = SCNVector3(Float(x) - Float(direction.delta.col) * out,
+                                              Float(doorTop + lipHeight / 2),
+                                              Float(z) - Float(direction.delta.row) * out)
+                tag?(lipNode)
+                root.addChildNode(lipNode)
+                createdStrips.append(lipNode)
+            }
         }
 
         strip(alongLength: cellSize, verticalHeight: wallHeight - doorTop, alongOffset: 0, verticalCenter: doorTop + (wallHeight - doorTop) / 2)
@@ -1814,8 +1917,12 @@ enum HallwayScene {
         let backingMaterial = makeWallMaterial(imageName: effectiveWallImageName)
         let backingSScale = Float(2 * backingWidth / cellSize)
         let backingTScale = Float(2 * backingHeight / wallHeight)
-        backingMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(backingSScale, backingTScale, 1)
-        backingMaterial.name = "wallRepeat:\(backingSScale)x\(backingTScale)"
+        // (Oct 18: centred on the wall at orientOnWall's 0.55 x height, facing the room)
+        let backingPhase = wallPatternPhase(direction: direction, facingOwner: true, centerX: wallCenterX, centerZ: wallCenterZ,
+                                            length: backingWidth, top: wallHeight * 0.55 + backingHeight / 2,
+                                            cellSize: cellSize, wallHeight: wallHeight)
+        backingMaterial.diffuse.contentsTransform = wallRepeatTransform(backingSScale, backingTScale, backingPhase)
+        backingMaterial.name = wallRepeatName(backingSScale, backingTScale, backingPhase)
         wallMaterials.append(backingMaterial)
         let backingGeo = SCNBox(width: backingWidth, height: backingHeight, length: 0.02, chamferRadius: 0)
         backingGeo.materials = [backingMaterial]
@@ -2138,7 +2245,8 @@ enum HallwayScene {
         // opening instead of a full cell) fill in everything AROUND
         // the door, so the cubby becomes a small hole in a
         // normal-looking wall again, not the entire wall itself.
-        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, into container: SCNNode? = nil, tag: ((SCNNode) -> Void)? = nil, followsCellOverride: Bool = true) {
+        func addDoorFrame(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, doorWidth: CGFloat, doorHeight: CGFloat, doorCenterY: CGFloat, interiorMaterial: SCNMaterial? = nil, topFrontExtension: CGFloat = 0, into container: SCNNode? = nil, tag: ((SCNNode) -> Void)? = nil, followsCellOverride: Bool = true,
+                          splitSides: Bool = false) {
             // Oct 1 (cell-surface overrides): strips follow their OWNER cell
             // (same owner rule buildDoorFrame uses for the cellWall- name);
             // special geometry keeps the floor default and is marked exempt
@@ -2164,7 +2272,13 @@ enum HallwayScene {
             // roomEntranceDoors loop below passes them, so that door's
             // own frame strips land inside its owning assembly node
             // instead of loose in the scene root.
-            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: stripImageName, root: container ?? root, wallMaterials: &wallMaterials, tag: stripTag)
+            // Oct 18: a doorway between two open cells -- each side follows the cell it faces.
+            var backSide: (imageName: String?, owner: GridCoordinate)?
+            if splitSides, followsCellOverride {
+                let other = GridCoordinate(row: owner.row + direction.delta.row, col: owner.col + direction.delta.col)
+                if cells.contains(other) { backSide = (cellWallImageName(other), other) }
+            }
+            HallwayScene.buildDoorFrame(direction: direction, wallCenterX: wallCenterX, wallCenterZ: wallCenterZ, doorWidth: doorWidth, doorHeight: doorHeight, doorCenterY: doorCenterY, interiorMaterial: interiorMaterial, topFrontExtension: topFrontExtension, cellSize: cellSize, wallHeight: wallHeight, effectiveWallImageName: stripImageName, root: container ?? root, wallMaterials: &wallMaterials, tag: stripTag, backSide: backSide)
         }
 
         func addDestinationDoor(direction: Direction, wallCenterX: CGFloat, wallCenterZ: CGFloat, kind: ObjectKind) -> SCNNode {
@@ -4141,7 +4255,8 @@ enum HallwayScene {
             // (below) whenever currentCell changes afterward, so the red
             // dot tracks you live from here on -- see its
             // refreshFloorMapTexture().
-            let mapTexture = makeFloorMapTexture(cells: cells, end: end, playerAt: start, facing: startingFacing(at: start, cells: cells), missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), photoBoothCells: Array(photoBooths.keys), gameCells: Array(Set(ticTacToeTerminals.keys).union(shellGameStations.keys).union(rockPaperScissorsTerminals.keys).union(higherLowerTerminals.keys).union(fiveCardDrawTerminals.keys).union(simonTerminals.keys).union(hangmanTerminals.keys).union(connectFourTerminals.keys).union(checkersTerminals.keys).union(woidleTerminals.keys).intersection(cells)), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors)
+            let mapTexture = makeFloorMapTexture(cells: cells, end: end, playerAt: start, facing: startingFacing(at: start, cells: cells), missionItemCells: Array(objects.filter { $0.value == missionObjectKind }.keys), missionDestinationCells: Array(destinations.filter { $0.value == missionObjectKind }.keys), photoBoothCells: Array(photoBooths.keys), gameCells: Array(Set(ticTacToeTerminals.keys).union(shellGameStations.keys).union(rockPaperScissorsTerminals.keys).union(higherLowerTerminals.keys).union(fiveCardDrawTerminals.keys).union(simonTerminals.keys).union(hangmanTerminals.keys).union(connectFourTerminals.keys).union(checkersTerminals.keys).union(woidleTerminals.keys).intersection(cells)), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors,
+                                                gridSize: HallwayScene.floorMapGridSize(for: cells))   // Oct 17: the whole floor, even past 15 x 15
             for (coord, direction) in floorMaps {
                 guard cells.contains(coord) else { continue }
                 guard !isOpen(coord.row + direction.delta.row, coord.col + direction.delta.col) else { continue }
@@ -4486,7 +4601,7 @@ enum HallwayScene {
             case .east: (wx, wz) = (doorX + half, doorZ)
             case .west: (wx, wz) = (doorX - half, doorZ)
             }
-            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: bathroomDoorWidth, doorHeight: bathroomDoorHeight, doorCenterY: bathroomDoorCenterY)
+            addDoorFrame(direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: bathroomDoorWidth, doorHeight: bathroomDoorHeight, doorCenterY: bathroomDoorCenterY, splitSides: true)
             root.addChildNode(HallwayScene.makeBathroomDoorPanel(at: coord, direction: direction, wallCenterX: wx, wallCenterZ: wz, doorWidth: bathroomDoorWidth, doorHeight: bathroomDoorHeight, doorCenterY: bathroomDoorCenterY))
         }
 
@@ -4532,7 +4647,7 @@ enum HallwayScene {
             case .east: (dwx, dwz) = (doorX + half, doorZ)
             case .west: (dwx, dwz) = (doorX - half, doorZ)
             }
-            addDoorFrame(direction: placement.direction, wallCenterX: dwx, wallCenterZ: dwz, doorWidth: windowRoomDoorWidth, doorHeight: windowRoomDoorHeight, doorCenterY: windowRoomDoorCenterY)
+            addDoorFrame(direction: placement.direction, wallCenterX: dwx, wallCenterZ: dwz, doorWidth: windowRoomDoorWidth, doorHeight: windowRoomDoorHeight, doorCenterY: windowRoomDoorCenterY, splitSides: true)
             root.addChildNode(HallwayScene.makeBathroomDoorPanel(at: coord, direction: placement.direction, wallCenterX: dwx, wallCenterZ: dwz, doorWidth: windowRoomDoorWidth, doorHeight: windowRoomDoorHeight, doorCenterY: windowRoomDoorCenterY, hingeNamePrefix: "windowRoomDoor", includeSign: false))
 
             let roomX = worldX(neighbor.col)
@@ -4608,7 +4723,8 @@ enum HallwayScene {
             let entranceWidth = placement.style == .doubleGlass ? placement.style.doorWidth : roomEntranceDoorWidth
             let entranceHeight = placement.style == .doubleGlass ? placement.style.doorHeight : roomEntranceDoorHeight
             let entranceCenterY = placement.style == .doubleGlass ? entranceHeight / 2 : roomEntranceDoorCenterY
-            addDoorFrame(direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: entranceWidth, doorHeight: entranceHeight, doorCenterY: entranceCenterY, into: assembly, tag: { roomEntranceAssemblyTarget.tag($0) })
+            addDoorFrame(direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: entranceWidth, doorHeight: entranceHeight, doorCenterY: entranceCenterY, into: assembly, tag: { roomEntranceAssemblyTarget.tag($0) },
+                         splitSides: true)
             let roomEntranceHinge = HallwayScene.makeRoomEntranceDoorPanel(at: coord, direction: direction, wallCenterX: rwx, wallCenterZ: rwz, doorWidth: entranceWidth, doorHeight: entranceHeight, doorCenterY: entranceCenterY, style: placement.style, textureName: placement.textureName, label: placement.label)
             // Sept 27 (door cosmetics tap-routing fix): tagged so a
             // build-time Room Entrance (any floor reload or app
@@ -5229,6 +5345,11 @@ enum HallwayScene {
         return cache
     }()
 
+    /// Oct 17 (My Photos): a removed texture must not linger in the cache.
+    static func forgetThemeImage(_ imageName: String) {
+        themeImageCache.removeObject(forKey: imageName as NSString)
+    }
+
     static func resolveThemeImage(_ imageName: String?) -> UIImage? {
         guard let imageName else { return nil }
         if let image = themeImageCache.object(forKey: imageName as NSString) { return image }
@@ -5271,6 +5392,11 @@ enum HallwayScene {
             // subdirectory-aware lookup first covers the first case,
             // and falling through to the ordinary flat lookup below
             // covers the second, so this resolves correctly either way.
+            // Oct 17 (My Photos): the player's own texture, if it's one of theirs on
+            // this device; otherwise (an exported copy added to the project) the bundle below.
+            if let mine = MyTextures.storedURL(imageName) {
+                return UIImage(contentsOfFile: mine.path)
+            }
             let hallwayTextureLibrary = "hallway"
             if let url = Bundle.main.url(forResource: imageName, withExtension: "jpg", subdirectory: hallwayTextureLibrary) {
                 return UIImage(contentsOfFile: url.path)
@@ -5814,7 +5940,15 @@ enum HallwayScene {
     /// updating as you walk, is real additional plumbing -- this
     /// texture is baked once per floor-build, not re-rendered on every
     /// move -- saved for its own pass.
-    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, headingYaw: Double? = nil, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], fireCells: [GridCoordinate] = [], extinguisherCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], gameCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false, wallObjectFaces: Set<WallFace> = [], doorFaces: Set<WallFace> = [], exitSignFaces: Set<WallFace> = []) -> UIImage {
+    /// Oct 17 (wall map fit): the square grid (in cells) one floor's own map
+    /// needs -- the building's 15, or more when the floor reaches past row or
+    /// column 14 (Floor 5's eastern and southern extension). Every floor that
+    /// fits the 15 x 15 sheet gets exactly 15, so its map is unchanged.
+    static func floorMapGridSize(for cells: Set<GridCoordinate>) -> Int {
+        cells.reduce(15) { max($0, $1.row + 1, $1.col + 1) }
+    }
+
+    static func makeFloorMapTexture(cells: Set<GridCoordinate>, end: GridCoordinate, playerAt: GridCoordinate, facing: Direction = .north, headingYaw: Double? = nil, missionItemCells: [GridCoordinate] = [], missionDestinationCells: [GridCoordinate] = [], fireCells: [GridCoordinate] = [], extinguisherCells: [GridCoordinate] = [], photoBoothCells: [GridCoordinate] = [], gameCells: [GridCoordinate] = [], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], paintedCells: Set<GridCoordinate>? = nil, backgroundOpacity: CGFloat = 1, simplified: Bool = false, wallObjectFaces: Set<WallFace> = [], doorFaces: Set<WallFace> = [], exitSignFaces: Set<WallFace> = [], gridSize: Int = 15) -> UIImage {
         // simplified (the handheld mini-map): a small, clean corridor
         // shape -- floor cells plus the live player marker only. No
         // room numbers, mission dots, elevator, booths, painted fill,
@@ -5826,7 +5960,10 @@ enum HallwayScene {
         // The permanent building coordinate space (GridEditorView's own
         // fixed columns/rows) -- NOT this floor's occupied-cell bounding
         // box. See this function's doc comment above.
-        let buildingGridSize = 15
+        // Oct 17 (Building GPS): a caller may draw a bigger square grid (never
+        // smaller than the building's 15) so a floor reaching past column or
+        // row 14 is not cut off; everyone else keeps the 15 x 15 sheet.
+        let buildingGridSize = max(15, gridSize)
         let width = CGFloat(buildingGridSize) * cellPx + margin * 2
         let height = CGFloat(buildingGridSize) * cellPx + margin * 2
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height))

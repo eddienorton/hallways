@@ -36,6 +36,17 @@ enum FredOfficeEncounter {
     private static weak var leading: SCNNode?
     private static var activeLead: CharacterLead?
 
+    /// Oct 24 (Start Over without relaunch): his performance and "follow me" lead
+    /// from the last game are forgotten (a relaunch always started from nothing).
+    static func resetForNewPlayer() {
+        activeLead?.cancel()
+        activeLead = nil
+        leading = nil
+        readyToPet = nil
+        petted = nil
+        performedFor = nil
+    }
+
     private static var occupant: SCNNode? {
         AdministrationReception.officeNode?.childNode(withName: AdministrationReception.officeOccupantName, recursively: false)
     }
@@ -77,6 +88,13 @@ enum FredOfficeEncounter {
             n = current.parent
         }
         return false
+    }
+
+    /// Oct 19: Tinky has just spoken to the player for the first time.
+    private static func metTinky(_ fred: SCNNode) {
+        if ContactsStore.shared.meet(CharacterRegistry.tinkyID, body: fred) {
+            diag("contacts.met", ["who": "tinky", "event": "firstWords"])
+        }
     }
 
     static func begin() {
@@ -166,7 +184,9 @@ enum FredOfficeEncounter {
         })
         beats.append(.wait(duration: 0.3))
         beats.append(.group([face(player, from: start, 0.45), tilt(0.1, 0.45),
-                             .sequence([.wait(duration: 0.22), say(FredSound.query)])]))
+                             .sequence([.wait(duration: 0.22), say(FredSound.query),
+                                        // Oct 19: his first word to you is meeting him -- Contacts (once).
+                                        .run { _ in DispatchQueue.main.async { MainActor.assumeIsolated { metTinky(fred) } } }])]))
         // Oct 10 (playthrough): every hold below trimmed -- he sat too long
         // before the hop. Same beats, same order, same jump.
         beats.append(.wait(duration: 0.3))
@@ -213,6 +233,12 @@ enum FredOfficeEncounter {
         beats.append(tilt(-0.38, 0.22))
         beats.append(.wait(duration: 0.14))
         let wobbleH = CGFloat(heading(corner, landed))
+        // Oct 12 (stability): after the shortest-arc turn above (past 90 degrees),
+        // SceneKit reads his orientation back as the equivalent (pi, y', pi); the
+        // wobble's plain rotateTo then rolled him right over on his feet for a
+        // few frames (the one-frame "teleport" low and left of the desk edge).
+        // Same pose, restated as plain yaw, so the wobble starts from it.
+        beats.append(.run { $0.eulerAngles = SCNVector3(0, Float(wobbleH), 0) })
         beats.append(.sequence([.rotateTo(x: 0, y: wobbleH, z: 0.07, duration: 0.08), .rotateTo(x: 0, y: wobbleH, z: -0.07, duration: 0.1),
                                 .rotateTo(x: 0, y: wobbleH, z: 0.05, duration: 0.09), .rotateTo(x: 0, y: wobbleH, z: 0, duration: 0.08)]))
         beats.append(.wait(duration: 0.12))
@@ -264,7 +290,33 @@ enum FredOfficeEncounter {
     private static func beginFollowMe(_ fred: SCNNode) {
         guard fred.parent != nil else { return }
         activeLead?.cancel()
-        let lead = FredLead.startFollowMe(fred: fred) {
+        activeLead = nil
+        // Oct 24 -- THE FIRST FOLLOW LESSON: the introduction above is unchanged; now he
+        // steps back to where he's easy to see, and waits to be followed (GuidedJourney:
+        // the FOLLOW sign, his card's FOLLOW, the one nudge). FOLLOW chosen: the "follow
+        // me!" below, and the escort on FOLLOW.
+        leading = fred                                               // (taps on him are his card's now)
+        Cast.jeffActivity("waiting for the player to FOLLOW")
+        let performer = FredLeadPerformer(node: fred)
+        let player = FredLead.context?.playerPose()?.position
+        let away: () -> Void = {
+            guard fred.parent != nil else { return }
+            if let player { performer.look(at: player, 0.25) {} }
+            GuidedJourney.awaitFollow(guide: fred, fromFloor: floor, toFloor: FredLead.orientationFloor) {
+                startEscortLead(fred)
+            }
+        }
+        guard let player else { away(); return }
+        performer.stepBack(from: player, distance: 0.28) {
+            performer.stepBack(from: player, distance: 0.28) { away() }
+        }
+    }
+
+    /// FOLLOW chosen: "follow me!" and the lead to the elevator nook, on FOLLOW.
+    private static func startEscortLead(_ fred: SCNNode) {
+        guard fred.parent != nil else { return }
+        activeLead?.cancel()
+        let lead = FredLead.startFollowMe(fred: fred, onFollow: true) {
             diag("fred.lead.arrived", ["journey": GuidedJourney.trip != nil])
             // Oct 6: on the orientation trip the nook is not the end -- he
             // waits there for the elevator. (No journey: the old pet here.)
@@ -279,6 +331,7 @@ enum FredOfficeEncounter {
                                 toFloor: FredLead.orientationFloor)
             AdministrationExitGuard.release(reason: "Tinky is leading")      // Oct 9: she never blocks his way
         } else {
+            GuidedJourney.end()                                      // (Oct 24: no FOLLOW lesson without a lead)
             readyToPet = fred                                        // not wired: the old behaviour
         }
     }

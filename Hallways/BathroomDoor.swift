@@ -130,17 +130,26 @@ extension HallwayScene {
         case .north, .south:
             hinge.position = SCNVector3(Float(wallCenterX) - halfW, Float(doorCenterY), Float(wallCenterZ))
             panel.position = SCNVector3(Float(panelWidth / 2), 0, 0)
-            knob.eulerAngles.x = .pi / 2
-            knob.position = SCNVector3(Float(panelWidth * 0.85), 0, hallwayFacingSign * Float(panelThickness / 2))
+            // Oct 18 (knob orientation): the assembly is built along its own +Z with
+            // its rose 0.09 m out from its origin (it was made for the mail door). Face
+            // it out of the hallway-side face -- +Z already, or turned round -- and set
+            // it back 0.09 so the rose sits on that face. (Rotating about X had it
+            // pointing down the face; about Z, lying along the door's width.)
+            knob.eulerAngles.y = hallwayFacingSign > 0 ? 0 : .pi
+            // Oct 18 (wandering knob): the panel's own origin is its CENTRE (it hangs
+            // at +panelWidth/2 from the hinge), so 85% of the way from the hinge is
+            // +0.35 x panelWidth here -- 0.85 put the knob 0.35 of a door past the
+            // free edge, on the wall.
+            knob.position = SCNVector3(Float(panelWidth * 0.35), 0, hallwayFacingSign * (Float(panelThickness / 2) - HallwayScene.knobRoseSetback))
             if hallwayFacingSign < 0 { sign.eulerAngles.y = .pi }
-            sign.position = SCNVector3(Float(panelWidth / 2), signLocalY, hallwayFacingSign * Float(panelThickness / 2 + 0.008))
+            sign.position = SCNVector3(0, signLocalY, hallwayFacingSign * Float(panelThickness / 2 + 0.008))   // (Oct 18: centred -- the panel's origin IS its centre)
         case .east, .west:
             hinge.position = SCNVector3(Float(wallCenterX), Float(doorCenterY), Float(wallCenterZ) - halfW)
             panel.position = SCNVector3(0, 0, Float(panelWidth / 2))
-            knob.eulerAngles.z = .pi / 2
-            knob.position = SCNVector3(hallwayFacingSign * Float(panelThickness / 2), 0, Float(panelWidth * 0.85))
+            knob.eulerAngles.y = hallwayFacingSign > 0 ? .pi / 2 : -.pi / 2        // (+Z turned to +X / -X)
+            knob.position = SCNVector3(hallwayFacingSign * (Float(panelThickness / 2) - HallwayScene.knobRoseSetback), 0, Float(panelWidth * 0.35))   // (Oct 18: see above)
             sign.eulerAngles.y = hallwayFacingSign > 0 ? .pi / 2 : -.pi / 2
-            sign.position = SCNVector3(hallwayFacingSign * Float(panelThickness / 2 + 0.008), signLocalY, Float(panelWidth / 2))
+            sign.position = SCNVector3(hallwayFacingSign * Float(panelThickness / 2 + 0.008), signLocalY, 0)   // (Oct 18: centred)
         }
         panel.addChildNode(knob)
         if includeSign { panel.addChildNode(sign) }
@@ -253,6 +262,10 @@ extension HallwayScene {
     /// from the ambient/diffuse light it's actually sitting in, not
     /// only from a lucky specular hit, so it holds up under both the
     /// old tight spotlight and the new broad one.
+    /// Oct 18: how far the knob assembly's rose (centre 0.1, 0.018 thick) sits out
+    /// from the assembly's own origin -- a door sets the origin this far behind its face.
+    static let knobRoseSetback: Float = 0.09
+
     static func makeDoorKnobAssembly() -> SCNNode {
         let group = SCNNode()
         let chrome = SCNMaterial()

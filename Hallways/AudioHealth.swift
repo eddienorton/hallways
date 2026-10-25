@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import QuartzCore
 
 /// Oct 9 (audio static investigation) -- MEASUREMENT ONLY. Nothing here
 /// changes what plays or how loud.
@@ -78,9 +79,16 @@ nonisolated final class AudioHealth: @unchecked Sendable {
         let already = tappedEngines.contains { $0.engine === engine }
         if !already { tappedEngines.append(WeakEngine(engine)) }
         lock.unlock()
-        guard !already else { return }
+        guard !already, !AudioDiagnostics.audioOff else { return }         // (Oct 24: audio-off -- no tap)
         let mixer = engine.mainMixerNode
+        // Oct 24 (mud probe): buffers arriving later than their own length (twice it,
+        // plus slack) -- the engine falling behind, the usual cause of static.
+        let clock = TapClock()
         mixer.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, _ in
+            let t = CACurrentMediaTime()
+            let expected = Double(buffer.frameLength) / max(1, buffer.format.sampleRate)
+            if clock.last > 0, t - clock.last > expected * 2 + 0.03 { PerfMonitor.record("aud.tapGap", ns: UInt64((t - clock.last) * 1e9)) }
+            clock.last = t
             guard let channels = buffer.floatChannelData else { return }
             var peak: Float = 0
             let n = Int(buffer.frameLength)
@@ -92,6 +100,9 @@ nonisolated final class AudioHealth: @unchecked Sendable {
         }
         diag("audio.tap", ["installed": true])
     }
+
+    /// Oct 24 (mud probe): SceneKit positional players playing right now.
+    var livePlayers: Int { lock.lock(); defer { lock.unlock() }; return critterLive }
 
     func critterPlayerStarted() {
         lock.lock()
@@ -145,3 +156,6 @@ nonisolated final class AudioHealth: @unchecked Sendable {
         if !quiet { diag("audio.load", fields) }
     }
 }
+
+/// Oct 24 (mud probe): the mixer tap's own clock (touched only on the tap's thread).
+nonisolated final class TapClock: @unchecked Sendable { var last: CFTimeInterval = 0 }

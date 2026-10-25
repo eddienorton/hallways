@@ -94,7 +94,9 @@ enum AdministrationExitGuard {
     /// Is the rule in force? After the ID, before Tinky takes over.
     static func isEnforcing(admitted: Bool = Admission.isCompleted,
                             prologueDone: Bool = Admission.isPrologueCompleted,
-                            journeyUnderway: Bool = GuidedJourney.trip != nil) -> Bool {
+                            journeyUnderway: Bool = GuidedJourney.trip.map { $0.stage != .awaitingFollow } ?? false) -> Bool {
+        // (Oct 24: while Tinky waits to be followed, she still keeps the exit -- the player
+        // may look round Administration, but leaves it with him.)
         admitted && !prologueDone && !journeyUnderway
     }
 

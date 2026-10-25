@@ -239,9 +239,11 @@ private final class SuzanimatorSession: ObservableObject {
 /// unanchored UIKit popover is presented from a global/root controller.
 private struct BuildingJSONShareSheet: UIViewControllerRepresentable {
     let fileURL: URL
+    /// Oct 17 (My Photos): the building's own photo textures, shared with it.
+    var photoURLs: [URL] = []
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+        UIActivityViewController(activityItems: [fileURL] + photoURLs, applicationActivities: nil)
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
@@ -334,6 +336,12 @@ struct GridEditorView: View {
     /// which isn't where they actually are. nil when there's no 3D
     /// session running yet (matches youAreHere's own nil case).
     var youAreHereMazeID: Int? = nil
+    /// Oct 17 (YOU ARE HERE arrow): the same snapshot, exact -- where the
+    /// player stands in cell units (x = column, y = row; whole numbers are
+    /// cell centres) and the camera's yaw. nil falls back to youAreHere's
+    /// centre and youAreHereFacing.
+    var youAreHereSpot: CGPoint? = nil
+    var youAreHereYaw: Double? = nil
     /// Oct 5 (DEBUG only): reset onboarding and jump straight into
     /// Administration as a new employee (ContentView does the work).
     var devNewEmployeeAtAdministration: (() -> Void)? = nil
@@ -373,6 +381,10 @@ struct GridEditorView: View {
     @State private var sharedJSONURL: URL?
     @State private var showJSONShareSheet = false
     @State private var jsonShareError: String?
+    /// Oct 17 (My Photos): photo textures shared alongside the JSON.
+    @State private var sharedPhotoURLs: [URL] = []
+    /// Oct 17: COPY put JSON on the clipboard that names photos it can't carry.
+    @State private var copyPhotosNote: String?
 
     /// Two different things a drag can do to a cell now: paint/erase
     /// walls (nil, the default), or place/remove a specific kind of
@@ -559,7 +571,7 @@ struct GridEditorView: View {
         .statusBarHidden()
         .sheet(isPresented: $showJSONShareSheet, onDismiss: removeTemporaryJSONExport) {
             if let sharedJSONURL {
-                BuildingJSONShareSheet(fileURL: sharedJSONURL)
+                BuildingJSONShareSheet(fileURL: sharedJSONURL, photoURLs: sharedPhotoURLs)
             }
         }
         .alert("Unable to Share JSON", isPresented: Binding(
@@ -569,6 +581,14 @@ struct GridEditorView: View {
             Button("OK", role: .cancel) { jsonShareError = nil }
         } message: {
             Text(jsonShareError ?? "Please try again.")
+        }
+        .alert("Photos Not Included", isPresented: Binding(
+            get: { copyPhotosNote != nil },
+            set: { if !$0 { copyPhotosNote = nil } }
+        )) {
+            Button("OK", role: .cancel) { copyPhotosNote = nil }
+        } message: {
+            Text(copyPhotosNote ?? "")
         }
         .sheet(item: $deletionRequest) { request in
             CellDeletionSheet(request: request) { selected in
@@ -636,6 +656,7 @@ struct GridEditorView: View {
                     cellView(coord, cellSize: cellSize)
                 }
             }
+            youAreHereMarker(cellSize: cellSize)        // Oct 17: on top of every cell, zoomed/panned with them
         }
         .frame(width: width, height: gridHeight)
         return ZStack(alignment: .topLeading) {
@@ -828,27 +849,41 @@ struct GridEditorView: View {
                         .shadow(color: .black.opacity(0.6), radius: 1.5)
                 }
             }
-            .overlay {
-                // "You are here" — white circle + red directional arrow.
-                // Deliberately the LAST overlay in the chain, so the
-                // marker renders on top of every other marker that can
-                // share its cell (elevator, start door, light, objects,
-                // signs, badges) and stays clearly visible regardless.
-                // No cell fill/highlight here: the cell keeps its normal
-                // background; this is the marker alone.
-                if coord == youAreHere && youAreHereMazeID == mazeStore.currentMazeID {
-                    if let youAreHereFacing {
-                        Image(systemName: "location.north.fill")
-                            .font(.system(size: cellSize * 0.5, weight: .heavy))
-                            .foregroundStyle(Color.red)
-                            .shadow(color: .black.opacity(0.6), radius: 1.5)
-                            .rotationEffect(.degrees(facingRotationDegrees(youAreHereFacing)))
-                            .padding(3)
-                            .background(Color.white, in: Circle())
-                            .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 1))
-                    }
-                }
+            // (Oct 17: the "you are here" marker moved out of the cells -- see
+            // youAreHereMarker, drawn once over the whole grid.)
+    }
+
+    /// Oct 17 (YOU ARE HERE arrow): the player, as the wall maps and Building
+    /// GPS draw them -- blue ring + blue triangle (same blue, same angle rule:
+    /// HallwayScene.floorMapArrowAngle) on a white disc so it reads over any
+    /// cell colour. Drawn in the grid's own content space, so the grid's zoom
+    /// and pan carry it: (spot + 0.5) cells from the top-left corner, the same
+    /// cell layout the LazyVGrid uses. Grows only gently when zoomed
+    /// (1/sqrt(zoom) counter-scale). Display only: no hit testing. Only on the
+    /// floor the player is on, and only inside the editor's 15 x 15 sheet.
+    @ViewBuilder
+    private func youAreHereMarker(cellSize: CGFloat) -> some View {
+        if youAreHereMazeID == mazeStore.currentMazeID,
+           let spot = youAreHereSpot ?? youAreHere.map({ CGPoint(x: CGFloat($0.col), y: CGFloat($0.row)) }),
+           spot.x > -0.5, spot.y > -0.5, spot.x < CGFloat(columns) - 0.5, spot.y < CGFloat(rows) - 0.5,
+           youAreHereYaw != nil || youAreHereFacing != nil {
+            let angle = HallwayScene.floorMapArrowAngle(facing: youAreHereFacing ?? .north, headingYaw: youAreHereYaw)
+            let d = max(cellSize * 1.2, 28)
+            ZStack {
+                Circle().fill(Color.white)
+                Circle().stroke(Color(red: 0.08, green: 0.12, blue: 0.85), lineWidth: max(2.5, d * 0.09))
+                YouAreHereTriangle()
+                    .fill(Color(red: 0.08, green: 0.12, blue: 0.85))
+                    .frame(width: d * 0.5, height: d * 0.56)
+                    .rotationEffect(.radians(Double(angle)))
             }
+            .frame(width: d, height: d)
+            .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
+            .scaleEffect(1 / max(1, gridZoom).squareRoot())
+            .position(x: (spot.x + 0.5) * cellSize, y: (spot.y + 0.5) * cellSize)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 
     @ViewBuilder
@@ -889,7 +924,31 @@ struct GridEditorView: View {
             let url = directory.appendingPathComponent("DefaultMazes.json")
             // Preserve the exact UTF-8 output COPY places on the clipboard.
             try Data(json.utf8).write(to: url, options: .atomic)
+            // Oct 17 (My Photos): the player's own textures the building uses go
+            // with it, as <name>.jpg files beside the JSON (add them to the
+            // project's Hallways-Assets/textures/hallway folder and the bundled
+            // building finds them). One the app already ships needs no copy; one
+            // that can't be found at all stops the export -- never a JSON whose
+            // pictures won't load.
+            var photos: [URL] = []
+            var missing: [String] = []
+            for name in MyTextures.references(in: json) {
+                if let stored = MyTextures.storedURL(name) {
+                    let copy = directory.appendingPathComponent(stored.lastPathComponent)
+                    try FileManager.default.copyItem(at: stored, to: copy)
+                    photos.append(copy)
+                } else if MyTextures.bundledURL(name) == nil {
+                    missing.append(name)
+                }
+            }
+            guard missing.isEmpty else {
+                try? FileManager.default.removeItem(at: directory)
+                diag("myPhotos.exportMissing", ["ids": missing.joined(separator: ","), "device": MyTextures.inventory()])
+                jsonShareError = "\(missing.count) photo texture\(missing.count == 1 ? " is" : "s are") used in the building but missing from this device (\(missing.joined(separator: ", "))). Nothing has been changed. To fix it, open Surfaces \u{2192} Choose Surface: under My Photos, tap the orange \"Missing\" tile and pick a picture for it -- every surface using it gets it back. Then share again."
+                return
+            }
             sharedJSONURL = url
+            sharedPhotoURLs = photos
             showJSONShareSheet = true
         } catch {
             try? FileManager.default.removeItem(at: directory)
@@ -903,6 +962,7 @@ struct GridEditorView: View {
             try? FileManager.default.removeItem(at: sharedJSONURL.deletingLastPathComponent())
         }
         sharedJSONURL = nil
+        sharedPhotoURLs = []
     }
 
     /// Every control that used to overlay the grid, now a normal
@@ -983,6 +1043,11 @@ struct GridEditorView: View {
                     if let json = mazeStore.exportLibraryJSON() {
                         UIPasteboard.general.string = json
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        // Oct 17 (My Photos): text can't carry pictures -- say so.
+                        let notShipped = MyTextures.references(in: json).filter { MyTextures.bundledURL($0) == nil }
+                        if !notShipped.isEmpty {
+                            copyPhotosNote = "The building uses \(notShipped.count) of your own photo texture\(notShipped.count == 1 ? "" : "s"). The copied JSON names them but can't include the pictures -- use SHARE JSON to export the building with its photos."
+                        }
                     }
                 } label: {
                     Image(systemName: "doc.on.clipboard")
@@ -2585,5 +2650,17 @@ struct FloorMapOverlayView: View {
         case .south: return 180
         case .west: return -90
         }
+    }
+}
+
+/// Oct 17: the YOU ARE HERE arrowhead (points up; rotated by the caller).
+private struct YouAreHereTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }

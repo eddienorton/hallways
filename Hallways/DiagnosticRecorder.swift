@@ -36,7 +36,7 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
     private var foregroundFlagURL: URL { directory.appendingPathComponent("foreground.flag") }
 
     private let queue = DispatchQueue(label: "Hallways.DiagnosticRecorder", qos: .utility)
-    private let startUptime = ProcessInfo.processInfo.systemUptime
+    let startUptime = ProcessInfo.processInfo.systemUptime      // (Oct 18: also the [Life] console's +elapsed)
     private let version: String
     private let lock = NSLock()
     private var _floor: Int?
@@ -80,10 +80,12 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
         let elapsed = ProcessInfo.processInfo.systemUptime - startUptime
         let floorText = floor.map { "F\($0)" } ?? "F?"
         let rendered = fields.map { "\($0.key)=\(Self.render($0.value))" }.joined(separator: " ")
+        PerfMonitor.shared.diagEnqueued()                     // Oct 21: lines per second + write backlog (measurement)
         queue.async { [weak self] in
             guard let self else { return }
             let line = "\(self.timestampFormatter.string(from: now)) +\(String(format: "%.3f", elapsed))s S=\(self.sessionID) v=\(self.version) \(floorText) \(event)\(rendered.isEmpty ? "" : " " + rendered)\n"
             self.append(line)
+            PerfMonitor.shared.diagWritten()
         }
     }
 
@@ -213,6 +215,8 @@ nonisolated final class DiagnosticRecorder: @unchecked Sendable {
     private func snapshotOnQueue() -> URL? {
         try? handle?.synchronize()
         var data = Data("Hallways Diagnostics -- shared \(timestampFormatter.string(from: Date())) from session \(sessionID), app \(version), device \(Self.deviceModel), \(ProcessInfo.processInfo.operatingSystemVersionString)\nOldest first. Each SESSION START line marks an app launch.\n\n".utf8)
+        // Oct 21: the slowdown hunt's in-memory history (PerfMonitor) first, then the log.
+        data.append(Data(PerfMonitor.shared.report().utf8))
         if let previous = try? Data(contentsOf: previousURL) { data.append(previous) }
         if let current = try? Data(contentsOf: currentURL) { data.append(current) }
         let stamp = DateFormatter()

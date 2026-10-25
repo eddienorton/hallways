@@ -52,6 +52,10 @@ enum Admission {
         get { UserDefaults.standard.bool(forKey: prologueCompletedKey) }
         set {
             UserDefaults.standard.set(newValue, forKey: prologueCompletedKey)
+            // Oct 12 (escort resume): completed -> no escort is owed any more;
+            // un-completed (Start Over, the dev toggle) -> start from scratch.
+            ResumeState.clearEscort(reason: newValue ? "prologueCompleted" : "prologueReset")
+            if !newValue { UserDefaults.standard.removeObject(forKey: ResumeState.orientationArrivedKey) }
             diag("prologue.completedChanged", ["completed": newValue])
         }
     }

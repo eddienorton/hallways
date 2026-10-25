@@ -31,6 +31,8 @@ enum Bobbin {
     /// Called once per floor build, after TinCanRat.install.
     static func install(in view: SCNView, scene: SCNScene, playerCamera: SCNNode, cells: Set<GridCoordinate>,
                         cellSize: CGFloat, doors: [(GridCoordinate, Direction)]) {
+        // Oct 16 (Floor 4 PP): an ambient roamer -- off with the rest (LivingWorld.ambientCritters).
+        guard LivingWorld.ambientCritters else { return }
         // Topology as plain numbers: open neighbours of every cell, minus any
         // boundary that has a door of any kind (he never uses doors).
         func key(_ c: GridCoordinate) -> Int { BobbinDriver.cellKey(row: c.row, col: c.col) }
@@ -161,7 +163,7 @@ nonisolated final class BobbinDriver: @unchecked Sendable {
     private var pause: Double = 0
     private var noticeCooldown: Double = 0
     private var senseTimer: Double = 0
-    private var chirpTimer: Double = Double.random(in: 1...4)
+    private var chirpTimer: Double = Double.random(in: 8...30)          // (Oct 16: rarer)
     /// Habitat pass: the other Bobbins on this floor (for not bumping into them).
     var flock: BobbinFlock?
     private var bumpCooldown: Double = 0
@@ -437,8 +439,9 @@ nonisolated final class BobbinDriver: @unchecked Sendable {
         guard chirpTimer <= 0 else { return }
         switch mode {
         case .flee: play(Self.chirpFlee); chirpTimer = Double.random(in: 1.2...2)
-        case .curious: play(Self.chirpRoam); chirpTimer = Double.random(in: 2...3.5)
-        default: play(Self.chirpRoam); chirpTimer = Double.random(in: 3...7)
+        case .curious: play(Self.chirpRoam); chirpTimer = Double.random(in: 6...10)
+        // (Oct 16: the roaming chirp was the building's "crickets" -- now rare: 20-45 s apart.)
+        default: play(Self.chirpRoam); chirpTimer = Double.random(in: 20...45)
         }
     }
 

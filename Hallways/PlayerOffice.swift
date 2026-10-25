@@ -74,6 +74,7 @@ enum PlayerOffice {
         desk.eulerAngles.y = Float(Direction.south.yaw)                  // local +Z (front) toward the door
         office.addChildNode(desk)
         deskCenter = SIMD2<Float>(deskX, deskZ)
+        BlackBox.install(onDesk: desk)                                   // Oct 12: the Black Box (BlackBox.swift)
 
         let chair = AdministrationReception.makeDeskChair()
         chair.name = "playerOfficeChair"
@@ -87,7 +88,7 @@ enum PlayerOffice {
         office.addChildNode(visitor)
 
         // A filing cabinet against the east wall, far half (front faces west).
-        let cabinet = AdministrationReception.makeCabinet()
+        let cabinet = makeOfficeCabinet()                               // Oct 15: its top drawer opens
         cabinet.name = "playerOfficeCabinet"
         cabinet.position = SCNVector3(eastX - 0.32, 0, southZ - 0.9)
         cabinet.eulerAngles.y = Float(Direction.east.yaw)
@@ -606,6 +607,85 @@ enum PlayerOffice {
     private static func portraitImage() -> UIImage? {
         if let url = EmployeeID.portraitURL, let image = UIImage(contentsOfFile: url.path) { return image }
         return AdministrationIDTerminal.acceptedPhoto
+    }
+
+    // MARK: Oct 15 -- the filing cabinet (the office's first ordinary object to use)
+
+    /// The office's filing cabinet: the Administration cabinet's body and
+    /// look, but its TOP drawer is a real one (front, pull, label slot and a
+    /// tray behind it) that slides out 0.38 m and back. Front = local +Z.
+    private static func makeOfficeCabinet() -> SCNNode {
+        let root = SCNNode()
+        let body = AdministrationReception.material(UIColor(red: 0.3, green: 0.31, blue: 0.3, alpha: 1), metal: 0.5, rough: 0.5)
+        let pull = AdministrationReception.material(UIColor(white: 0.75, alpha: 1), metal: 0.9, rough: 0.3)
+        let inside = AdministrationReception.material(UIColor(white: 0.16, alpha: 1), metal: 0.3, rough: 0.7)
+        AdministrationReception.box(0.46, 1.32, 0.6, body, 0, 0.66, 0, in: root)
+        for i in 0..<3 {                                                 // the three lower drawers (painted on, as before)
+            let y = 0.18 + Float(i) * 0.31
+            AdministrationReception.box(0.42, 0.006, 0.006, pull, 0, y + 0.14, 0.302, in: root)
+            AdministrationReception.box(0.12, 0.025, 0.02, pull, 0, y, 0.31, in: root)
+        }
+        let drawer = SCNNode()
+        drawer.name = "playerOfficeCabinetDrawer"
+        let y: Float = 0.18 + 3 * 0.31                                  // the top drawer's pull height (1.11 m)
+        AdministrationReception.box(0.43, 0.28, 0.014, body, 0, y + 0.01, 0.307, in: drawer, chamfer: 0.003)   // its front
+        AdministrationReception.box(0.12, 0.025, 0.02, pull, 0, y, 0.324, in: drawer)                          // the pull
+        AdministrationReception.box(0.09, 0.035, 0.004, pull, 0, y + 0.08, 0.316, in: drawer, chamfer: 0.001)  // label slot
+        // The tray (inside the body while shut): floor, sides, back.
+        AdministrationReception.box(0.38, 0.01, 0.42, inside, 0, y - 0.11, 0.09, in: drawer, chamfer: 0.002)
+        for side: Float in [-1, 1] {
+            AdministrationReception.box(0.01, 0.2, 0.42, inside, side * 0.185, y - 0.01, 0.09, in: drawer, chamfer: 0.002)
+        }
+        AdministrationReception.box(0.38, 0.2, 0.01, inside, 0, y - 0.01, -0.12, in: drawer, chamfer: 0.002)
+        // A few hanging folders.
+        let folder = AdministrationReception.material(UIColor(red: 0.62, green: 0.52, blue: 0.3, alpha: 1), rough: 0.85)
+        for k in 0..<4 {
+            AdministrationReception.box(0.34, 0.17, 0.006, folder, 0, y - 0.02, 0.24 - Float(k) * 0.09, in: drawer, chamfer: 0.001)
+        }
+        root.addChildNode(drawer)
+        cabinetDrawerOpen = false
+        return root
+    }
+
+    static let cabinetDrawerTravel: Float = 0.38
+    private(set) static var cabinetDrawerOpen = false
+
+    /// A tap landed on the office cabinet (any part, drawer included).
+    static func isCabinet(_ node: SCNNode) -> Bool {
+        var n: SCNNode? = node
+        while let current = n {
+            if current.name == "playerOfficeCabinet" { return true }
+            if current === officeNode { return false }
+            n = current.parent
+        }
+        return false
+    }
+
+    /// Where to stand to use the cabinet (world x/y/z at the player's eye
+    /// height is set by the caller) and the yaw that looks at its top drawer:
+    /// in front of it, inside the walkable part of its cell.
+    static func cabinetStandPose(eyeY: Float) -> (position: SCNVector3, yaw: Double)? {
+        guard let cabinet = officeNode?.childNode(withName: "playerOfficeCabinet", recursively: false) else { return nil }
+        let p = cabinet.worldPosition
+        let front = cabinet.convertVector(SCNVector3(0, 0, 1), to: nil)
+        let s = cellSize
+        // 1.45 m out from its centre, kept 0.3 m short of the south wall's walking limit.
+        var x = p.x + front.x * 1.45, z = p.z + front.z * 1.45
+        z = min(z, 9 * s + 0.3)
+        x = min(x, 13 * s + 0.3)
+        let yaw = Double(atan2(-(p.x - x), -(p.z - z)))
+        return (SCNVector3(x, eyeY, z), yaw)
+    }
+
+    /// Opens the top drawer if shut, shuts it if open (a short slide).
+    static func toggleCabinetDrawer() {
+        guard let drawer = officeNode?.childNode(withName: "playerOfficeCabinetDrawer", recursively: true) else { return }
+        cabinetDrawerOpen.toggle()
+        drawer.removeAction(forKey: "slide")
+        let slide = SCNAction.move(to: SCNVector3(0, 0, cabinetDrawerOpen ? cabinetDrawerTravel : 0), duration: cabinetDrawerOpen ? 0.4 : 0.3)
+        slide.timingMode = cabinetDrawerOpen ? .easeOut : .easeIn
+        drawer.runAction(slide, forKey: "slide")
+        diag("office.cabinet.drawer", ["open": cabinetDrawerOpen])
     }
 
     /// A 1.2 m oak shelf unit, nearly empty: one binder, one archive box.

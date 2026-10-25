@@ -48,6 +48,8 @@ final class TouchTrackingSCNView: SCNView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         applyRenderScale()
+        // Oct 11: the computer magnifier's two-finger pinch/pan (inert unless seated).
+        if let window { CameraMagnifierGestures.shared.install(on: window) }
     }
 
     override func layoutSubviews() {

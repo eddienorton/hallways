@@ -42,31 +42,17 @@ enum Menagerie {
     @discardableResult
     static func install(in view: SCNView, scene: SCNScene, playerCamera: SCNNode, cells: Set<GridCoordinate>,
                         cellSize: CGFloat, doors: [(GridCoordinate, Direction)], litCells: Set<GridCoordinate>,
-                        busyCells: Set<GridCoordinate>) -> GridCoordinate? {
+                        busyCells: Set<GridCoordinate>, floor: Int = 0) -> GridCoordinate? {
         let tracePhase = ElevatorArrivalTrace.shared.beginPhase("Menagerie.install")
         defer { ElevatorArrivalTrace.shared.endPhase("Menagerie.install", tracePhase) }
         guard cells.count >= 20 else { return nil }      // the lobby and tiny floors stay quiet
         let traceGraph = ElevatorArrivalTrace.shared.beginPhase("Menagerie.habitatGraph")
         func key(_ c: GridCoordinate) -> Int { HabitatGraph.key(row: c.row, col: c.col) }
-        var blocked = Set<Int64>()
-        func edge(_ a: Int, _ b: Int) -> Int64 { Int64(min(a, b)) << 32 | Int64(max(a, b)) }
-        for (coord, direction) in doors {
-            blocked.insert(edge(key(coord), key(GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col))))
-        }
-        var neighbors: [Int: [Int]] = [:]
-        var centers: [Int: SIMD2<Float>] = [:]
+        let graph = makeGraph(cells: cells, cellSize: cellSize, doors: doors, litCells: litCells)
+        let neighbors = graph.neighbors
+        let centers = graph.centers
         var coordOf: [Int: GridCoordinate] = [:]
-        for c in cells {
-            centers[key(c)] = SIMD2<Float>(Float(CGFloat(c.col) * cellSize), Float(CGFloat(c.row) * cellSize))
-            coordOf[key(c)] = c
-            neighbors[key(c)] = Direction.allCases.compactMap { d in
-                let n = GridCoordinate(row: c.row + d.delta.row, col: c.col + d.delta.col)
-                guard cells.contains(n), !blocked.contains(edge(key(c), key(n))) else { return nil }
-                return key(n)
-            }
-        }
-        let graph = HabitatGraph(neighbors: neighbors, centers: centers, cellSize: Float(cellSize),
-                                 lit: Set(litCells.map(key)))
+        for c in cells { coordOf[key(c)] = c }
         let eye = playerCamera.presentation.worldPosition
         let start = key(GridCoordinate(row: Int((CGFloat(eye.z) / cellSize).rounded()), col: Int((CGFloat(eye.x) / cellSize).rounded())))
         let fromStart = graph.distances(from: centers[start] != nil ? [start] : [])
@@ -114,8 +100,10 @@ enum Menagerie {
         ElevatorArrivalTrace.shared.endPhase("Menagerie.shadowAndHabitat", traceHabitat)
         let traceCast = ElevatorArrivalTrace.shared.beginPhase("Menagerie.cageAndObjectCast")
         // The enclosure first (a discovery, somewhere off the beaten track).
+        // (Oct 16: the ambient cast only while LivingWorld.ambientCritters -- off for now.)
+        let ambient = LivingWorld.ambientCritters
         var cageCell: GridCoordinate?
-        if LivingWorld.fullCast, let k = pick(minFraction: 0.45, prefer: deadEnd), let center = centers[k] {   // Oct 4 DIAGNOSTIC: cage only at ALL / 32
+        if ambient, LivingWorld.fullCast, let k = pick(minFraction: 0.45, prefer: deadEnd), let center = centers[k] {   // Oct 4 DIAGNOSTIC: cage only at ALL / 32
             cageCell = coordOf[k]
             let doorToward = (neighbors[k] ?? []).first.flatMap { centers[$0] } ?? (center + SIMD2<Float>(0, 1))
             let cage = Cage(habitat: habitat, cell: k, center: center, doorToward: doorToward)
@@ -123,9 +111,8 @@ enum Menagerie {
             LivingWorld.trackStructure(cage.node)
             cage.node.runAction(.repeatForever(cage.tickAction()), forKey: "cageTick")
             habitat.blockedCells.insert(k)
+            // (Oct 19, Stage A: the two caged Clackers retired -- the Pottle alone.)
             let inmates: [(Critter, SCNNode)] = [
-                Clacker.make(habitat: habitat, cell: k, shadow: shadow, scale: 0.85),
-                Clacker.make(habitat: habitat, cell: k, shadow: shadow, scale: 0.8),
                 Pottle.make(habitat: habitat, cell: k, shadow: shadow, scale: 0.72)
             ]
             for (i, (critter, node)) in inmates.enumerated() {
@@ -137,30 +124,22 @@ enum Menagerie {
             }
         }
         // The ones already loose.
-        if let k = pick(minFraction: 0.3, prefer: { graph.lit.contains($0) }) {
+        if ambient, let k = pick(minFraction: 0.3, prefer: { graph.lit.contains($0) }) {
             let (c, n) = Stalk.make(habitat: habitat, cell: k, shadow: shadow); add(c, n)
         }
-        if let k = pick(minFraction: 0.35, prefer: crossing) {
+        if ambient, let k = pick(minFraction: 0.35, prefer: crossing) {
             let (c, n) = Ladder.make(habitat: habitat, cell: k, shadow: shadow); add(c, n)
         }
-        if let k = pick(minFraction: 0.55, prefer: crossing) {
+        if ambient, let k = pick(minFraction: 0.55, prefer: crossing) {
             let (c, n) = Chair.make(habitat: habitat, cell: k, shadow: shadow); add(c, n)
         }
-        if let k = pick(minFraction: 0.3, prefer: deadEnd) {
+        if ambient, let k = pick(minFraction: 0.3, prefer: deadEnd) {
             let (c, n) = Pottle.make(habitat: habitat, cell: k, shadow: shadow, scale: 1); add(c, n)
-        }
-        if let k = pick(minFraction: 0.5, prefer: { _ in true }) {
-            let (c, n) = Clacker.make(habitat: habitat, cell: k, shadow: shadow, scale: 1); add(c, n)
         }
         // Oct 4 DIAGNOSTIC "DOUBLE THE ZOO" (32 setting only): more of the lighter
         // office-object species, spread over the floor by the same pick() rules.
-        if LivingWorld.isCrowd {
+        if ambient, LivingWorld.isCrowd {
             let crowdScales: [Float] = [1, 0.9, 0.95, 0.85]
-            for i in 0..<3 {
-                if let k = pick(minFraction: 0.15, prefer: { _ in true }) {
-                    let (c, n) = Clacker.make(habitat: habitat, cell: k, shadow: shadow, scale: crowdScales[i % 4]); add(c, n)
-                }
-            }
             for i in 0..<3 {
                 if let k = pick(minFraction: 0.15, prefer: { graph.degree($0) <= 2 }) {
                     let (c, n) = Pottle.make(habitat: habitat, cell: k, shadow: shadow, scale: crowdScales[(i + 1) % 4]); add(c, n)
@@ -179,19 +158,44 @@ enum Menagerie {
             }
         }
         ElevatorArrivalTrace.shared.endPhase("Menagerie.cageAndObjectCast", traceCast)
-        // Calibration experiment (RealAnimals.swift): a dog and a cat near the start.
-        // Delete this line (and that file) to remove them.
-        let traceAnimals = ElevatorArrivalTrace.shared.beginPhase("Menagerie.RealAnimals")
-        RealAnimals.populate(habitat: habitat, scene: scene, start: start, fromStart: fromStart, busy: busy, shadow: shadow)
-        ElevatorArrivalTrace.shared.endPhase("Menagerie.RealAnimals", traceAnimals)
+        // (Oct 19, Stage A: the RealAnimals dog and cat retired; AnimalBuild and
+        // AnimalVoice stay in RealAnimals.swift for the Frog, Slinky and the meeting.)
         // Audition (Audition.swift): two more residents. Delete this line (and that file) to remove them.
         let traceAudition = ElevatorArrivalTrace.shared.beginPhase("Menagerie.Audition")
-        Audition.populate(habitat: habitat, scene: scene, fromStart: fromStart, busy: busy, shadow: shadow)
+        if ambient { Audition.populate(habitat: habitat, scene: scene, fromStart: fromStart, busy: busy, shadow: shadow) }
         ElevatorArrivalTrace.shared.endPhase("Menagerie.Audition", traceAudition)
+        // Oct 16 -- THE FIRST MONSTER AUDITION: the Big Shot (one, Floor 3).
+        // Oct 22 (later): RETIRED -- no longer placed at all (was: off unless
+        // `-HallwaysBigShot YES`). His class, voice recipes and eviction script
+        // remain below as unreachable code until a build confirms they can go.
         diag("menagerie.installed", ["creatures": critters.count, "caged": cageCell != nil,
                                      "kinds": critters.map { "\($0.kind)" }.joined(separator: ","),
                                      "admissionPending": Admission.isPending])
         return cageCell
+    }
+
+    /// The floor as the creatures walk it: a node per cell, joined where the
+    /// cells meet with no door between them. (Oct 16: shared with the eviction,
+    /// which needs one for the lobby, a floor too small for a menagerie.)
+    static func makeGraph(cells: Set<GridCoordinate>, cellSize: CGFloat, doors: [(GridCoordinate, Direction)],
+                          litCells: Set<GridCoordinate>) -> HabitatGraph {
+        func key(_ c: GridCoordinate) -> Int { HabitatGraph.key(row: c.row, col: c.col) }
+        var blocked = Set<Int64>()
+        func edge(_ a: Int, _ b: Int) -> Int64 { Int64(min(a, b)) << 32 | Int64(max(a, b)) }
+        for (coord, direction) in doors {
+            blocked.insert(edge(key(coord), key(GridCoordinate(row: coord.row + direction.delta.row, col: coord.col + direction.delta.col))))
+        }
+        var neighbors: [Int: [Int]] = [:]
+        var centers: [Int: SIMD2<Float>] = [:]
+        for c in cells {
+            centers[key(c)] = SIMD2<Float>(Float(CGFloat(c.col) * cellSize), Float(CGFloat(c.row) * cellSize))
+            neighbors[key(c)] = Direction.allCases.compactMap { d in
+                let n = GridCoordinate(row: c.row + d.delta.row, col: c.col + d.delta.col)
+                guard cells.contains(n), !blocked.contains(edge(key(c), key(n))) else { return nil }
+                return key(n)
+            }
+        }
+        return HabitatGraph(neighbors: neighbors, centers: centers, cellSize: Float(cellSize), lit: Set(litCells.map(key)))
     }
 
     static func shadowImage() -> UIImage {
@@ -243,6 +247,7 @@ nonisolated final class HabitatGraph: @unchecked Sendable {
 
     /// The cell whose centre is nearest `p`.
     func cell(near p: SIMD2<Float>) -> Int? {
+        guard p.x.isFinite, p.y.isFinite, abs(p.x) < 1e6, abs(p.y) < 1e6 else { return nil }   // (Oct 16: never trap on Int(nan))
         let k = Self.key(row: Int((p.y / cellSize).rounded()), col: Int((p.x / cellSize).rounded()))
         return centers[k] != nil ? k : nil
     }
@@ -251,7 +256,7 @@ nonisolated final class HabitatGraph: @unchecked Sendable {
 /// Who is where. Refreshed at most 5 times a second by whichever creature
 /// ticks first; everyone reads the same snapshot (render thread only).
 nonisolated final class Habitat: @unchecked Sendable {
-    enum Kind: String { case noodle, player, bobbin, clacker, stalk, ladder, chair, pottle, dog, cat, frog, slinky }
+    enum Kind: String { case noodle, player, bobbin, stalk, ladder, chair, pottle, frog, slinky, bigShot }
 
     struct Sighting {
         let id: String
@@ -340,6 +345,14 @@ nonisolated final class Habitat: @unchecked Sendable {
     }
 }
 
+// MARK: - Oct 11: errands
+
+/// Something a critter has to do somewhere (see Critter.errand). Subclassed
+/// by MeetingProcession; `step` is called from the critter's own tick.
+nonisolated class CritterErrand: @unchecked Sendable {
+    func step(_ critter: Critter, dt: Double, now: CFTimeInterval) {}
+}
+
 // MARK: - Critter: shared body plumbing (not a shared personality)
 
 nonisolated class Critter: @unchecked Sendable {
@@ -381,7 +394,32 @@ nonisolated class Critter: @unchecked Sendable {
     var cageRadius: Float = 0.42
     private var cageGoal: SIMD2<Float>?
 
+    // Oct 11 -- ERRANDS (MeetingProcession): somewhere to be. While `errand`
+    // is set its own senses and choices sit out and the errand drives speed,
+    // goal, pauses and looks; body, gait, voice and travel stay its own.
+    var errand: CritterErrand?
+    /// Height above the floor (a hop an errand asks for); 0 otherwise.
+    var lift: Float = 0
+    /// Off-graph travel (e.g. through an opened door into a room): when set,
+    /// the critter heads straight for this point instead of along the graph.
+    var freePoint: SIMD2<Float>?
+
+    /// Sets off on `errand` toward graph cell `cell` from where it stands.
+    /// Main thread, BEFORE the critter's tick starts running.
+    func beginErrand(_ errand: CritterErrand, toward cell: Int) {
+        self.errand = errand
+        goal = cell
+        progress = 0
+        cameFrom = nil
+        to = pickNext(graph.neighbors[from] ?? []) ?? from
+        maxLane = 0.12
+        lane = 0
+        laneTarget = 0
+    }
+
     private var lastTime: CFTimeInterval = 0
+    /// Oct 16: set (main thread) while a script drives this body; read by the tick.
+    var suspended = false
     private var senseClock: Double = Double.random(in: 0...0.4)
     var senseInterval: Double = 0.35
     private var aliveClock: Double = 4
@@ -402,11 +440,14 @@ nonisolated class Critter: @unchecked Sendable {
 
     func tickAction() -> SCNAction {
         // Strong: the action on its own node is the creature's only owner.
-        SCNAction.customAction(duration: 1) { _, _ in self.tick() }
+        SCNAction.customAction(duration: 1) { _, _ in let p = PerfMonitor.begin("critter.tick"); self.tick(); PerfMonitor.end(p) }   // (Oct 21: timed, measurement only)
     }
 
     private func tick() {
         guard let node else { return }
+        // Oct 16 (Bonzo's eviction): a script has the body for now -- its own
+        // tick stands aside entirely (the script moves it; see BonzoEviction).
+        if suspended { lastTime = 0; return }
         let now = CACurrentMediaTime()
         let dt = Float(lastTime == 0 ? 1.0 / 60 : min(max(now - lastTime, 0), 1.0 / 20))
         lastTime = now
@@ -414,17 +455,26 @@ nonisolated class Critter: @unchecked Sendable {
         let dtd = Double(dt)
         time += dtd
         habitat.refreshIfNeeded(now)
-        senseClock -= dtd
-        if senseClock <= 0 {
-            senseClock = senseInterval * Double.random(in: 0.8...1.25)
-            sense(now: now)
+        if let errand {
+            errand.step(self, dt: dtd, now: now)            // Oct 11: on an errand
+        } else if fleeBigShot(dt: dtd) {
+            // Oct 16 (the Big Shot): scattering -- its own senses and choices wait.
+        } else {
+            senseClock -= dtd
+            if senseClock <= 0 {
+                senseClock = senseInterval * Double.random(in: 0.8...1.25)
+                sense(now: now)
+            }
+            think(dt: dtd, now: now)
         }
-        think(dt: dtd, now: now)
+        if suspended { return }                     // (Oct 16: a script took the body during this very tick)
         if pause > 0 { pause -= dtd }
         let target = pause > 0 ? 0 : wantSpeed
         speed += (target - speed) * min(1, dt * acceleration)
         let previous = pos
-        if let cage { moveInCage(cage, dt: dt) } else { moveOnGraph(dt: dt) }
+        if let cage { moveInCage(cage, dt: dt) }
+        else if let point = freePoint { moveFree(toward: point, dt: dt) }   // Oct 11 (errands)
+        else { moveOnGraph(dt: dt) }
         let moved = simd_length(pos - previous)
         velocity = (pos - previous) / dt
         var desired = heading
@@ -438,7 +488,7 @@ nonisolated class Critter: @unchecked Sendable {
         while turn < -.pi { turn += 2 * .pi }
         let turnStep = turn * min(1, dt * turnRate)
         heading += turnStep
-        node.position = SCNVector3(pos.x, 0, pos.y)
+        node.position = SCNVector3(pos.x, lift, pos.y)
         node.eulerAngles = SCNVector3(0, heading, 0)
         animate(dt: dt, moved: moved, turning: turnStep / dt)
 
@@ -450,12 +500,63 @@ nonisolated class Critter: @unchecked Sendable {
         }
     }
 
+    // MARK: Oct 16 -- scattering from the Big Shot (every loose critter, the
+    // same simple rule; its own personality resumes the moment he's gone)
+
+    private var panicFrom: SIMD2<Float>?
+    private var panicClock: Double = 0
+    private var panicCheck: Double = Double.random(in: 0...0.3)
+    private var calmSpeed: Float = 0
+    /// How fast this creature scurries away (a species may set its own).
+    var panicSpeed: Float = 2.3
+
+    /// True while it is fleeing (and its own brain is sitting out).
+    private func fleeBigShot(dt: Double) -> Bool {
+        // (Frog and Slinky move themselves in their own animation -- hopping, stepping --
+        // so they aren't driven away; they just carry on.)
+        guard kind != .bigShot, kind != .frog, kind != .slinky, cage == nil else { return false }
+        panicCheck -= dt
+        if panicCheck <= 0 {
+            panicCheck = 0.25
+            if case let (s, d)? = nearest([.bigShot], within: panicFrom == nil ? BigShot.scareRadius : BigShot.calmRadius) {
+                if panicFrom == nil {
+                    calmSpeed = wantSpeed
+                    if from != to, simd_dot(direction, s.pos - pos) > 0.2 { reverse() }   // turn tail
+                    goal = nil
+                    lookAt = nil
+                    pause = 0
+                    diag("bigShot.scatter", ["who": id, "distance": (d * 10).rounded() / 10])
+                    scattered()
+                }
+                panicFrom = s.pos
+                panicClock = 1.4
+            }
+        }
+        guard panicFrom != nil else { return false }
+        panicClock -= dt
+        if panicClock <= 0 {
+            panicFrom = nil
+            wantSpeed = calmSpeed                       // back to whatever it was doing
+            return false
+        }
+        // Its own kind of hurry: about 2.5x its usual pace (never more than panicSpeed).
+        // Cornered (nowhere further away to go), it holds still.
+        wantSpeed = from == to ? 0 : min(panicSpeed, max(calmSpeed, 0.6) * 2.5)
+        pause = 0
+        return true
+    }
+
+    /// Oct 16: the moment it starts scattering (a species may change pose -- stand up, turn to run).
+    func scattered() {}
+
     // Overridden per creature.
     func sense(now: CFTimeInterval) {}
     func think(dt: Double, now: CFTimeInterval) {}
     func animate(dt: Float, moved: Float, turning: Float) {}
     func arrived(at cell: Int) {}
     func giveWay(to other: Habitat.Sighting) {
+        // Oct 11: on an errand -- a polite beat, never turning back.
+        if errand != nil { pause = 0.2; return }
         pause = Double.random(in: 0.3...0.8)
         if Float.random(in: 0...1) < 0.35 { reverse() }
     }
@@ -473,7 +574,7 @@ nonisolated class Critter: @unchecked Sendable {
         // Don't walk into someone just ahead.
         if speed > 0.1, from != to {
             let ahead = direction
-            for other in habitat.sightings where other.id != id && other.kind != .player {
+            for other in habitat.sightings where other.id != id && other.kind != .player && other.kind != .bigShot {
                 let offset = other.pos - pos
                 let d = simd_length(offset)
                 if d > 0.001, d < personalSpace, simd_dot(offset / d, ahead) > 0.35 {
@@ -511,6 +612,13 @@ nonisolated class Critter: @unchecked Sendable {
 
     private func pickNext(_ options: [Int]) -> Int? {
         guard !options.isEmpty else { return nil }
+        if let panicFrom {                                                       // Oct 16: away from the Big Shot
+            let best = choice(options, awayFrom: panicFrom)
+            let here = graph.centers[from] ?? pos
+            // Cornered (every way leads nearer him): hold still in its corner.
+            if simd_length((graph.centers[best] ?? pos) - panicFrom) < simd_length(here - panicFrom) { return nil }
+            return best
+        }
         if let goal, goal != from {
             if goalFor != goal {
                 goalDistances = graph.distances(from: [goal])
@@ -527,6 +635,13 @@ nonisolated class Critter: @unchecked Sendable {
             return SIMD2<Float>(-sin(heading), -cos(heading))
         }
         return simd_normalize(b - a)
+    }
+
+    /// Oct 11 (errands): straight toward a point, off the graph.
+    private func moveFree(toward point: SIMD2<Float>, dt: Float) {
+        let d = point - pos
+        let l = simd_length(d)
+        if l > 0.0005 { pos += d / l * min(l, speed * dt) }
     }
 
     func reverse() {
@@ -665,13 +780,18 @@ nonisolated enum MenagerieSound {
     static func source(_ name: String, volume: Float, _ render: () -> [Float]) -> SCNAudioSource? {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("mng-v1-\(name).wav")
         if !FileManager.default.fileExists(atPath: url.path) {
+            // Oct 22 (evening, startup investigation): every render is named and timed --
+            // which sounds are made on the main thread at launch, and how long each takes.
+            let t0 = CACurrentMediaTime()
             guard (try? BobbinSound.wav(normalized(render())).write(to: url)) != nil else { return nil }
+            diag("audio.render", ["name": name, "ms": Int((CACurrentMediaTime() - t0) * 1000), "main": Thread.isMainThread])
         }
         guard let s = SCNAudioSource(url: url) else { return nil }
         s.isPositional = true
         s.shouldStream = false
         s.volume = volume
         s.load()
+        SoundCatalog.register(s, name: name)          // Oct 18: so AudioWatch can say which sound played
         return s
     }
 
@@ -786,200 +906,6 @@ nonisolated enum MenagerieSound {
 }
 
 typealias Rand = MenagerieSound.Rand
-
-// MARK: - Clacker
-
-nonisolated final class Clacker: Critter {
-    enum Mode: String { case forage, seek, attend, flee }
-    private var mode: Mode = .forage
-    private var modeTime: Double = 0
-    private var hopsLeft = Int.random(in: 1...4)
-    private var hopPhase: Float = 0
-    private var peckTime: Float = 0
-    private var callClock = Double.random(in: 2...8)
-    private var replyAt: Double?
-    private var alarmCooldown: Double = 0
-    private var seekPoint: SIMD2<Float>?
-    private var threat: SIMD2<Float>?
-    private let jaw: SCNNode?
-    private let legs: [SCNNode]
-    private let sizeScale: Float
-
-    private static let calls = MenagerieSound.variants("clacker-call", count: 4, volume: 0.75) { rng in
-        let snap = MenagerieSound.strike([(rng.range(2900, 3400), 0.012, 0.5), (rng.range(5200, 6100), 0.006, 0.25)],
-                                         seconds: 0.04, noise: 0.9, noiseDecay: 0.0015, rng: &rng)
-        let a = rng.range(3300, 3800)
-        let chirp = MenagerieSound.sweep(a, a * rng.range(1.25, 1.45), seconds: rng.range(0.06, 0.09), wobble: 0.6, curve: 0.7)
-        let chirp2 = MenagerieSound.sweep(a * 1.1, a * rng.range(0.9, 1.3), seconds: 0.05, wobble: 0.4)
-        return MenagerieSound.mix([(0, snap, 1), (0.035, chirp, 0.7), (rng.range(0.11, 0.16), chirp2, 0.5)])
-    }
-    private static let alarm = MenagerieSound.source("clacker-alarm", volume: 0.85) {
-        var rng = Rand(seed: 41)
-        var parts: [(at: Float, samples: [Float], gain: Float)] = []
-        var at: Float = 0
-        for _ in 0..<6 {
-            parts.append((at, MenagerieSound.strike([(rng.range(2800, 3600), 0.01, 0.5)], seconds: 0.03, noise: 1, rng: &rng), 1))
-            parts.append((at + 0.012, MenagerieSound.sweep(4200, 5400, seconds: 0.03), 0.4))
-            at += rng.range(0.045, 0.07)
-        }
-        return MenagerieSound.mix(parts)
-    }
-    private static let ticks = MenagerieSound.variants("clacker-tick", count: 4, volume: 0.25) { rng in
-        MenagerieSound.strike([(rng.range(1800, 2400), 0.006, 0.4)], seconds: 0.025, noise: 0.6, noiseDecay: 0.001, rng: &rng)
-    }
-
-    override var modeName: String { mode.rawValue }
-
-    static func make(habitat: Habitat, cell: Int, shadow: UIImage, scale: Float) -> (Critter, SCNNode) {
-        let root = SCNNode()
-        root.name = "clacker"
-        root.scale = SCNVector3(scale, scale, scale)
-        addShadow(shadow, size: 0.32, to: root)
-        let body = pivot(in: root, at: SCNVector3(0, 0.11, 0))
-        let steel = mat(UIColor(white: 0.25, alpha: 1), metal: 0.3, rough: 0.4)
-        let red = mat(UIColor(red: 0.82, green: 0.08, blue: 0.07, alpha: 1), rough: 0.35)
-        let chrome = mat(UIColor(white: 0.8, alpha: 1), metal: 0.5, rough: 0.3)
-        part(SCNBox(width: 0.06, height: 0.025, length: 0.24, chamferRadius: 0.008), steel, in: body)
-        part(SCNBox(width: 0.045, height: 0.012, length: 0.04, chamferRadius: 0.003), chrome, in: body, at: SCNVector3(0, 0.016, -0.1))
-        // The top arm -- hinged at the back, opens at the front.
-        let jaw = pivot(in: body, at: SCNVector3(0, 0.02, 0.105), name: "jaw")
-        part(SCNBox(width: 0.055, height: 0.032, length: 0.225, chamferRadius: 0.012), red, in: jaw, at: SCNVector3(0, 0.017, -0.105))
-        let white = mat(.white, rough: 0.3, glow: UIColor(white: 0.25, alpha: 1))
-        let black = mat(.black, rough: 0.2)
-        for side in [Float(-1), 1] {
-            let eye = part(SCNSphere(radius: 0.012), white, in: jaw, at: SCNVector3(side * 0.029, 0.03, -0.17))
-            part(SCNSphere(radius: 0.006), black, in: eye, at: SCNVector3(side * 0.006, 0, -0.006))
-        }
-        // A little spring-steel tail.
-        part(SCNBox(width: 0.02, height: 0.004, length: 0.07, chamferRadius: 0.001), chrome, in: body,
-             at: SCNVector3(0, 0.02, 0.14), euler: SCNVector3(-0.5, 0, 0))
-        let orange = mat(UIColor(red: 0.95, green: 0.55, blue: 0.1, alpha: 1))
-        var legs: [SCNNode] = []
-        for side in [Float(-1), 1] {
-            let hip = pivot(in: body, at: SCNVector3(side * 0.018, -0.012, 0.01), name: "leg")
-            part(SCNCylinder(radius: 0.0025, height: 0.095), steel, in: hip, at: SCNVector3(0, -0.048, 0))
-            part(SCNBox(width: 0.02, height: 0.004, length: 0.03, chamferRadius: 0.002), orange, in: hip, at: SCNVector3(0, -0.097, -0.008))
-            legs.append(hip)
-        }
-        let critter = Clacker(habitat: habitat, node: root, body: body, cell: cell, jaw: jaw, legs: legs, scale: scale)
-        return (critter, root)
-    }
-
-    init(habitat: Habitat, node: SCNNode, body: SCNNode, cell: Int, jaw: SCNNode, legs: [SCNNode], scale: Float) {
-        self.jaw = jaw
-        self.legs = legs
-        self.sizeScale = scale
-        super.init(kind: .clacker, habitat: habitat, node: node, body: body, cell: cell)
-        maxLane = 0.9
-        personalSpace = 0.45
-        acceleration = 10
-        turnRate = 12
-        senseInterval = 0.25
-    }
-
-    private func set(_ m: Mode) { mode = m; modeTime = 0 }
-
-    override func sense(now: CFTimeInterval) {
-        alarmCooldown = max(0, alarmCooldown - senseInterval)
-        // Anything big coming at it fast, or right on top of it: off it goes.
-        for s in habitat.sightings where s.id != id && s.kind != .clacker && s.kind != .pottle {
-            let d = simd_length(s.pos - pos)
-            if d < 1.0 || (d < 2.6 && closingSpeed(s) > 1.2) {
-                threat = s.pos
-                if mode != .flee {
-                    set(.flee)
-                    pause = 0
-                    hopsLeft = 12
-                    if alarmCooldown <= 0 { say(Self.alarm); alarmCooldown = 2.5 }
-                    if cage == nil, simd_dot(direction, s.pos - pos) > 0 { reverse() }
-                }
-                return
-            }
-        }
-        guard mode != .flee else { return }
-        // A sound somewhere (not its own): sometimes go and see; another
-        // clacker's call: sometimes answer.
-        if let heard = habitat.sounds.last(where: { $0.id != id && now - $0.time < 1.2 }),
-           simd_length(heard.pos - pos) < 16 {
-            if heard.kind == .clacker, replyAt == nil, Float.random(in: 0...1) < 0.45 {
-                replyAt = time + Double.random(in: 0.3...1.3)
-            }
-            if mode == .forage, Float.random(in: 0...1) < 0.35 {
-                seekPoint = heard.pos
-                set(.seek)
-                goal = graph.cell(near: heard.pos)
-            }
-        }
-        // Noodle, sitting still nearby: worth a closer look.
-        if mode == .forage, case let (n, d)? = nearest([.noodle], within: 5), simd_length(n.velocity) < 0.3, d > 1.1,
-           habitat.canSee(pos, n.pos, height: 0.15) {
-            if Float.random(in: 0...1) < 0.3 { set(.attend); seekPoint = n.pos; goal = graph.cell(near: n.pos) }
-        }
-    }
-
-    override func think(dt: Double, now: CFTimeInterval) {
-        modeTime += dt
-        switch mode {
-        case .flee:
-            wantSpeed = 3.0
-            if modeTime > 3 { set(.forage); threat = nil; hopsLeft = 0; pause = Double.random(in: 0.5...1.5) }
-        case .seek:
-            wantSpeed = 1.7
-            if let p = seekPoint, simd_length(p - pos) < 1.2 || modeTime > 8 { set(.forage); goal = nil; pause = 1 }
-        case .attend:
-            wantSpeed = 1.1
-            lookAt = seekPoint
-            if let p = seekPoint, simd_length(p - pos) < 1.0 { goal = nil; wantSpeed = 0 }
-            if modeTime > 7 { set(.forage); goal = nil; lookAt = nil }
-        case .forage:
-            wantSpeed = hopsLeft > 0 ? 1.25 : 0
-        }
-        // Hop bursts: a few hops, a stop to peck, again.
-        if hopsLeft <= 0 && pause <= 0 && mode != .flee {
-            pause = Double.random(in: 0.4...2.2)
-            peckTime = Float.random(in: 0.3...1.2)
-            hopsLeft = Int.random(in: 2...6)
-        }
-        if let r = replyAt, time >= r { replyAt = nil; say(Self.calls.randomElement()) }
-        callClock -= dt
-        if callClock <= 0 {
-            callClock = cage != nil ? Double.random(in: 2.5...7) : Double.random(in: 4...12)
-            say(Self.calls.randomElement())
-        }
-    }
-
-    override func choose(options: [Int]) -> Int {
-        if mode == .flee, let threat { return choice(options, awayFrom: threat) }
-        return roamChoice(options)
-    }
-
-    override func animate(dt: Float, moved: Float, turning: Float) {
-        // Hops: each 0.2 m of travel is one arc; landing ticks.
-        let before = hopPhase
-        hopPhase += moved / (0.2 * sizeScale)
-        if floor(hopPhase) > floor(before) {
-            hopsLeft -= 1
-            if Float.random(in: 0...1) < 0.7 { say(Self.ticks.randomElement(), loud: false) }
-        }
-        let inHop = speed > 0.15
-        let arc = inHop ? sin((hopPhase - floor(hopPhase)) * .pi) : 0
-        body.position.y = 0.11 + arc * 0.07
-        for leg in legs { leg.eulerAngles.x = inHop ? -0.6 * arc : 0 }
-        // Pecking while paused: tip forward, snap the jaw.
-        var pitch: Float = inHop ? 0.15 * arc : 0
-        var jawOpen: Float = mode == .flee ? 0.5 + 0.3 * sin(Float(time) * 40) : 0
-        if !inHop, peckTime > 0 {
-            peckTime -= dt
-            let p = sin(Float(time) * 14)
-            pitch = -0.35 * max(0, p)
-            jawOpen = 0.35 * max(0, -p)
-        } else if !inHop, mode == .forage {
-            jawOpen = 0.05 * (1 + sin(Float(time) * 1.7))
-        }
-        body.eulerAngles = SCNVector3(pitch, 0, sin(Float(time) * 3.1) * 0.04)
-        jaw?.eulerAngles.x = jawOpen
-    }
-}
 
 // MARK: - Stalk
 
@@ -1106,7 +1032,7 @@ nonisolated final class Stalk: Critter {
         }
         // Small things nearby: bow down for a good long look.
         if mode == .wander || mode == .bask, peerCooldown <= 0,
-           case let (s, _)? = nearest([.noodle, .clacker, .pottle, .bobbin], within: 2.8),
+           case let (s, _)? = nearest([.noodle, .pottle, .bobbin], within: 2.8),
            simd_length(s.velocity) < 1.5, habitat.canSee(pos, s.pos, height: 0.6), Float.random(in: 0...1) < 0.5 {
             set(.peer)
             peerAt = s.pos
@@ -1281,7 +1207,7 @@ nonisolated final class Ladder: Critter {
         }
         // Someone to keep company with, now and then.
         if mode == .commute, companyCooldown <= 0,
-           case let (s, _)? = nearest([.stalk, .chair, .pottle, .clacker, .bobbin], within: 7),
+           case let (s, _)? = nearest([.stalk, .chair, .pottle, .bobbin], within: 7),
            habitat.canSee(pos, s.pos, height: 1.0), Float.random(in: 0...1) < 0.25 {
             set(.accompany)
             companion = s.id
@@ -1373,11 +1299,11 @@ nonisolated final class Chair: Critter {
     private let legs: [SCNNode]
     private let seat: SCNNode
 
-    private static let taps = MenagerieSound.variants("chair-step", count: 4, volume: 0.22) { rng in
+    static let taps = MenagerieSound.variants("chair-step", count: 4, volume: 0.22) { rng in
         MenagerieSound.strike([(rng.range(380, 460), 0.025, 0.4), (rng.range(900, 1100), 0.012, 0.2)],
                               seconds: 0.07, noise: 0.4, noiseDecay: 0.0015, rng: &rng)
     }
-    private static let thumps = MenagerieSound.variants("chair-thump", count: 3, volume: 0.55) { rng in
+    static let thumps = MenagerieSound.variants("chair-thump", count: 3, volume: 0.55) { rng in
         let k = rng.range(0.9, 1.1)
         return MenagerieSound.strike([(150 * k, 0.07, 0.6), (330 * k, 0.05, 0.35), (720 * k, 0.025, 0.15)],
                                      seconds: 0.2, noise: 0.6, noiseDecay: 0.004, rng: &rng)
@@ -1392,7 +1318,7 @@ nonisolated final class Chair: Critter {
         let b = knock(&rng)
         return MenagerieSound.mix([(0, a, 1), (0.085, b, 0.85)])
     }
-    private static let creak = MenagerieSound.source("chair-creak", volume: 0.4) {
+    static let creak = MenagerieSound.source("chair-creak", volume: 0.4) {
         var rng = Rand(seed: 23)
         return MenagerieSound.creak(resonance: 470, q: 11, startHz: 28, endHz: 44, seconds: 0.4, rng: &rng)
     }
@@ -1400,6 +1326,14 @@ nonisolated final class Chair: Critter {
     override var modeName: String { mode.rawValue }
 
     static func make(habitat: Habitat, cell: Int, shadow: UIImage) -> (Critter, SCNNode) {
+        let m = model(shadow: shadow)
+        let critter = Chair(habitat: habitat, node: m.root, body: m.body, cell: cell, seat: m.seat, legs: m.legs)
+        return (critter, m.root)
+    }
+
+    /// Oct 18 (building life): the chair's model alone -- also the roaming
+    /// chair resident's body (ResidentChair.swift). Facing -z (yaw 0).
+    static func model(shadow: UIImage) -> (root: SCNNode, body: SCNNode, seat: SCNNode, legs: [SCNNode]) {
         let root = SCNNode()
         root.name = "chair"
         addShadow(shadow, size: 0.75, to: root)
@@ -1422,8 +1356,7 @@ nonisolated final class Chair: Critter {
             part(SCNCylinder(radius: 0.016, height: 0.44), wood, in: hip, at: SCNVector3(0, -0.22, 0))
             legs.append(hip)
         }
-        let critter = Chair(habitat: habitat, node: root, body: body, cell: cell, seat: seat, legs: legs)
-        return (critter, root)
+        return (root, body, seat, legs)
     }
 
     init(habitat: Habitat, node: SCNNode, body: SCNNode, cell: Int, seat: SCNNode, legs: [SCNNode]) {
@@ -1555,14 +1488,17 @@ nonisolated final class Pottle: Critter {
     private var corner: Int?
     private let pot: SCNNode
     private let plant: SCNNode
+    private let legs: [SCNNode]
     private let sizeScale: Float
+    /// Oct 20 (night): its step's length x (set by a resident errand while it guides: longer steps).
+    var strideScale: Float = 1
 
     private static let tocks = MenagerieSound.variants("pottle-tock", count: 5, volume: 0.35) { rng in
         let k = rng.range(0.92, 1.08)
         return MenagerieSound.strike([(640 * k, 0.03, 0.5), (1480 * k, 0.018, 0.3), (2650 * k, 0.01, 0.12)],
                                      seconds: 0.09, noise: 0.35, noiseDecay: 0.006, rng: &rng)
     }
-    private static let rustles = MenagerieSound.variants("pottle-rustle", count: 3, volume: 0.45) { rng in
+    static let rustles = MenagerieSound.variants("pottle-rustle", count: 3, volume: 0.45) { rng in
         MenagerieSound.rustle(grains: Int(rng.range(18, 34)), seconds: rng.range(0.3, 0.55), grainLength: 0.004, rng: &rng)
     }
 
@@ -1573,7 +1509,22 @@ nonisolated final class Pottle: Critter {
         root.name = "pottle"
         root.scale = SCNVector3(scale, scale, scale)
         addShadow(shadow, size: 0.42, to: root)
-        let body = pivot(in: root, at: SCNVector3Zero)
+        // Oct 16 (Supplies II polish): the pot stands on three pencil legs with
+        // eraser feet (Mr. Tinky's kind), so it walks rather than shuffles.
+        let legLength: Float = 0.13
+        let body = pivot(in: root, at: SCNVector3(0, legLength, 0))
+        let pencil = mat(UIColor(red: 0.98, green: 0.78, blue: 0.12, alpha: 1), rough: 0.5)
+        let eraser = mat(UIColor(red: 0.95, green: 0.55, blue: 0.6, alpha: 1), rough: 0.8)
+        var legs: [SCNNode] = []
+        for i in 0..<3 {
+            let a = Float(i) / 3 * 2 * .pi + .pi / 2
+            let hip = pivot(in: body, at: SCNVector3(0.06 * cos(a), 0.01, 0.06 * sin(a)), name: "leg")
+            let shaft = SCNCylinder(radius: 0.0075, height: CGFloat(legLength))
+            shaft.radialSegmentCount = 6
+            part(shaft, pencil, in: hip, at: SCNVector3(0, -legLength / 2, 0))
+            part(SCNSphere(radius: 0.011), eraser, in: hip, at: SCNVector3(0, -legLength - 0.002, 0))
+            legs.append(hip)
+        }
         let clay = mat(UIColor(red: 0.74, green: 0.38, blue: 0.22, alpha: 1), rough: 0.85)
         let soil = mat(UIColor(red: 0.18, green: 0.12, blue: 0.08, alpha: 1), rough: 1)
         let leaf = mat(UIColor(red: 0.2, green: 0.55, blue: 0.22, alpha: 1), rough: 0.6)
@@ -1593,13 +1544,14 @@ nonisolated final class Pottle: Critter {
         }
         part(SCNCylinder(radius: 0.005, height: 0.3), leaf, in: plant, at: SCNVector3(0, 0.15, 0))
         part(SCNSphere(radius: 0.03), petal, in: plant, at: SCNVector3(0, 0.31, 0))
-        let critter = Pottle(habitat: habitat, node: root, body: body, cell: cell, pot: pot, plant: plant, scale: scale)
+        let critter = Pottle(habitat: habitat, node: root, body: body, cell: cell, pot: pot, plant: plant, legs: legs, scale: scale)
         return (critter, root)
     }
 
-    init(habitat: Habitat, node: SCNNode, body: SCNNode, cell: Int, pot: SCNNode, plant: SCNNode, scale: Float) {
+    init(habitat: Habitat, node: SCNNode, body: SCNNode, cell: Int, pot: SCNNode, plant: SCNNode, legs: [SCNNode], scale: Float) {
         self.pot = pot
         self.plant = plant
+        self.legs = legs
         self.sizeScale = scale
         super.init(kind: .pottle, habitat: habitat, node: node, body: body, cell: cell)
         maxLane = 0.5
@@ -1621,22 +1573,18 @@ nonisolated final class Pottle: Critter {
     }
 
     override func sense(now: CFTimeInterval) {
-        guard cage == nil else {
-            if nearest([.clacker], within: 0.5) != nil { shiver = 1 }
-            return
-        }
-        let company = nearest([.noodle, .player, .clacker, .chair, .ladder, .bobbin, .stalk], within: 2.2)
-        let birds = nearest([.clacker], within: 3)
+        guard cage == nil else { return }          // (Oct 19: its old cage-mates, the Clackers, are retired)
+        let company = nearest([.noodle, .player, .chair, .ladder, .bobbin, .stalk], within: 2.2)
         switch mode {
         case .settled:
-            if company != nil || birds != nil {
+            if company != nil {
                 set(.uneasy)
                 shiver = 1
                 say(Self.rustles.randomElement())
             }
         case .uneasy:
-            if company == nil && birds == nil, modeTime > 2 { set(.settled) }
-            else if modeTime > 3 || birds != nil && modeTime > 1 {
+            if company == nil, modeTime > 2 { set(.settled) }
+            else if modeTime > 3 {
                 set(.relocate)
                 findCorner()
             }
@@ -1676,12 +1624,17 @@ nonisolated final class Pottle: Critter {
     override func animate(dt: Float, moved: Float, turning: Float) {
         // Walks by tipping onto its rim and pivoting: left edge, right edge.
         let before = pivotPhase
-        pivotPhase += moved / (0.12 * sizeScale) * .pi
-        if floor(before / .pi) != floor(pivotPhase / .pi), speed > 0.08 { say(Self.tocks.randomElement(), loud: false) }
+        pivotPhase += moved / (0.12 * sizeScale * max(0.5, strideScale)) * .pi
+        // Oct 23 (walking music): with the musical identities on, its walking sound is its
+        // signature (ResidentWalkingMusic, the same for every critter) -- no tocks then.
+        if floor(before / .pi) != floor(pivotPhase / .pi), speed > 0.08, !ResidentMusic.hushesVoices { say(Self.tocks.randomElement(), loud: false) }
         let walking = min(1, speed / 0.2)
         let s = sin(pivotPhase)
         pot.eulerAngles = SCNVector3(-0.06 * walking, s * 0.05 * walking, s * 0.17 * walking)
         pot.position.y = abs(s) * 0.012 * walking
+        for (i, leg) in legs.enumerated() {                        // Oct 16: the legs take the steps
+            leg.eulerAngles.x = 0.35 * sin(pivotPhase + Float(i) * 2.1) * walking
+        }
         // Leaves: lag behind the pot; shiver when uneasy.
         leafSway += ((-s * 0.25 * walking) - leafSway) * min(1, dt * 4)
         let jitter = shiver > 0 ? sin(Float(time) * 47) * 0.12 * shiver : 0
@@ -1806,7 +1759,7 @@ nonisolated final class Cage: @unchecked Sendable {
     }
 
     func tickAction() -> SCNAction {
-        SCNAction.customAction(duration: 1) { _, _ in self.tick() }
+        SCNAction.customAction(duration: 1) { _, _ in let p = PerfMonitor.begin("critter.tick"); self.tick(); PerfMonitor.end(p) }   // (Oct 21: timed, measurement only)
     }
 
     private func tick() {
@@ -1842,5 +1795,1402 @@ nonisolated final class Cage: @unchecked Sendable {
         // They don't all bolt at once.
         releaseAt = inmates.map { _ in clock + Double.random(in: 0.8...9) }
         diag("cage.opened", ["inmates": inmates.count])
+    }
+}
+
+// MARK: - Oct 16 -- THE FIRST MONSTER AUDITION: THE BIG SHOT
+//
+// One enormous, pompous corporate bully (~2.5 m, mostly belly) who stomps the
+// corridors of Floor 3 like he owns them. An original character: a lacquered
+// silver pompadour, a ruddy jowly face with permanently indignant brows, a
+// dark suit straining at its buttons, a loud striped tie, stubby little hands
+// and enormous polished shoes. Signature: he stops, straightens his tie,
+// lifts his chin, POINTS -- harrumphs -- and stomps on.
+//
+// Behaviour (his own Critter brain; the floor graph, travel and voice are the
+// shared ones):
+//   stroll    lumbering about; every 8-15 s a harrumph at whatever's ahead
+//   chase     a critter he can see within 6.5 m: a short stomping pursuit
+//             (3 s at most), then he points at where it fled
+//   (Oct 16, meaner -- the player:)
+//   spot      the player seen within 15 m (or within 2.5 m, seen or not):
+//             he stops dead, swings round to face them, points -- "YOU"
+//   pursue    then comes, at a charge (up to 5.2 m/s), finger first, along
+//             the corridors to where he last saw them; easing off at the end
+//             so he pulls up ~1.7 m from the player's face
+//   search    lost sight (round a corner): to the last place he saw them,
+//             a look one way and the other -- found: pursue; not: he
+//             straightens his tie, harrumphs and strolls off (5-8 s)
+//   confront  in your face: the accusation (point, jab, "YOU", stomp); run
+//             and he's after you again; stand there and he gets furious
+//             (jabbing, "no-no-NO", double stomp); stand there still and he
+//             gives up in a huff and turns away (9-13 s). A pursuit gives up
+//             after 24 s in any case; now and then he breaks off to chase a
+//             critter on the way.
+//             He never blocks or touches the player (no collision with the
+//             camera; he stops short of them) and never follows them into
+//             a room -- he glares from the nearest corridor cell.
+// Every loose critter scatters from him (Critter.fleeBigShot) and goes back
+// to its own life when he's gone. Nobody is hurt, caught or removed.
+// Off: `-HallwaysNoBigShot YES`, or delete BigShot.populate's line in
+// Menagerie.install.
+nonisolated final class BigShot: Critter {
+    // Oct 22: RETIRED FROM NORMAL PLAY (no longer wanted). Nothing of his is
+    // deleted: he (and his eviction, which only he can start) comes back only
+    // with `-HallwaysBigShot YES`; `-HallwaysNoBigShot YES` still wins.
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "HallwaysBigShot") && !UserDefaults.standard.bool(forKey: "HallwaysNoBigShot")
+    }
+    static let floor = 3
+    /// Critters bolt when he comes this close (m), and calm down beyond calmRadius.
+    static let scareRadius: Float = 3.4
+    static let calmRadius: Float = 5.0
+
+    // Oct 16 (meaner): he notices you from further off, turns on you, and comes
+    // -- fast. Round a corner and he checks where you were; stand your ground
+    // and he gets in your face, then gets crosser; eventually he gives up in a
+    // huff. Critters still get chased now and then -- even mid-pursuit.
+    static let sightRange: Float = 15            // was 8
+    static let hearRange: Float = 2.5            // this close he knows, line of sight or not
+    static let strollSpeed: Float = 0.85
+    static let pursueSpeed: Float = 5.2          // the charge (the player cruises at 6, 9 when sustained)
+    static let searchSpeed: Float = 2.4
+    static let chaseSpeed: Float = 2.4           // after a critter
+    static let confrontRange: Float = 1.7        // as close as he comes (m, to the player's eye)
+    static let retreatRange: Float = 3.6         // further than this after a confrontation = you ran
+    static let pursuitMax: Double = 24           // then he's had enough
+    static let searchMax: Double = 7
+
+    enum Mode: String { case stroll, harrumph, chase, spot, pursue, search, escort }
+    /// Oct 16 (Bonzo's eviction): this close, in sight, mid-pursuit -- he grabs.
+    static let captureRange: Float = 1.8
+    /// The signature gesture's three tempers.
+    enum Gesture: String { case plain, accuse, fury }
+    /// What comes after a gesture.
+    private enum After { case stroll, turnAway, judge }
+
+    private var mode: Mode = .stroll
+    private var modeTime: Double = 0
+    private var gestureClock = Double.random(in: 6...10)
+    private var chaseCooldown: Double = 5
+    private var playerCooldown: Double = 4
+    private var chaseTarget: String?
+    private var gestureTime: Double = 0
+    private var gesture: Gesture = .plain
+    private var after: After = .stroll
+    private var stompsDone = 0
+    private var saidInGesture = false
+    // What he knows about the player.
+    private var lastSeen: SIMD2<Float>?
+    private var lastSeenAt: Double = -100
+    private var lastSeenCell: Int?
+    private var lastSeenOffGraph = false
+    private var seenDistance: Float = 99
+    private var pursuitTime: Double = 0
+    private var annoyance = 0
+    private var divertedFromPlayer = false
+    private var lookAroundTime: Double = 0
+    private var pathDistances: [Int: Int] = [:]
+    private var pathFor: Int?
+    private var lastStepSound: Double = -1
+    // Oct 16 (Bonzo's eviction): the escort's body (a script moves him; see BonzoEviction).
+    private var captureAskedAt: Double = -100
+    /// 0 = arm down ... 1 = gripping the player's collar (main writes, render eases toward it).
+    var escortReach: Float = 0
+    /// 1 = his usual girth; < 1 = breathing in to squeeze through a doorway.
+    var squeeze: Float = 1
+    private var escortLast: SIMD2<Float>?
+    private var escortClock: CFTimeInterval = 0
+    private var reach: [Int: Int] = [:]          // cells he can walk to from `reachFrom`
+    private var reachFrom: Int?
+    private var diversionEndedAt: Double = -100
+
+    // The rig.
+    private let torso: SCNNode, belly: SCNNode, head: SCNNode, tie: SCNNode
+    private let hips: [SCNNode], shoulders: [SCNNode], elbows: [SCNNode]
+    private var gait: Float = 0
+    private var lastSwing: Float = 0
+    private var stomp: Float = 0                 // the body's dip after a footfall (decays)
+    private var jiggle: Float = 0, jiggleVel: Float = 0
+
+    override var modeName: String { mode.rawValue }
+
+    private init(habitat: Habitat, node: SCNNode, body: SCNNode, cell: Int, torso: SCNNode, belly: SCNNode, head: SCNNode,
+                 tie: SCNNode, hips: [SCNNode], shoulders: [SCNNode], elbows: [SCNNode]) {
+        self.torso = torso; self.belly = belly; self.head = head; self.tie = tie
+        self.hips = hips; self.shoulders = shoulders; self.elbows = elbows
+        super.init(kind: .bigShot, habitat: habitat, node: node, body: body, cell: cell)
+        acceleration = 2.2                       // a big body gets going slowly
+        turnRate = 2.4
+        maxLane = 0.18
+        personalSpace = 1.1
+        senseInterval = 0.4
+        wantSpeed = 0.85
+    }
+
+    // MARK: Voice (synthesised, like everyone's)
+
+    private typealias S = MeetingVoices.Syl
+    private static let harrumphs: [String: SCNAudioSource] = {
+        let lines: [(String, [S])] = [
+            ("bigshot-hmph", [S(v: 6, s: 0.14, a: 104, b: 98), S(v: 5, s: 0.26, a: 128, b: 84, stop: true)]),
+            ("bigshot-harrumph", [S(v: 0, s: 0.12, a: 96, b: 104, stop: true), S(v: 5, s: 0.3, a: 132, b: 88, stop: true)]),
+            ("bigshot-you", [S(v: 3, s: 0.12, a: 112, b: 150), S(v: 3, s: 0.32, a: 158, b: 92)]),
+            ("bigshot-nonono", [S(v: 1, s: 0.1, a: 120, b: 126, stop: true), S(v: 1, s: 0.1, a: 124, b: 130, stop: true),
+                                S(v: 1, s: 0.22, a: 132, b: 92, stop: true)]),
+        ]
+        var out: [String: SCNAudioSource] = [:]
+        for (name, syl) in lines {
+            let source = MenagerieSound.source(name, volume: 0.75, {
+                MeetingVoices.speak(syl, seed: AuditionVoices.stableSeed(name), formantScale: 0.74, breath: 0.16)
+            })
+            if let source { out[name] = source }
+        }
+        return out
+    }()
+    /// accuse = "YOU", fury = "no-no-NO", plain = a harrumph.
+    private static func voice(for g: Gesture) -> SCNAudioSource? {
+        switch g {
+        case .accuse: return harrumphs["bigshot-you"] ?? harrumphs.values.first
+        case .fury: return harrumphs["bigshot-nonono"] ?? harrumphs.values.first
+        case .plain: return [harrumphs["bigshot-hmph"], harrumphs["bigshot-harrumph"]].compactMap { $0 }.randomElement()
+        }
+    }
+    private static let stomps: [SCNAudioSource] = MenagerieSound.variants("bigshot-stomp", count: 3, volume: 0.55) { rng in
+        MenagerieSound.strike([(rng.range(48, 60), 0.2, 1), (rng.range(100, 120), 0.1, 0.45), (rng.range(230, 270), 0.04, 0.2)],
+                              seconds: 0.4, noise: 0.7, noiseDecay: 0.012, rng: &rng)
+    }
+
+    // MARK: Build
+
+    static func make(habitat: Habitat, cell: Int, shadow: UIImage) -> (BigShot, SCNNode) {
+        let root = SCNNode()
+        root.name = "bigShot"
+        addShadow(shadow, size: 1.8, to: root)
+        let body = pivot(in: root, at: SCNVector3Zero)
+        let suit = mat(UIColor(red: 0.14, green: 0.15, blue: 0.19, alpha: 1), rough: 0.78)
+        let trousers = mat(UIColor(red: 0.12, green: 0.13, blue: 0.16, alpha: 1), rough: 0.8)
+        let shirt = mat(UIColor(white: 0.93, alpha: 1), rough: 0.6)
+        let skin = mat(UIColor(red: 0.88, green: 0.52, blue: 0.46, alpha: 1), rough: 0.5)
+        let flush = mat(UIColor(red: 0.85, green: 0.36, blue: 0.36, alpha: 1), rough: 0.45)
+        let hair = mat(UIColor(white: 0.8, alpha: 1), metal: 0.35, rough: 0.22)              // lacquered silver
+        let brow = mat(UIColor(white: 0.32, alpha: 1), rough: 0.9)
+        let shoeLeather = mat(UIColor(white: 0.04, alpha: 1), metal: 0.25, rough: 0.18)       // mirror-polished
+        let navy = mat(UIColor(red: 0.1, green: 0.13, blue: 0.32, alpha: 1), rough: 0.5)
+        let mustard = mat(UIColor(red: 0.86, green: 0.66, blue: 0.12, alpha: 1), rough: 0.5)
+        let white = mat(UIColor(white: 0.97, alpha: 1), rough: 0.3)
+        let black = mat(UIColor(white: 0.02, alpha: 1), rough: 0.25)
+        let mouthRed = mat(UIColor(red: 0.45, green: 0.08, blue: 0.1, alpha: 1), rough: 0.6)
+        let button = mat(UIColor(white: 0.08, alpha: 1), metal: 0.3, rough: 0.4)
+
+        // Legs and enormous shoes (toes forward = -Z).
+        var hips: [SCNNode] = []
+        for side: Float in [-1, 1] {
+            let hip = pivot(in: body, at: SCNVector3(side * 0.25, 0.82, 0))
+            part(SCNCapsule(capRadius: 0.16, height: 0.8), trousers, in: hip, at: SCNVector3(0, -0.4, 0))
+            part(SCNBox(width: 0.27, height: 0.13, length: 0.52, chamferRadius: 0.06), shoeLeather, in: hip,
+                 at: SCNVector3(side * 0.02, -0.755, -0.11))
+            hips.append(hip)
+        }
+        // The torso: a vast belly in a jacket that doesn't close, a broad chest.
+        let torso = pivot(in: body, at: SCNVector3(0, 0.82, 0))
+        let belly = pivot(in: torso, at: SCNVector3(0, 0.55, -0.05))
+        let jacketBelly = part(SCNSphere(radius: 0.62), suit, in: belly)
+        jacketBelly.scale = SCNVector3(1.08, 0.95, 1.0)
+        part(SCNSphere(radius: 0.5), shirt, in: belly, at: SCNVector3(0, -0.13, -0.2))        // shirt bulging out below
+        for (y, z) in [(Float(0.04), Float(-0.62)), (0.24, -0.585)] {                           // straining buttons
+            part(SCNCylinder(radius: 0.035, height: 0.02), button, in: belly, at: SCNVector3(0, y, z), euler: SCNVector3(Float.pi / 2, 0, 0))
+        }
+        let chest = part(SCNSphere(radius: 0.5), suit, in: torso, at: SCNVector3(0, 0.95, 0.02))
+        chest.scale = SCNVector3(1.22, 0.85, 0.9)
+        for side: Float in [-1, 1] {                                                            // shoulder pads
+            part(SCNBox(width: 0.32, height: 0.13, length: 0.42, chamferRadius: 0.05), suit, in: torso,
+                 at: SCNVector3(side * 0.52, 1.15, 0.02), euler: SCNVector3(0, 0, side * -0.12))
+        }
+        part(SCNCylinder(radius: 0.16, height: 0.1), shirt, in: torso, at: SCNVector3(0, 1.3, -0.03))   // collar
+        // The tie: knot at the collar, a short loud striped blade over the belly top.
+        let tie = pivot(in: torso, at: SCNVector3(0, 1.25, -0.35))
+        tie.eulerAngles.x = 0.5
+        part(SCNBox(width: 0.1, height: 0.08, length: 0.05, chamferRadius: 0.015), navy, in: tie, at: SCNVector3(0, 0.0, 0))
+        part(SCNBox(width: 0.15, height: 0.4, length: 0.02, chamferRadius: 0.01), navy, in: tie, at: SCNVector3(0, -0.22, -0.015))
+        for k in 0..<4 {
+            part(SCNBox(width: 0.17, height: 0.03, length: 0.022, chamferRadius: 0.004), mustard, in: tie,
+                 at: SCNVector3(0, -0.08 - Float(k) * 0.09, -0.017), euler: SCNVector3(0, 0, 0.45))
+        }
+        // The head: ruddy, jowly, indignant -- and the pompadour.
+        let head = pivot(in: torso, at: SCNVector3(0, 1.4, -0.04))
+        let skull = part(SCNSphere(radius: 0.24), skin, in: head)
+        skull.scale = SCNVector3(1, 1.04, 0.95)
+        for side: Float in [-1, 1] {
+            part(SCNSphere(radius: 0.125), skin, in: head, at: SCNVector3(side * 0.135, -0.13, -0.07))   // jowls
+            part(SCNSphere(radius: 0.06), skin, in: head, at: SCNVector3(side * 0.24, 0.0, 0.0))         // ears
+            part(SCNSphere(radius: 0.045), flush, in: head, at: SCNVector3(side * 0.13, -0.05, -0.18))  // flushed cheeks
+            part(SCNSphere(radius: 0.042), white, in: head, at: SCNVector3(side * 0.072, 0.07, -0.195))  // beady eyes
+            part(SCNSphere(radius: 0.02), black, in: head, at: SCNVector3(side * 0.072, 0.065, -0.234))
+            // Brows: thick, inner ends down -- permanently indignant.
+            part(SCNBox(width: 0.12, height: 0.035, length: 0.04, chamferRadius: 0.012), brow, in: head,
+                 at: SCNVector3(side * 0.08, 0.135, -0.205), euler: SCNVector3(0, 0, side * 0.38))
+        }
+        part(SCNSphere(radius: 0.14), skin, in: head, at: SCNVector3(0, -0.2, -0.07))            // double chin
+        part(SCNSphere(radius: 0.068), flush, in: head, at: SCNVector3(0, 0.0, -0.245))          // nose
+        part(SCNBox(width: 0.11, height: 0.022, length: 0.02, chamferRadius: 0.008), mouthRed, in: head,
+             at: SCNVector3(0, -0.1, -0.228))
+        for side: Float in [-1, 1] {                                                              // the frown's ends
+            part(SCNBox(width: 0.04, height: 0.02, length: 0.02, chamferRadius: 0.007), mouthRed, in: head,
+                 at: SCNVector3(side * 0.065, -0.112, -0.222), euler: SCNVector3(0, 0, side * 0.6))
+        }
+        let pomp = part(SCNSphere(radius: 0.21), hair, in: head, at: SCNVector3(0, 0.2, -0.02))
+        pomp.scale = SCNVector3(1.1, 0.55, 1.2)
+        let swoop = part(SCNSphere(radius: 0.13), hair, in: head, at: SCNVector3(0.02, 0.26, -0.19))
+        swoop.scale = SCNVector3(1.35, 0.85, 1.0)
+        // Short arms, stubby little hands; the right one has a pointing finger.
+        var shoulders: [SCNNode] = [], elbows: [SCNNode] = []
+        for side: Float in [-1, 1] {
+            let shoulder = pivot(in: torso, at: SCNVector3(side * 0.66, 1.1, 0))
+            part(SCNCapsule(capRadius: 0.105, height: 0.44), suit, in: shoulder, at: SCNVector3(0, -0.2, 0))
+            let elbow = pivot(in: shoulder, at: SCNVector3(0, -0.4, 0))
+            part(SCNCapsule(capRadius: 0.09, height: 0.36), suit, in: elbow, at: SCNVector3(0, -0.16, 0))
+            part(SCNCylinder(radius: 0.072, height: 0.04), shirt, in: elbow, at: SCNVector3(0, -0.34, 0))   // cuff
+            part(SCNSphere(radius: 0.058), skin, in: elbow, at: SCNVector3(0, -0.4, 0))                     // hand
+            if side > 0 {
+                part(SCNCapsule(capRadius: 0.016, height: 0.1), skin, in: elbow, at: SCNVector3(0, -0.47, 0))
+            }
+            shoulder.eulerAngles.z = side * 0.32
+            shoulders.append(shoulder)
+            elbows.append(elbow)
+        }
+        let shot = BigShot(habitat: habitat, node: root, body: body, cell: cell, torso: torso, belly: belly, head: head,
+                           tie: tie, hips: hips, shoulders: shoulders, elbows: elbows)
+        _ = (harrumphs, stomps)                                     // render (and cache) the sounds now
+        return (shot, root)
+    }
+
+    // MARK: Brain
+
+    override func giveWay(to other: Habitat.Sighting) {
+        // After the player he bulldozes through; otherwise small things scatter
+        // and things that don't (Noodle, a Bobbin) he turns his back on.
+        if mode == .pursue || mode == .search || mode == .spot { return }
+        // Oct 16 (stuck + flicker report): a frog or the Slinky never scatters from him
+        // (they move themselves), so waiting for one to get out of the way was a
+        // stop-start stutter that could last; he steps over them, as he does the player.
+        if other.kind == .frog || other.kind == .slinky { return }
+        lastGiveWay = "\(other.kind)"
+        if other.critter == nil { reverse() } else { pause = 0.1 }
+    }
+
+    // MARK: Oct 16 -- isolation switches and stuck/dither diagnostics (testing)
+
+    /// `-HallwaysBigShotMute YES`: he makes no sound at all (everything else as usual).
+    static let muted = UserDefaults.standard.bool(forKey: "HallwaysBigShotMute")
+    /// `-HallwaysBigShotNoAnimation YES`: his body holds still (legs, arms, belly, tie);
+    /// he still moves about and thinks.
+    static let stillBody = UserDefaults.standard.bool(forKey: "HallwaysBigShotNoAnimation")
+
+    private var lastGiveWay = "-"
+    private var reverseTimes: [Double] = []
+    private var lastDitherLog: Double = -100
+    private var stuckClock: Double = 0
+    private var stuckFrom = SIMD2<Float>(0, 0)
+
+    override func say(_ source: SCNAudioSource?, loud: Bool = true) {
+        super.say(Self.muted ? nil : source, loud: loud)
+    }
+
+    /// Every about-face is counted: four within 2 s is a dither, logged with what he was doing.
+    override func reverse() {
+        super.reverse()
+        reverseTimes.append(time)
+        reverseTimes.removeAll { time - $0 > 2 }
+        if reverseTimes.count >= 4, time - lastDitherLog > 5 {
+            lastDitherLog = time
+            diag("bigShot.dither", ["reverses2s": reverseTimes.count, "mode": mode.rawValue, "from": from, "to": to,
+                                    "goal": goal ?? -1, "speed": speed, "lastGiveWay": lastGiveWay])
+        }
+    }
+
+    /// Every 3 s: wanting to walk but not getting anywhere is logged (mode, cells, who's near).
+    private func noteProgress(dt: Double) {
+        stuckClock += dt
+        guard stuckClock >= 3 else { return }
+        stuckClock = 0
+        let went = simd_length(pos - stuckFrom)
+        stuckFrom = pos
+        let looking = mode == .harrumph || mode == .spot || (mode == .search && lookAroundTime > 0)
+        guard !looking, wantSpeed > 0.3, went < 0.4 else { return }
+        let near = habitat.sightings.filter { $0.id != id && simd_length($0.pos - pos) < 2 }.map { "\($0.kind)" }
+        diag("bigShot.stuck", ["mode": mode.rawValue, "moved3s": (went * 100).rounded() / 100, "from": from, "to": to,
+                               "goal": goal ?? -1, "speed": speed, "wantSpeed": wantSpeed, "pause": pause,
+                               "lastGiveWay": lastGiveWay, "near": near.joined(separator: ",")])
+    }
+
+    override func sense(now: CFTimeInterval) {
+        // Where is the player? Seen (clear line at eye height), or simply too close to miss.
+        if case let (p, d)? = nearest([.player], within: Self.sightRange), p.pos.x.isFinite, p.pos.y.isFinite,
+           d < Self.hearRange || habitat.canSee(pos, p.pos, height: 1.7) {
+            lastSeen = p.pos
+            lastSeenAt = time
+            seenDistance = d
+            if reachFrom != from {
+                reach = graph.distances(from: [from])
+                reachFrom = from
+            }
+            if let c = graph.cell(near: p.pos), reach[c] != nil {
+                lastSeenCell = c
+                lastSeenOffGraph = false
+            } else {
+                // Somewhere he can't walk to (a room behind a door, the office, the cab):
+                // the nearest place he CAN get to -- and he glares from there.
+                lastSeenCell = reach.keys.min { k1, k2 in
+                    simd_length((graph.centers[k1] ?? pos) - p.pos) < simd_length((graph.centers[k2] ?? pos) - p.pos)
+                }
+                lastSeenOffGraph = true
+            }
+            if mode == .stroll, playerCooldown <= 0 {
+                spot()
+                return
+            }
+            if mode == .search {
+                set(.pursue)
+                diag("bigShot.reacquired", ["distance": (d * 10).rounded() / 10])
+            }
+        }
+        guard mode == .stroll, chaseCooldown <= 0, let prey = nearestPrey(within: 6.5), habitat.canSee(pos, prey.0.pos, height: 1.0) else { return }
+        startChase(prey.0, distance: prey.1)
+    }
+
+    override func think(dt: Double, now: CFTimeInterval) {
+        modeTime += dt
+        chaseCooldown -= dt
+        playerCooldown -= dt
+        noteProgress(dt: dt)
+        let sinceSeen = time - lastSeenAt
+        let livePlayer = nearest([.player], within: Self.sightRange)
+        let liveDistance = livePlayer?.1 ?? seenDistance
+        switch mode {
+        case .stroll:
+            wantSpeed = Self.strollSpeed
+            goal = nil
+            lookAt = nil
+            gestureClock -= dt
+            if gestureClock <= 0 { beginGesture(.plain, at: pos + direction * 3, then: .stroll) }
+            // Close ahead of the player (between pursuits): he stands and glares,
+            // and sooner or later, hmph, off he goes.
+            if case let (p, _)? = nearest([.player], within: 2.4), simd_dot(direction, p.pos - pos) > 0.3 {
+                wantSpeed = 0
+                pause = 0.3
+                lookAt = p.pos
+                if Double.random(in: 0...1) < dt * 0.15 { reverse() }
+            }
+
+        case .chase:
+            wantSpeed = Self.chaseSpeed
+            let target = habitat.sightings.first { $0.id == chaseTarget }
+            if let target, target.pos.x.isFinite, target.pos.y.isFinite, simd_length(target.pos - pos) < 9, modeTime < 3.0 {
+                goal = graph.cell(near: target.pos)
+                headTowardGoal()
+            } else {
+                chaseCooldown = Double.random(in: 7...11)
+                if divertedFromPlayer {                                          // ...now, where was I
+                    playerCooldown = min(playerCooldown, 1.0)
+                    diversionEndedAt = time
+                }
+                divertedFromPlayer = false
+                beginGesture(.plain, at: target?.pos ?? pos + direction * 3, then: .stroll)   // ...and point where it went
+            }
+
+        case .spot:
+            // Caught sight of you: he stops dead, swings round, points -- YOU.
+            wantSpeed = 0
+            speed = max(0, speed - Float(dt) * 6)
+            lookAt = lastSeen
+            if modeTime > 0.75 {
+                set(.pursue)
+                diag("bigShot.pursue", ["distance": (seenDistance * 10).rounded() / 10, "offGraph": lastSeenOffGraph])
+            }
+
+        case .pursue:
+            pursuitTime += dt
+            lookAt = lastSeen
+            // Oct 16 (Bonzo's eviction): caught -- in sight, within arm's reach: he grabs
+            // (the main thread decides whether he may; meanwhile he stands over you).
+            if time - captureAskedAt < 0.5 {
+                wantSpeed = 0
+                speed = max(0, speed - Float(dt) * 6)
+                break
+            }
+            if BonzoEviction.isEnabled, liveDistance <= Self.captureRange, sinceSeen < 0.6, !lastSeenOffGraph,
+               time - captureAskedAt > 2.5, now >= BonzoEviction.captureGraceUntil {
+                captureAskedAt = time
+                wantSpeed = 0
+                let me = self
+                DispatchQueue.main.async { MainActor.assumeIsolated { BonzoEviction.requestCapture(by: me) } }
+                break
+            }
+            if sinceSeen > 0.9 {
+                set(.search)                                                    // round a corner: where did you go
+                diag("bigShot.search", ["since": (sinceSeen * 10).rounded() / 10])
+            } else if pursuitTime > Self.pursuitMax {
+                playerCooldown = Double.random(in: 8...12)
+                endPursuit()
+                beginGesture(.plain, at: lastSeen ?? pos, then: .turnAway)      // enough of you
+                diag("bigShot.gaveUp", ["why": "tooLong"])
+            } else if liveDistance <= Self.confrontRange || (from == goal && (lastSeenOffGraph || liveDistance < 3.2)) {
+                confront()
+            } else {
+                goal = lastSeenCell
+                headTowardGoal()
+                // Charging -- but easing off for the last few metres (on the live distance, braking
+                // hard), so he pulls up in your face, not through you.
+                wantSpeed = max(0.8, min(Self.pursueSpeed, (liveDistance - Self.confrontRange) * 1.4))
+                speed = min(speed, max(0, liveDistance - Self.confrontRange) * 1.5 + 0.3)
+                // Now and then a critter in the way is too tempting.
+                if pursuitTime > 3, Double.random(in: 0...1) < dt * 0.06, let prey = nearestPrey(within: 3) {
+                    divertedFromPlayer = true
+                    startChase(prey.0, distance: prey.1)
+                }
+            }
+
+        case .search:
+            pursuitTime += dt
+            guard let seen = lastSeen else { endPursuit(); set(.stroll); break }
+            let there = from == lastSeenCell || simd_length(seen - pos) < 1.5
+            if there || lookAroundTime > 0 {
+                // Where you were: he looks one way, then the other...
+                wantSpeed = 0
+                speed = max(0, speed - Float(dt) * 4)
+                lookAroundTime += dt
+                let side = SIMD2<Float>(-direction.y, direction.x) * (Int(lookAroundTime / 0.7) % 2 == 0 ? Float(3) : Float(-3))
+                lookAt = pos + direction * 2 + side
+            } else {
+                goal = lastSeenCell
+                headTowardGoal()
+                wantSpeed = Self.searchSpeed
+                lookAt = seen
+            }
+            if lookAroundTime > 2.1 || modeTime > Self.searchMax {
+                // ...lost you. The tie gets straightened, with feeling.
+                playerCooldown = Double.random(in: 5...8)
+                endPursuit()
+                beginGesture(.plain, at: seen, then: .stroll)
+                diag("bigShot.lost", [:])
+            }
+
+        case .escort:
+            break                                                               // (a script drives him)
+
+        case .harrumph:
+            wantSpeed = 0
+            pause = 0.2
+            speed = max(0, speed - Float(dt) * 5)
+            gestureTime += dt
+            if after == .judge { pursuitTime += dt }                               // (a confrontation counts toward his patience)
+            let beat = Self.timeline(gesture)
+            if after == .judge, case let (p, _)? = nearest([.player], within: 8) { lookAt = p.pos }   // glaring at you throughout
+            if !saidInGesture, gestureTime > beat.voice {
+                saidInGesture = true
+                say(Self.voice(for: gesture))
+            }
+            if stompsDone < beat.stomps.count, gestureTime > beat.stomps[stompsDone] {
+                stompsDone += 1
+                footfall(heavy: true, always: true)
+            }
+            if gestureTime > beat.end { finishGesture() }
+        }
+        // Never through the player: chasing a critter or searching, close ahead of
+        // them, he stands (the pursuit brakes on its own; strolling glares above).
+        if mode == .chase || mode == .search, case let (p, d)? = livePlayer, d < 2.2, simd_dot(direction, p.pos - pos) > 0.3 {
+            wantSpeed = 0
+            pause = 0.3
+            speed = max(0, speed - Float(dt) * 6)
+        }
+    }
+
+    private func set(_ m: Mode) {
+        mode = m
+        modeTime = 0
+        lookAroundTime = 0
+        turnRate = (m == .spot || m == .harrumph) ? 5 : 2.6
+        senseInterval = (m == .stroll || m == .chase) ? 0.4 : 0.25
+    }
+
+    /// Noticed you: the turn, the point, the "YOU".
+    private func spot() {
+        set(.spot)
+        if time - diversionEndedAt > 4 {                                     // (back from a critter: same pursuit, same patience)
+            pursuitTime = 0
+            annoyance = 0
+        }
+        divertedFromPlayer = false
+        lookAt = lastSeen
+        goal = lastSeenCell
+        if let seen = lastSeen, from != to, simd_dot(direction, seen - pos) < -0.2 { reverse() }   // never off the other way
+        say(Self.voice(for: .accuse))
+        footfall(heavy: true, always: true)
+        diag("bigShot.spot", ["distance": (seenDistance * 10).rounded() / 10])
+    }
+
+    /// In your face (or as near as the corridors let him get): the accusation.
+    private func confront() {
+        diag("bigShot.confront", ["distance": (seenDistance * 10).rounded() / 10, "annoyance": annoyance])
+        beginGesture(annoyance == 0 ? .accuse : .fury, at: lastSeen ?? pos, then: .judge)
+    }
+
+    private func endPursuit() {
+        pursuitTime = 0
+        annoyance = 0
+        divertedFromPlayer = false
+        goal = nil
+    }
+
+    private func nearestPrey(within range: Float) -> (Habitat.Sighting, Float)? {
+        var prey: (Habitat.Sighting, Float)?
+        for s in habitat.sightings where s.kind != .bigShot && s.kind != .player {
+            guard let c = s.critter, c.cage == nil, c.errand == nil, s.pos.x.isFinite, s.pos.y.isFinite else { continue }
+            let d = simd_length(s.pos - pos)
+            if d < range, prey == nil || d < prey!.1 { prey = (s, d) }
+        }
+        return prey
+    }
+
+    private func startChase(_ prey: Habitat.Sighting, distance: Float) {
+        chaseTarget = prey.id
+        set(.chase)
+        say(Self.voice(for: .plain))
+        diag("bigShot.chase", ["target": prey.id, "distance": (distance * 10).rounded() / 10, "fromPlayer": divertedFromPlayer])
+    }
+
+    /// Mid-corridor and heading the wrong way for where he wants to be: about-face now,
+    /// not at the far end of the corridor.
+    private func headTowardGoal() {
+        guard let goal, from != to, goal != from, to != goal else { return }
+        if pathFor != goal {
+            pathDistances = graph.distances(from: [goal])
+            pathFor = goal
+        }
+        if let here = pathDistances[from], let there = pathDistances[to], there > here { reverse() }
+    }
+
+    private func beginGesture(_ g: Gesture, at point: SIMD2<Float>, then next: After) {
+        set(.harrumph)
+        gesture = g
+        after = next
+        lookAt = point
+        goal = nil
+        gestureTime = 0
+        stompsDone = 0
+        saidInGesture = false
+    }
+
+    private func finishGesture() {
+        let next = after
+        after = .stroll
+        switch next {
+        case .stroll:
+            set(.stroll)
+            gestureClock = Double.random(in: 8...15)
+            goal = nil
+            lookAt = nil
+        case .turnAway:
+            set(.stroll)
+            gestureClock = Double.random(in: 8...15)
+            goal = nil
+            lookAt = nil
+            turnAway()
+        case .judge:
+            // Did you run? Then after you. Still standing there? He gets crosser -- then gives up in a huff.
+            let d = nearest([.player], within: Self.sightRange)?.1 ?? 99
+            // (Somewhere he can't follow, and he's as near as he can get: that's standing your ground too.)
+            let cantGetCloser = lastSeenOffGraph && from == lastSeenCell
+            if d > Self.retreatRange, !cantGetCloser, pursuitTime < Self.pursuitMax, time - lastSeenAt < 1.5 {
+                set(.pursue)
+                diag("bigShot.pursue", ["why": "youRan", "distance": (d * 10).rounded() / 10])
+            } else if d <= Self.retreatRange || cantGetCloser, annoyance < 1, time - lastSeenAt < 1.5 {
+                annoyance += 1
+                beginGesture(.fury, at: lastSeen ?? pos, then: .judge)
+                diag("bigShot.confront", ["distance": (d * 10).rounded() / 10, "annoyance": annoyance])
+            } else {
+                playerCooldown = Double.random(in: 9...13)
+                endPursuit()
+                set(.stroll)
+                gestureClock = Double.random(in: 8...15)
+                lookAt = nil
+                turnAway()
+                diag("bigShot.gaveUp", ["why": d <= Self.retreatRange || cantGetCloser ? "youStood" : "gone"])
+            }
+        }
+    }
+
+    /// Hmph -- and off he goes, the other way from the player.
+    private func turnAway() {
+        guard case let (p, _)? = nearest([.player], within: 40) else { reverse(); return }
+        if from != to {
+            if simd_dot(direction, p.pos - pos) > 0 { reverse() }
+        } else if let away = graph.neighbors[from].map({ $0.filter { !habitat.blockedCells.contains($0) } }), !away.isEmpty {
+            to = choice(away, awayFrom: p.pos)
+            progress = 0
+        }
+    }
+
+    private func footfall(heavy: Bool, always: Bool = false) {
+        stomp = heavy ? 0.075 : 0.04
+        jiggleVel -= heavy ? 1.1 : 0.55
+        // (Oct 16: a step's sound at most every 0.4 s -- a charge is a lot of feet; the gesture's stomps always.)
+        guard always || time - lastStepSound > 0.4 else { return }
+        lastStepSound = time
+        say(Self.stomps.randomElement(), loud: heavy)
+    }
+
+    // MARK: Oct 16 -- the escort (Bonzo's eviction drives; these are his handles)
+    //
+    // While a script has him (suspended), his own brain and travel stand aside:
+    // the script moves his node with SCNActions, and this per-frame action keeps
+    // his body alive -- gait, belly, footsteps (from how far he actually moved),
+    // the gripping arm, and any gesture the script asks for, with its voice and
+    // stomps. Everything here runs on the render thread except the script calls.
+
+    /// Main thread: the script takes him.
+    func beginEscort() {
+        suspended = true
+        mode = .escort
+        escortReach = 0
+        squeeze = 1
+        escortLast = nil
+        escortClock = 0
+        node?.removeAction(forKey: "bonzoEscort")
+        node?.runAction(.repeatForever(SCNAction.customAction(duration: 1) { _, _ in let p = PerfMonitor.begin("critter.escortFrame"); self.escortFrame(); PerfMonitor.end(p) }), forKey: "bonzoEscort")
+    }
+
+    /// Main thread: the signature gesture, mid-escort (its voice and stomps included).
+    func scriptGesture(_ g: Gesture) {
+        gesture = g
+        after = .stroll
+        gestureTime = 0
+        stompsDone = 0
+        saidInGesture = false
+        mode = .harrumph
+    }
+
+    /// Main thread: a word (never posted to the critters -- their list is the render thread's).
+    func speak(_ g: Gesture) { say(Self.voice(for: g), loud: false) }
+
+    /// Main thread: one heavy stomp.
+    func scriptStomp() {
+        stomp = 0.075
+        jiggleVel -= 1.1
+        say(Self.stomps.randomElement(), loud: false)
+    }
+
+    /// Main thread: the script lets him go (an eviction that couldn't go on):
+    /// back on the floor where he stands, strolling, the player left alone a while.
+    func releaseFromEscort() {
+        node?.removeAction(forKey: "bonzoEscort")
+        node?.removeAction(forKey: BonzoEviction.walkKey)
+        escortReach = 0
+        squeeze = 1
+        if let node {
+            let p = SIMD2<Float>(node.position.x, node.position.z)
+            pos = p
+            heading = node.eulerAngles.y
+            if let k = graph.centers.min(by: { simd_length($0.value - p) < simd_length($1.value - p) })?.key {
+                from = k
+                to = k
+                progress = 0
+                cameFrom = nil
+            }
+        }
+        endPursuit()
+        playerCooldown = 15
+        set(.stroll)
+        suspended = false
+    }
+
+    /// Render thread, every frame while escorting.
+    private func escortFrame() {
+        guard let node else { return }
+        let now = CACurrentMediaTime()
+        let dt = Float(escortClock == 0 ? 1.0 / 60 : min(max(now - escortClock, 0), 1.0 / 20))
+        escortClock = now
+        guard dt > 0 else { return }
+        time += Double(dt)
+        let p = SIMD2<Float>(node.position.x, node.position.z)
+        let moved = escortLast.map { simd_length(p - $0) } ?? 0
+        escortLast = p
+        pos = p                                                   // (the critters still see him -- and scatter)
+        heading = node.eulerAngles.y
+        speed += (moved / dt - speed) * min(1, dt * 6)
+        if mode == .harrumph {
+            gestureTime += Double(dt)
+            let beat = Self.timeline(gesture)
+            if !saidInGesture, gestureTime > beat.voice {
+                saidInGesture = true
+                say(Self.voice(for: gesture))
+            }
+            if stompsDone < beat.stomps.count, gestureTime > beat.stomps[stompsDone] {
+                stompsDone += 1
+                footfall(heavy: true, always: true)
+            }
+            if gestureTime > beat.end { mode = .escort }
+        }
+        animate(dt: dt, moved: moved, turning: 0)
+    }
+
+    // MARK: Body
+
+    private struct Beat {
+        let tieEnd: Double, pointStart: Double, pointEnd: Double, voice: Double, stomps: [Double], end: Double
+    }
+
+    /// The signature gesture's timing, per temper: plain (tie, chin up, point,
+    /// STOMP), accuse (straight to the point), fury (jabbing, double stomp).
+    private static func timeline(_ g: Gesture) -> Beat {
+        switch g {
+        case .plain: return Beat(tieEnd: 0.9, pointStart: 1.25, pointEnd: 2.6, voice: 1.35, stomps: [2.75], end: 3.2)
+        case .accuse: return Beat(tieEnd: 0, pointStart: 0.15, pointEnd: 1.8, voice: 0.25, stomps: [2.0], end: 2.4)
+        case .fury: return Beat(tieEnd: 0, pointStart: 0.1, pointEnd: 1.9, voice: 0.15, stomps: [1.55, 2.05], end: 2.6)
+        }
+    }
+
+    private static func ease(_ n: SCNNode, x: Float? = nil, y: Float? = nil, z: Float? = nil, rate: Float, dt: Float) {
+        let k = min(1, dt * rate)
+        var e = n.eulerAngles
+        if let x { e.x += (x - e.x) * k }
+        if let y { e.y += (y - e.y) * k }
+        if let z { e.z += (z - e.z) * k }
+        n.eulerAngles = e
+    }
+
+    override func animate(dt: Float, moved: Float, turning: Float) {
+        if Self.stillBody { return }                                      // (isolation switch)
+        if torso.scale.x != squeeze { torso.scale = SCNVector3(squeeze, 1, 1) }   // (Oct 16: breathing in for a doorway)
+        let walk = min(1, speed / 0.9)
+        let run = max(0, min(1, (speed - 1.2) / 3.0))                     // 0 walking ... 1 charging
+        gait += moved / (1.15 + run * 1.7) * .pi                           // longer, bounding strides at a charge
+        if gait > 2000 * .pi { gait = gait.truncatingRemainder(dividingBy: 2 * .pi) }
+        let swing = sin(gait)
+        if walk > 0.15, (swing >= 0) != (lastSwing >= 0) { footfall(heavy: speed > 1.3) }   // each foot down
+        lastSwing = swing
+        stomp *= max(0, 1 - dt * 7)
+        // Heavy gait: legs, a dip at every step, a roll from side to side; leaning in at a charge.
+        let legSwing = (0.34 + run * 0.3) * walk
+        Self.ease(hips[0], x: swing * legSwing, rate: 14, dt: dt)
+        Self.ease(hips[1], x: -swing * legSwing, rate: 14, dt: dt)
+        body.position.y = -abs(sin(gait)) * (0.045 + run * 0.06) * walk - stomp
+        let t = Float(gestureTime)
+        let fury = mode == .harrumph && gesture == .fury
+        Self.ease(torso, x: -run * 0.14, z: swing * 0.05 * walk + (fury ? sin(t * 38) * 0.035 : 0), rate: 6, dt: dt)
+        // The belly: a spring the footfalls set going.
+        jiggleVel += (-70 * jiggle - 5 * jiggleVel) * dt
+        jiggle += jiggleVel * dt
+        let j = max(-0.08, min(0.08, jiggle))
+        belly.scale = SCNVector3(1 - j * 0.5, 1 + j, 1 - j * 0.4)
+        // Arms and head: walking, charging (pointing all the way), or the signature gesture.
+        if mode == .harrumph {
+            let beat = Self.timeline(gesture)
+            let td = Double(t)
+            let chin: Float = td > beat.tieEnd - 0.1 && td < beat.pointEnd + 0.2 ? 0.2 : 0
+            Self.ease(head, x: chin, rate: 5, dt: dt)
+            if td < beat.tieEnd {                                          // 1. straightens his tie
+                for (i, side) in [Float(-1), 1].enumerated() {
+                    Self.ease(shoulders[i], x: 0.95, z: side * -0.15, rate: 8, dt: dt)
+                    Self.ease(elbows[i], x: 1.5, rate: 8, dt: dt)
+                }
+                tie.eulerAngles.z = sin(t * 22) * 0.12
+            } else if td < beat.pointStart {                               // 2. hands down, chin up
+                tie.eulerAngles.z = 0
+                for (i, side) in [Float(-1), 1].enumerated() {
+                    Self.ease(shoulders[i], x: 0, z: side * 0.32, rate: 8, dt: dt)
+                    Self.ease(elbows[i], x: 0, rate: 8, dt: dt)
+                }
+            } else if td < beat.pointEnd {                                 // 3. POINTS
+                tie.eulerAngles.z = 0
+                let jab: Float = fury ? sin(t * 16) * 0.14 : sin(t * 9) * 0.06
+                Self.ease(shoulders[1], x: 1.45, z: -0.08, rate: 9, dt: dt)
+                Self.ease(elbows[1], x: 0.08 + jab, rate: fury ? 14 : 9, dt: dt)            // a jab or two (a flurry, furious)
+                Self.ease(shoulders[0], x: -0.15, z: -0.45, rate: 5, dt: dt)         // the other hand on his hip-ish
+                Self.ease(elbows[0], x: 1.1, rate: 5, dt: dt)
+            } else {                                                       // 4. arms down -- STOMP
+                for (i, side) in [Float(-1), 1].enumerated() {
+                    Self.ease(shoulders[i], x: 0, z: side * 0.32, rate: 8, dt: dt)
+                    Self.ease(elbows[i], x: 0, rate: 8, dt: dt)
+                }
+            }
+        } else if mode == .escort {
+            // Oct 16 (Bonzo's eviction): the right hand out in front, gripping the
+            // player's collar; the left swings; he looks down his nose at them.
+            Self.ease(head, x: 0.12, rate: 5, dt: dt)
+            Self.ease(shoulders[1], x: 0.2 + 1.1 * escortReach, z: 0.32 - 0.66 * escortReach, rate: 7, dt: dt)   // (in toward the collar)
+            Self.ease(elbows[1], x: 0.25 * escortReach, rate: 7, dt: dt)
+            Self.ease(shoulders[0], x: -swing * 0.3 * walk, z: -0.32, rate: 8, dt: dt)
+            Self.ease(elbows[0], x: 0.3, rate: 6, dt: dt)
+            tie.eulerAngles.z = swing * 0.08 * walk
+        } else if mode == .spot || mode == .pursue {
+            // The finger leads: pointing at you all the way; the other arm pumps.
+            let raise: Float = mode == .spot ? 1.6 : 1.3
+            Self.ease(head, x: mode == .spot ? 0.18 : -0.06, rate: 6, dt: dt)
+            Self.ease(shoulders[1], x: raise, z: -0.1, rate: 9, dt: dt)
+            Self.ease(elbows[1], x: 0.1 + sin(Float(time) * 8) * 0.07 * run, rate: 9, dt: dt)
+            Self.ease(shoulders[0], x: swing * (0.3 + run * 0.4) * walk, z: -0.5, rate: 8, dt: dt)
+            Self.ease(elbows[0], x: 0.9 + run * 0.3, rate: 6, dt: dt)
+            tie.eulerAngles.z = swing * (0.08 + run * 0.18) * walk                    // the tie flaps
+        } else {
+            Self.ease(head, x: -abs(swing) * 0.04 * walk, rate: 6, dt: dt)
+            for (i, side) in [Float(-1), 1].enumerated() {
+                let arm = (i == 0 ? swing : -swing) * 0.3 * walk
+                Self.ease(shoulders[i], x: arm, z: side * (mode == .chase ? 0.55 : 0.32), rate: 8, dt: dt)
+                Self.ease(elbows[i], x: mode == .chase ? 0.9 : 0.25, rate: 6, dt: dt)
+            }
+            tie.eulerAngles.z = swing * 0.08 * walk
+        }
+    }
+}
+
+/// Oct 16: puts the one Big Shot on his floor (main actor: LivingWorld's bookkeeping).
+enum BigShotAudition {
+    static func populate(habitat: Habitat, scene: SCNScene, fromStart: [Int: Int], busy: Set<Int>, shadow: UIImage, floor: Int) {
+        guard BigShot.isEnabled, floor == BigShot.floor else { return }
+        let graph = habitat.graph
+        var fromStart = fromStart
+        if fromStart.isEmpty, let eye = habitat.playerCamera?.presentation.worldPosition {
+            // (the player is off the graph -- in the office: measure from the nearest corridor cell)
+            let here = SIMD2<Float>(eye.x, eye.z)
+            if let near = graph.centers.min(by: { simd_length($0.value - here) < simd_length($1.value - here) })?.key {
+                fromStart = graph.distances(from: [near])
+            }
+        }
+        // A corridor cell (not a dead end) as far from the player as the floor allows.
+        let candidates = graph.centers.keys.filter { k in
+            !busy.contains(k) && !habitat.blockedCells.contains(k) && graph.degree(k) >= 2 && (fromStart[k] ?? 0) >= 3
+        }
+        guard let cell = candidates.max(by: { (fromStart[$0] ?? 0) < (fromStart[$1] ?? 0) }) else {
+            diag("bigShot.notPlaced", ["reason": "no corridor cell far enough"]); return
+        }
+        let (shot, node) = BigShot.make(habitat: habitat, cell: cell, shadow: shadow)
+        node.enumerateHierarchy { n, _ in n.categoryBitMask = Menagerie.categoryBit }
+        scene.rootNode.addChildNode(node)
+        LivingWorld.track(node)
+        habitat.add(shot)
+        node.runAction(.repeatForever(shot.tickAction()), forKey: "critterTick")
+        BonzoEviction.captureGraceUntil = CACurrentMediaTime() + BonzoEviction.graceOnArrival   // (Oct 16: never a grab on arrival)
+        diag("bigShot.placed", ["cell": cell, "fromPlayer": fromStart[cell] ?? -1])
+    }
+}
+
+// MARK: - Oct 16 -- BONZO'S EVICTION (audition)
+//
+// When the Big Shot catches the player (mid-pursuit, in sight, within arm's
+// reach -- BigShot.captureRange) he grabs them by the collar and throws them
+// out of the building -- the long way:
+//   grab       he turns on them, the hand comes up, the view is hauled up off
+//              its feet toward his face (CarryRig: the camera is held at a pose
+//              in HIS frame -- every step, bob and turn of his is the camera's)
+//   carry      Floor 3: along the corridors to the elevator (the floor's own
+//              creature graph: no walls, no doors), held at arm's length facing
+//              him, the corridor streaming away behind him
+//   board      at the landing he turns them round to face the doors and plonks
+//              them down; the ordinary elevator opens (TapNavigationController.
+//              evictionBoard -> openElevator); the player is carried in by the
+//              ride itself; he squeezes in after them into the back corner
+//   ride       the building presses LOBBY (guidedAutoFloor -- the same automatic
+//              press the onboarding rides use); the real ride, the real numbers
+//   lobby      Floor 1 is built with him in the cab (floorBuilt); the doors
+//              open, he steps up behind them, grabs again, and marches them out
+//              of the cab and across the lobby to the entrance (the controller's
+//              own route), facing forward this time: the doors coming at them
+//   eject      at the doors he turns them round -- the accusation, "YOU",
+//              STOMP -- turns them back, a shove, and they're outside
+//              (the ordinary return to the street: NavigationBridge.
+//              requestReturnToOpening -- the exterior view and the traffic)
+// The player has no say from the grab to the street (evictionLocked). Progress
+// is kept (ID, prologue, meetings, money, collected things); only where they
+// are is reset: the resume point is cleared, so a relaunch opens outside.
+// Anything that can't go on (no route, the elevator refuses, a scene torn
+// down, a ride that never arrives) ends the eviction where it is: the player
+// gets control back, he goes back to strolling, and a line is logged.
+// Off: `-HallwaysNoBonzoEviction YES` (he still patrols and pursues).
+
+/// The camera, held in the Big Shot's grip: a pose in his body's frame, eased
+/// between poses; the grab itself blends from wherever the player was. Read on
+/// the render thread by a transform constraint on the camera; set on main.
+nonisolated final class CarryRig: @unchecked Sendable {
+    struct Hold {
+        var position: SIMD3<Float>
+        var yaw: Float
+        var pitch: Float
+        var roll: Float
+
+        /// Held at arm's length, facing him (he looms; the corridor recedes behind him).
+        static let facingHim = Hold(position: SIMD3<Float>(0.25, 1.95, -0.85), yaw: .pi, pitch: 0.2, roll: 0.04)
+        /// Held out in front of him, facing where he's going.
+        static let forward = Hold(position: SIMD3<Float>(0.2, 1.9, -0.85), yaw: 0, pitch: -0.05, roll: -0.03)
+        /// The shove: out of his hand, toward the doors.
+        static let shove = Hold(position: SIMD3<Float>(0.2, 1.8, -1.45), yaw: 0, pitch: 0.06, roll: 0.02)
+
+        static func mix(_ a: Hold, _ b: Hold, _ t: Float) -> Hold {
+            Hold(position: a.position + (b.position - a.position) * t, yaw: a.yaw + (b.yaw - a.yaw) * t,
+                 pitch: a.pitch + (b.pitch - a.pitch) * t, roll: a.roll + (b.roll - a.roll) * t)
+        }
+
+        var matrix: simd_float4x4 {
+            func rot(_ angle: Float, _ axis: SIMD3<Float>) -> simd_float4x4 { simd_float4x4(simd_quatf(angle: angle, axis: axis)) }
+            var t = matrix_identity_float4x4
+            t.columns.3 = SIMD4<Float>(position.x, position.y, position.z, 1)
+            return t * rot(yaw, SIMD3<Float>(0, 1, 0)) * rot(pitch, SIMD3<Float>(1, 0, 0)) * rot(roll, SIMD3<Float>(0, 0, 1))
+        }
+    }
+
+    private let lock = NSLock()
+    private weak var body: SCNNode?
+    private var grabFrom: simd_float4x4?
+    private var grabStart: CFTimeInterval
+    private let grabDuration: Double
+    private var holdFrom: Hold
+    private var holdTo: Hold
+    private var holdStart: CFTimeInterval = 0
+    private var holdDuration: Double = 0
+
+    init(body: SCNNode, from world: simd_float4x4, hold: Hold, grabDuration: Double) {
+        self.body = body
+        grabFrom = world
+        grabStart = CACurrentMediaTime()
+        self.grabDuration = grabDuration
+        holdFrom = hold
+        holdTo = hold
+    }
+
+    /// Main thread: ease to another hold.
+    func move(to hold: Hold, duration: Double) {
+        let now = CACurrentMediaTime()
+        lock.lock()
+        holdFrom = current(at: now)
+        holdTo = hold
+        holdStart = now
+        holdDuration = duration
+        lock.unlock()
+    }
+
+    private func current(at now: CFTimeInterval) -> Hold {
+        guard holdDuration > 0 else { return holdTo }
+        let u = Float(min(1, max(0, (now - holdStart) / holdDuration)))
+        return Hold.mix(holdFrom, holdTo, u * u * (3 - 2 * u))
+    }
+
+    /// The camera's constraint (its block runs on the render thread, every frame).
+    func makeConstraint() -> SCNTransformConstraint {
+        SCNTransformConstraint(inWorldSpace: true) { [self] _, transform in self.worldTransform() ?? transform }
+    }
+
+    /// Render thread (the camera's constraint): where the camera is this frame.
+    func worldTransform() -> SCNMatrix4? {
+        let now = CACurrentMediaTime()
+        lock.lock()
+        let hold = current(at: now)
+        let from = grabFrom
+        let g = grabDuration > 0 ? min(1, (now - grabStart) / grabDuration) : 1
+        lock.unlock()
+        guard let body else { return nil }
+        let b = body.presentation.simdWorldTransform
+        // His frame without any scale (a squeeze through a doorway must never squash the view).
+        var frame = matrix_identity_float4x4
+        frame.columns.0 = SIMD4<Float>(simd_normalize(SIMD3<Float>(b.columns.0.x, b.columns.0.y, b.columns.0.z)), 0)
+        frame.columns.1 = SIMD4<Float>(simd_normalize(SIMD3<Float>(b.columns.1.x, b.columns.1.y, b.columns.1.z)), 0)
+        frame.columns.2 = SIMD4<Float>(simd_normalize(SIMD3<Float>(b.columns.2.x, b.columns.2.y, b.columns.2.z)), 0)
+        frame.columns.3 = b.columns.3
+        var target = frame * hold.matrix
+        if let from, g < 1 {
+            // The grab: from where they stood to his grip -- quick, with a jolt upward.
+            let e = Float(1 - pow(1 - g, 3))
+            let p0 = SIMD3<Float>(from.columns.3.x, from.columns.3.y, from.columns.3.z)
+            let p1 = SIMD3<Float>(target.columns.3.x, target.columns.3.y, target.columns.3.z)
+            let p = p0 + (p1 - p0) * e + SIMD3<Float>(0, sin(Float(g) * .pi) * 0.14, 0)
+            let q = simd_slerp(simd_quatf(from), simd_quatf(target), e)
+            target = simd_float4x4(q)
+            target.columns.3 = SIMD4<Float>(p.x, p.y, p.z, 1)
+        }
+        return SCNMatrix4(target)
+    }
+}
+
+enum BonzoEviction {
+    nonisolated static let isEnabled = !UserDefaults.standard.bool(forKey: "HallwaysNoBonzoEviction")
+    /// No grab before this (CACurrentMediaTime): set when Floor 3's Big Shot is
+    /// placed, so arriving on the floor is never an instant capture.
+    nonisolated(unsafe) static var captureGraceUntil: CFTimeInterval = 0
+    static let graceOnArrival: CFTimeInterval = 20
+    nonisolated static let walkKey = "bonzoWalk"
+    static let carrySpeed: Float = 2.0
+
+    enum Stage: String { case idle, grabbing, carrying, settingDown, boarding, lobbyWaiting, lobbyCarrying, ejecting }
+    private(set) static var stage: Stage = .idle
+    static var isActive: Bool { stage != .idle }
+
+    /// Set by ContentView: the live controller, and the way out to the street.
+    static var liveController: (() -> TapNavigationController?)?
+    static var returnToStreet: (() -> Void)?
+
+    private static var shot: BigShot?
+    private static weak var controller: TapNavigationController?
+    private static var rig: CarryRig?
+    private static var constraint: SCNTransformConstraint?
+    private static weak var heldCamera: SCNNode?
+    private static var generation = 0
+    private static var startedAt: CFTimeInterval = 0
+
+    private static func log(_ event: String, _ fields: KeyValuePairs<String, Any?> = [:]) {
+        diag("bonzo." + event, fields)
+    }
+
+    /// Heading (yaw) that faces along `d` (creatures face local -Z).
+    private static func heading(_ d: SIMD2<Float>) -> Float { atan2(-d.x, -d.y) }
+
+    /// Run `step` after `seconds` -- only if this eviction is still the one under way.
+    private static func after(_ seconds: Double, _ step: @escaping () -> Void) {
+        let gen = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            guard gen == generation, stage != .idle else { return }
+            step()
+        }
+    }
+
+    // MARK: Capture
+
+    /// The Big Shot has the player within reach (his tick asks; main decides).
+    static func requestCapture(by shot: BigShot) {
+        guard isEnabled, stage == .idle else { return }
+        func refuse(_ why: String) { log("captureRefused", ["why": why]) }
+        guard let c = liveController?(), c.currentFloorNumber == BigShot.floor else { return refuse("floor") }
+        guard CACurrentMediaTime() >= captureGraceUntil else { return refuse("grace") }
+        guard Admission.isPrologueCompleted, GuidedJourney.trip == nil else { return refuse("story") }
+        guard !ConferenceMeeting.isActive, !OfficeComputer.shared.isActive, !BoxReveal.isRunning else { return refuse("scene") }
+        guard !PlayerOffice.officeCells.contains(c.currentCell), !ConferenceRoom.roomCells.contains(c.currentCell) else {
+            return refuse("room")
+        }
+        guard let node = shot.node, node.parent != nil, shot.habitat.playerCamera === c.cameraNode else { return refuse("scene") }
+        if let why = c.evictionRefusal() { return refuse(why) }
+        begin(shot: shot, node: node, controller: c)
+    }
+
+    private static func begin(shot: BigShot, node: SCNNode, controller c: TapNavigationController) {
+        generation += 1
+        stage = .grabbing
+        startedAt = CACurrentMediaTime()
+        self.shot = shot
+        controller = c
+        c.evictionLocked = true
+        c.evictionStopMovement()
+        ResumeState.clearPoint(reason: "bonzoCapture")
+        let cam = c.cameraNode.presentation.worldPosition
+        log("capture", ["cell": c.currentCell, "distance": Double(simd_distance(SIMD2<Float>(cam.x, cam.z),
+                                                                                  SIMD2<Float>(node.position.x, node.position.z)))])
+        shot.beginEscort()
+        // He rounds on them; the hand comes up -- "YOU" -- and grabs.
+        let toPlayer = SIMD2<Float>(cam.x - node.position.x, cam.z - node.position.z)
+        if simd_length(toPlayer) > 0.01 {
+            node.runAction(.rotateTo(x: 0, y: CGFloat(heading(toPlayer)), z: 0, duration: 0.25, usesShortestUnitArc: true))
+        }
+        shot.escortReach = 1
+        shot.speak(.accuse)
+        // However it goes, never for ever: the whole trip is well under this.
+        after(150) { abort("watchdog") }
+        after(0.3) {
+            hold(camera: c.cameraNode, body: shot.body, hold: .facingHim, grab: 0.65)
+            shot.scriptStomp()
+            after(0.85) { carryToElevator() }
+        }
+    }
+
+    /// The camera into his grip (a transform constraint reading the rig).
+    private static func hold(camera: SCNNode, body: SCNNode, hold: CarryRig.Hold, grab: Double) {
+        releaseCamera(settle: false)
+        let rig = CarryRig(body: body, from: camera.presentation.simdWorldTransform, hold: hold, grabDuration: grab)
+        let c = rig.makeConstraint()
+        camera.constraints = (camera.constraints ?? []) + [c]
+        self.rig = rig
+        constraint = c
+        heldCamera = camera
+    }
+
+    /// Let go of the camera exactly where it is (no jump); `settle` eases it level, at eye height.
+    private static func releaseCamera(settle: Bool) {
+        guard let camera = heldCamera, let c = constraint else { rig = nil; constraint = nil; return }
+        let world = camera.presentation.worldTransform
+        camera.constraints = camera.constraints?.filter { $0 !== c }
+        camera.setWorldTransform(world)
+        rig = nil
+        constraint = nil
+        heldCamera = nil
+        guard settle, let ctl = controller else { return }
+        let start = camera.position, startEuler = camera.eulerAngles
+        let eye = ctl.eyeHeight
+        camera.removeAllActions()
+        camera.runAction(.customAction(duration: 0.3) { node, elapsed in
+            let t = Float(min(1, elapsed / 0.3))
+            let e = t * t * (3 - 2 * t)
+            node.position = SCNVector3(start.x, start.y + (eye - start.y) * e, start.z)
+            node.eulerAngles = SCNVector3(startEuler.x * (1 - e), startEuler.y, startEuler.z * (1 - e))
+        })
+    }
+
+    /// Walk his node through `points` (x/z, floor level) at `speed`, turning as he goes.
+    /// `turning: false` -- a step without turning (backing off, still facing the same way).
+    private static func walk(_ node: SCNNode, _ points: [SIMD2<Float>], speed: Float, turning: Bool = true,
+                             then done: @escaping () -> Void) {
+        var here = SIMD2<Float>(node.position.x, node.position.z)
+        var steps: [SCNAction] = []
+        for p in points {
+            let d = p - here
+            let length = simd_length(d)
+            guard length > 0.02 else { continue }
+            let seconds = Double(length / speed)
+            let turn = SCNAction.rotateTo(x: 0, y: CGFloat(heading(d)), z: 0, duration: min(0.35, seconds), usesShortestUnitArc: true)
+            let move = SCNAction.move(to: SCNVector3(p.x, 0, p.y), duration: seconds)
+            steps.append(turning ? .group([move, turn]) : move)
+            here = p
+        }
+        let gen = generation
+        node.removeAction(forKey: walkKey)
+        guard !steps.isEmpty else {
+            DispatchQueue.main.async { guard gen == generation, stage != .idle else { return }; done() }
+            return
+        }
+        node.runAction(.sequence(steps), forKey: walkKey) {
+            DispatchQueue.main.async { guard gen == generation, stage != .idle else { return }; done() }
+        }
+    }
+
+    private static func turn(_ node: SCNNode, toward d: SIMD2<Float>, seconds: Double) {
+        node.runAction(.rotateTo(x: 0, y: CGFloat(heading(d)), z: 0, duration: seconds, usesShortestUnitArc: true))
+    }
+
+    // MARK: Floor 3 -- to the elevator
+
+    private static func carryToElevator() {
+        guard stage == .grabbing, let shot, let node = shot.node, node.parent != nil, let c = controller,
+              let landing = c.evictionLanding() else { return abort("floor3Gone") }
+        let graph = shot.graph
+        let here = SIMD2<Float>(node.position.x, node.position.z)
+        // The landing's own cell (or, if the creatures' floor leaves it out, the nearest one to it).
+        var goal = HabitatGraph.key(row: landing.cell.row, col: landing.cell.col)
+        if graph.centers[goal] == nil {
+            guard let near = graph.centers.min(by: { simd_length($0.value - landing.center) < simd_length($1.value - landing.center) }),
+                  simd_length(near.value - landing.center) < graph.cellSize * 1.1 else { return abort("landingNotWalkable") }
+            goal = near.key
+        }
+        let distance = graph.distances(from: [goal])
+        guard var k = graph.centers.filter({ distance[$0.key] != nil })
+                .min(by: { simd_length($0.value - here) < simd_length($1.value - here) })?.key else { return abort("noRoute") }
+        var points: [SIMD2<Float>] = [graph.centers[k] ?? here]
+        while k != goal {
+            guard let n = (graph.neighbors[k] ?? []).filter({ (distance[$0] ?? .max) < (distance[k] ?? .max) })
+                    .min(by: { (distance[$0] ?? .max) < (distance[$1] ?? .max) }), let p = graph.centers[n] else { return abort("noRoute") }
+            points.append(p)
+            k = n
+        }
+        if simd_length((points.last ?? here) - landing.center) > 0.05 { points.append(landing.center) }
+        // (The nearest cell centre can lie behind him on the way: then straight on to the next.)
+        if points.count >= 2, simd_dot(points[0] - here, points[1] - points[0]) < 0 { points.removeFirst() }
+        stage = .carrying
+        log("carry", ["cells": points.count])
+        walk(node, points, speed: carrySpeed) { atTheElevator(landing: landing) }
+    }
+
+    private static func atTheElevator(landing: (center: SIMD2<Float>, outward: SIMD2<Float>, cell: GridCoordinate)) {
+        guard stage == .carrying, let shot, let node = shot.node, node.parent != nil, let c = controller else { return abort("floor3Gone") }
+        stage = .settingDown
+        let u = landing.outward, l = landing.center
+        // Facing the doors; he turns them round to face them too...
+        turn(node, toward: -u, seconds: 0.35)
+        rig?.move(to: .forward, duration: 0.7)
+        after(0.75) {
+            // ...steps back, so they stand on the landing...
+            walk(node, [l + u * 0.85], speed: 1.4, turning: false) {
+                // ...and plonks them down. The ordinary elevator takes it from here.
+                releaseCamera(settle: true)
+                shot.escortReach = 0
+                shot.speak(.plain)
+                after(0.32) { board(controller: c, shot: shot, node: node, landing: landing) }
+            }
+        }
+    }
+
+    private static func board(controller c: TapNavigationController, shot: BigShot, node: SCNNode,
+                              landing: (center: SIMD2<Float>, outward: SIMD2<Float>, cell: GridCoordinate)) {
+        stage = .boarding
+        guard c.evictionBoard() else { return abort("elevatorRefused") }
+        log("boarding", [:])
+        // Doors open (0.08 s wait + 1.6 s), the ride carries the player in; he
+        // squeezes in after them, into the back corner away from the panel.
+        let u = landing.outward
+        let door = c.elevatorDoorwayFrame()?.center ?? landing.center - u * (shot.graph.cellSize / 2)
+        let lateral = SIMD2<Float>(-u.y, u.x)
+        let side = panelSide(root: node.parent, door: door, lateral: lateral)
+        let inside = door - u * 0.6 + lateral * (side * 1.05)
+        let corner = door - u * 2.5 + lateral * (side * 1.05)
+        after(3.3) {
+            shot.squeeze = 0.72
+            walk(node, [door, inside, corner], speed: 2.4) {
+                shot.squeeze = 1
+                turn(node, toward: u, seconds: 0.4)
+            }
+            after(1.6) { shot.squeeze = 1 }
+        }
+        // A ride that never reaches the lobby: give the player back their controls.
+        after(45) {
+            if stage == .boarding { abort("rideNeverArrived") }
+        }
+    }
+
+    /// Which side of the cab (along `lateral`) is clear of the control panel: +1 or -1.
+    private static func panelSide(root: SCNNode?, door: SIMD2<Float>, lateral: SIMD2<Float>) -> Float {
+        guard let panel = root?.childNode(withName: "elevatorControlPanel", recursively: true) else { return 1 }
+        let p = panel.worldPosition
+        return simd_dot(SIMD2<Float>(p.x, p.z) - door, lateral) > 0 ? -1 : 1
+    }
+
+    /// The building presses LOBBY for this ride.
+    static func autoFloor(from floor: Int) -> Int? {
+        stage == .boarding && floor == BigShot.floor ? 1 : nil
+    }
+
+    // MARK: Floor 1 -- the lobby
+
+    /// Every floor build. The lobby, built for the arriving ride: he's in the cab.
+    static func floorBuilt(floor: Int, controller c: TapNavigationController, root: SCNNode, camera: SCNNode,
+                           context: CharacterLead.Context?) {
+        if stage != .idle, stage != .boarding { return abort("sceneRebuilt") }   // (any other stage: his scene is gone)
+        guard stage == .boarding else { return }
+        guard floor == 1 else {
+            if floor != BigShot.floor { abort("diverted") }
+            return
+        }
+        guard let context, let frame = c.elevatorDoorwayFrame() else { return abort("noLobbyCab") }
+        let graph = Menagerie.makeGraph(cells: context.cells, cellSize: CGFloat(context.cellSize),
+                                        doors: context.doors.map { ($0.key, $0.value) }, litCells: [])
+        let habitat = Habitat(graph: graph, root: root, playerCamera: camera)
+        let (bonzo, node) = BigShot.make(habitat: habitat, cell: graph.centers.keys.first ?? 0, shadow: Menagerie.shadowImage())
+        node.enumerateHierarchy { n, _ in n.categoryBitMask = Menagerie.categoryBit }
+        let u = frame.outward, door = frame.center
+        let lateral = SIMD2<Float>(-u.y, u.x)
+        let spot = door - u * 2.5 + lateral * (panelSide(root: root, door: door, lateral: lateral) * 1.05)
+        node.position = SCNVector3(spot.x, 0, spot.y)
+        node.eulerAngles.y = heading(u)
+        root.addChildNode(node)
+        habitat.add(bonzo)
+        bonzo.beginEscort()
+        shot = bonzo
+        controller = c
+        c.evictionLocked = true
+        stage = .lobbyWaiting
+        log("lobbyCabReady", [:])
+    }
+
+    /// The lobby doors are opening (onArrivalDoorsOpening).
+    static func arrivalDoorsOpening(floor: Int) {
+        guard floor == 1, stage == .lobbyWaiting else { return }
+        after(1.9) { lobbyGrab() }
+    }
+
+    private static func lobbyGrab() {
+        guard stage == .lobbyWaiting, let shot, let node = shot.node, node.parent != nil,
+              let c = liveController?(), c === controller, let frame = c.elevatorDoorwayFrame(),
+              let route = c.evictionRouteToEntrance() else { return abort("lobbyUnavailable") }
+        stage = .lobbyCarrying
+        let u = frame.outward, door = frame.center
+        let cam = c.cameraNode.presentation.worldPosition
+        let player = SIMD2<Float>(cam.x, cam.z)
+        let behind = player - u * 0.85
+        // Up behind them, facing out of the cab...
+        walk(node, [behind], speed: 1.5) {
+            turn(node, toward: u, seconds: 0.3)
+            after(0.3) {
+                // ...grab, from behind, the doors and the lobby ahead...
+                c.cameraNode.removeAllActions()                  // (the arrival's own turn to the doors)
+                shot.escortReach = 1
+                shot.speak(.plain)
+                hold(camera: c.cameraNode, body: shot.body, hold: .forward, grab: 0.55)
+                after(0.75) {
+                    // ...and out: through the doorway (breathing in), across the lobby, to the entrance.
+                    let depth = simd_dot(door - behind, u)          // (how deep in the cab he stands)
+                    let axis = door - u * depth
+                    var points = [axis, door + u * 0.4]
+                    points.append(contentsOf: route.points)
+                    shot.squeeze = 0.72
+                    after(Double(simd_distance(behind, door) + 1.0) / Double(carrySpeed)) { shot.squeeze = 1 }
+                    log("lobbyCarry", ["cells": route.points.count])
+                    walk(node, points, speed: carrySpeed) {
+                        turn(node, toward: route.entranceHeading, seconds: 0.4)
+                        after(0.45) { eject() }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Out
+
+    private static func eject() {
+        guard stage == .lobbyCarrying, let shot, shot.node?.parent != nil else { return abort("lobbyGone") }
+        stage = .ejecting
+        // Round to face him: the last word.
+        rig?.move(to: .facingHim, duration: 0.6)
+        after(0.65) {
+            shot.scriptGesture(.accuse)
+            after(2.5) {
+                // Back round to the doors -- and OUT.
+                rig?.move(to: .forward, duration: 0.45)
+                after(0.5) {
+                    rig?.move(to: .shove, duration: 0.22)
+                    shot.scriptStomp()
+                    after(0.26) { finish() }
+                }
+            }
+        }
+    }
+
+    private static func finish() {
+        guard stage == .ejecting else { return }
+        releaseCamera(settle: false)
+        if let camera = controller?.cameraNode {
+            let e = camera.eulerAngles
+            camera.eulerAngles = SCNVector3(0, e.y, 0)
+        }
+        controller?.evictionLeftCab()                       // (the street's reset: at the entrance, not the cab)
+        controller?.evictionLocked = false
+        ResumeState.clearPoint(reason: "bonzoEjected")
+        let node = shot?.node
+        log("ejected", ["seconds": Int(CACurrentMediaTime() - startedAt)])
+        stage = .idle
+        generation += 1
+        shot = nil
+        controller = nil
+        returnToStreet?()                                   // the exterior, the traffic -- as walking out does
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { node?.removeFromParentNode() }
+    }
+
+    // MARK: Can't go on
+
+    /// End it where it is: the player gets control back; he goes back to strolling
+    /// (on Floor 3) or leaves (the lobby). Logged.
+    static func abort(_ reason: String) {
+        guard stage != .idle else { return }
+        log("aborted", ["reason": reason, "stage": stage.rawValue])
+        let was = stage
+        stage = .idle
+        generation += 1
+        releaseCamera(settle: false)
+        // The controller back in step with where the camera actually is (unless the
+        // ordinary ride is still carrying them -- the elevator's own flow ends that).
+        if was != .boarding && was != .lobbyWaiting, let live = liveController?() { live.evictionResync() }
+        controller?.evictionLocked = false
+        liveController?()?.evictionLocked = false
+        if let shot, let node = shot.node, node.parent != nil {
+            if was == .grabbing || was == .carrying || was == .settingDown || was == .boarding {
+                shot.releaseFromEscort()
+            } else if was == .lobbyWaiting || was == .lobbyCarrying || was == .ejecting {
+                node.removeFromParentNode()
+            }
+        }
+        shot = nil
+        controller = nil
     }
 }

@@ -137,6 +137,11 @@ final class CharacterLead {
     /// while the lead was still running -- the lead cancels itself.
     var onLost: (() -> Void)?
     var name = "lead"
+    /// Oct 24 (Tinky on FOLLOW): may he go on from a (non-final) stop now? nil:
+    /// always (every other lead, unchanged). While it says no he simply waits where
+    /// he stands, watching the player -- no calls, no pointing, no coming round
+    /// (whoever owns the lead does any nudging).
+    var mayProceed: (() -> Bool)?
 
     init(performer: LeadPerformer, context: Context, steps: [Step]) {
         self.performer = performer
@@ -152,9 +157,23 @@ final class CharacterLead {
     /// steers the player's own walk; doors, guards and scripts are untouched.
     var guidedRoute: [GridCoordinate]?
     private static weak var guiding: CharacterLead?
+    /// Oct 24 (Start Over without relaunch): whatever escort is still running stops
+    /// and is forgotten -- a lead kept alive elsewhere would otherwise go on steering
+    /// the next game's WALK (activeGuidedRoute) and block its own walks.
+    static func cancelGuiding() {
+        guiding?.cancel()
+        guiding = nil
+    }
     static var activeGuidedRoute: [GridCoordinate]? {
         guard let lead = guiding, lead.isRunning else { return nil }
         return lead.guidedRoute
+    }
+    /// Oct 11 (escort pacing): where the escorting character stands right now
+    /// (world x, z) while an escort runs -- nil otherwise. Smart WALK keeps a
+    /// following distance behind it, so WALK can never overtake the guide.
+    static var activeGuidePosition: SIMD2<Float>? {
+        guard let lead = guiding, lead.isRunning, lead.guidedRoute != nil else { return nil }
+        return lead.performer.groundPosition
     }
 
     func start() {
@@ -211,10 +230,11 @@ final class CharacterLead {
                 finish(stop)
                 return
             }
+            let held = !stop.isFinal && !(mayProceed?() ?? true)            // (Oct 24: not followed -- no call)
             // A thing to touch (the kiosk) is touched soon after arriving.
             waiting = (stop, now, now, stop.touchTarget != nil ? now - Self.pointEvery + 1.4 : now)
             // Call on arrival when the player is not already on his heels.
-            if simd_distance(player, stop.point) > stop.release + 1 || stop.isFinal {
+            if !held, simd_distance(player, stop.point) > stop.release + 1 || stop.isFinal {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
                     guard let self, self.waiting != nil, !self.performer.isGesturing else { return }
                     self.performer.call()
@@ -248,6 +268,7 @@ final class CharacterLead {
     // MARK: Polling (main thread)
 
     private func poll() {
+        let perf = PerfMonitor.begin("lead.poll"); defer { PerfMonitor.end(perf) }   // Oct 21: measurement only (PerfMonitor)
         guard let me = performer.groundPosition else {
             let wasFinished = finished
             cancel()
@@ -274,6 +295,13 @@ final class CharacterLead {
         }
         guard !busy, let w = waiting else { return }
         let stop = w.stop
+        // Oct 24 (Tinky on FOLLOW): not to go on yet -- he waits, just watching.
+        if !stop.isFinal, let mayProceed, !mayProceed() {
+            if !performer.isGesturing { performer.watch(pose.position) }
+            waiting?.since = now                                           // (the escalation clock starts when he may go on)
+            waiting?.lastCall = now
+            return
+        }
         // Released: the player has come close -- or is already further along.
         let near = simd_distance(pose.position, stop.point) < stop.release
             || (stop.isFinal && simd_distance(pose.position, me) < stop.release)
@@ -432,6 +460,7 @@ final class CharacterLead {
     /// says no.
     static func route(from a: GridCoordinate, to b: GridCoordinate, cells: Set<GridCoordinate>,
                       doors: [GridCoordinate: Direction], canCross: ((GridCoordinate) -> Bool)? = nil) -> [GridCoordinate]? {
+        let perf = PerfMonitor.begin("path.route"); defer { PerfMonitor.end(perf) }   // Oct 21: measurement only (PerfMonitor)
         guard cells.contains(a), cells.contains(b) else { return nil }
         if a == b { return [a] }
         var parent: [GridCoordinate: GridCoordinate] = [a: a]
@@ -457,6 +486,23 @@ final class CharacterLead {
         return nil
     }
 
+    /// Oct 19 (wall-crossing diagnostics): the first place a walked path (straight
+    /// lines between `points`) leaves the walkable cells -- nil: it never does.
+    /// Sampled every 10 cm, so a corner clipped by more than that is caught.
+    static func firstPointOffCells(_ points: [SIMD2<Float>], cells: Set<GridCoordinate>, cellSize s: Float) -> SIMD2<Float>? {
+        guard points.count >= 2 else { return nil }
+        func cell(_ p: SIMD2<Float>) -> GridCoordinate { GridCoordinate(row: Int((p.y / s).rounded()), col: Int((p.x / s).rounded())) }
+        for i in 1..<points.count {
+            let a = points[i - 1], b = points[i]
+            let n = max(1, Int((simd_distance(a, b) / 0.1).rounded(.up)))
+            for k in 0...n {
+                let p = a + (b - a) * (Float(k) / Float(n))
+                if !cells.contains(cell(p)) { return p }
+            }
+        }
+        return nil
+    }
+
     static func doorAnchor(_ c: GridCoordinate, _ d: Direction, _ doors: [GridCoordinate: Direction]) -> GridCoordinate? {
         if doors[c] == d { return c }
         let n = GridCoordinate(row: c.row + d.delta.row, col: c.col + d.delta.col)
@@ -477,7 +523,7 @@ final class CharacterLead {
     /// actually pauses and looks back when the player has fallen behind).
     static func plan(route cells: [GridCoordinate], context: Context, finalPoint: SIMD2<Float>? = nil,
                      finalHeading: Float? = nil, decisionInset: Float = stopInset,
-                     decisionRelease: Float = 3.4, paceEvery: Int? = nil) -> [Step] {
+                     decisionRelease: Float = 3.4, paceEvery: Int? = nil, turnAtCentres: Bool = false) -> [Step] {
         guard cells.count >= 2 else { return [] }
         let s = context.cellSize
         func center(_ c: GridCoordinate) -> SIMD2<Float> { SIMD2<Float>(Float(c.col) * s, Float(c.row) * s) }
@@ -501,7 +547,11 @@ final class CharacterLead {
                 let previous = dir(cells[i - 2], a)
                 if previous != d {
                     sinceStop = 0
-                    if openWays(a) >= 3 { stopInNext = true } else { pending.append(center(a)) }
+                    // Oct 19 (wall-crossing): `turnAtCentres` (the residents, who keep no
+                    // waiting stops) turns every corner at the cell's centre. Without it a
+                    // junction turn becomes a decision stop -- and a walk that drops its
+                    // stops cut straight across the corner, through the wall beside it.
+                    if openWays(a) >= 3 && !turnAtCentres { stopInNext = true } else { pending.append(center(a)) }
                 }
             }
             sinceStop += 1

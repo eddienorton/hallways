@@ -87,7 +87,13 @@ final class OfficeComputer: ObservableObject {
     @Published private(set) var phase: Phase = .off
     /// The 3D screen's rectangle on the device (window points) while seated;
     /// the computer surface is laid exactly over it. nil until projected.
-    @Published private(set) var screenRect: CGRect?
+    /// (Oct 12: kept in `placement`, which only the overlay host observes -- it
+    /// changes every frame while turning, and nothing else needs redrawing then.)
+    var screenRect: CGRect? {
+        get { placement.rect }
+        set { placement.rect = newValue }
+    }
+    let placement = MonitorPlacement()
     /// nil = the desktop.
     @Published private(set) var openApp: ComputerAppID?
     /// The game being played inside Games (nil = the Games launcher).
@@ -109,6 +115,35 @@ final class OfficeComputer: ObservableObject {
     private weak var controller: TapNavigationController?
     private weak var view: SCNView?
     private var seatPosition: SCNVector3?               // camera-parent space
+    /// Oct 12 (seated look): the straight-on view of the monitor (camera
+    /// yaw/pitch once seated), and the head's turn away from it.
+    private var seatYaw: Double?
+    private var seatPitch: Double = 0
+    private var lookBaseYaw: Double = 0
+    private var lookPanning = false
+    /// The head's turn from the straight-on view, as last set by the player
+    /// (+ = left). Kept as state, not read off the camera: the zoomed lens
+    /// (CameraMagnifier) also aims the camera, and that is not "turned away".
+    private var lookYaw: Double = 0 {
+        didSet {
+            let f = abs(lookYaw) < 0.04
+            if f != facing { facing = f }
+        }
+    }
+    private var sitQueue = 0
+    /// Oct 12 (monitor polish): the monitor's four corners on the device
+    /// (window points; top-left, top-right, bottom-right, bottom-left of the
+    /// desktop as it reads), followed every frame while seated -- the desktop
+    /// is drawn onto exactly that quad, at any angle. nil = not on screen.
+    var screenQuad: [CGPoint]? { placement.quad }
+    /// Looking straight at the monitor (published: the desktop takes touches only then).
+    @Published private(set) var facing = true
+    /// Desktop / taskbar buttons (canvas coordinates) -- a tap on one while
+    /// looking away turns back to the monitor and then presses it.
+    private var tapTargets: [String: (frame: CGRect, action: () -> Void)] = [:]
+    private var follower: CADisplayLink?
+    private let followTicker = OfficeComputerTicker()
+    private var lastCameraTransform = SCNMatrix4Identity
     private var sessionSpan: HistorySpan?
     private var appSpan: HistorySpan?
     private var gameSpan: HistorySpan?
@@ -141,10 +176,15 @@ final class OfficeComputer: ObservableObject {
             diag("computer.sit.declined", ["reason": "busy", "blockers": controller.diagCanRotateBlockers])
             return false
         }
+        // Oct 12 (playtest: "the first SIT takes forever"): this used to REFUSE
+        // the seat for as long as Mr. Tinky's escort was in its guiding/goodbye
+        // stage -- his whole goodbye (desk, lamp, bow, ~15 s and up to 60 s),
+        // with nothing to show the tap had been refused; it only worked once
+        // he set off (stage .departing), and every later sit worked at once.
+        // Sitting no longer waits for him: his goodbye simply goes on around
+        // the seated player. (The call still wraps up a stalled journey.)
         if GuidedJourney.isPerformingInOffice() {
-            diag("computer.sit.declined", ["reason": "guide performing in the office",
-                                           "stage": GuidedJourney.trip?.stage.rawValue ?? "none"])
-            return false
+            diag("computer.sit.duringGuideGoodbye", ["stage": GuidedJourney.trip?.stage.rawValue ?? "none"])
         }
         guard let seat = seatedView(controller: controller, view: view) else {
             diag("computer.sit.declined", ["reason": "no workstation in scene"])
@@ -162,6 +202,9 @@ final class OfficeComputer: ObservableObject {
         worldPath.append(seat.position)
         let path = worldPath.map { local($0, camera) }
         seatPosition = path.last
+        seatYaw = seat.yaw
+        seatPitch = seat.pitch
+        lookYaw = 0
 
         var actions: [SCNAction] = []
         for i in 1..<path.count {
@@ -177,6 +220,16 @@ final class OfficeComputer: ObservableObject {
             DispatchQueue.main.async { self?.seated() }
         }
         return true
+    }
+
+    /// Oct 11 (USE fix): would `sitDown` accept right now? The same checks
+    /// it makes, without starting anything -- so the HUD never offers a USE
+    /// that is then silently refused (Mr. Tinky performing at the desk, or no
+    /// workstation in this scene). Movement/busy is the caller's own check.
+    func canSitDown(controller: TapNavigationController, view: SCNView) -> Bool {
+        guard phase == .off else { return false }
+        _ = GuidedJourney.isPerformingInOffice()                    // (wraps up a stalled journey; no longer a refusal -- Oct 12)
+        return seatedView(controller: controller, view: view) != nil
     }
 
     /// The seat for THIS view: the live camera's field of view and the
@@ -209,11 +262,17 @@ final class OfficeComputer: ObservableObject {
     private func seated() {
         guard phase == .sittingDown else { return }
         MailStore.shared.deliverInitialIfNeeded()
-        BuildingDispatch.evaluate(reason: "computer")        // Oct 8 (Phase 1)
+        // Oct 12 (event history): the player's first time at their computer is an
+        // event (once); a short while later it brings the meeting invitation.
+        if StoryBeats.shared.record(BuildingDispatch.computerFirstUseBeat, at: Date()) {
+            diag("story.computerFirstUse", [:])
+        }
+        BuildingDispatch.evaluate(reason: "computer")        // Oct 8 (Phase 1); Oct 12: also arms the invitation's pause
         sessionSpan = PlayerHistory.shared.begin(.computerSessionBegan, endKind: .computerSessionEnded,
                                                  subject: "computer.office", floor: PlayerOffice.floor)
         phase = .on
         projectScreenAfterNextFrame()
+        startFollowing()
         diag("computer.on", [:])
     }
 
@@ -233,22 +292,77 @@ final class OfficeComputer: ObservableObject {
         }
     }
 
-    private func projectScreen() {
+    private func projectScreen(animated: Bool = true) {
         guard phase == .on, let view,
               let screen = PlayerOffice.computer?.childNode(withName: "playerOfficeComputerScreen", recursively: true) else { return }
         let half = PlayerOffice.screenSize / 2
-        var minX = CGFloat.greatestFiniteMagnitude, minY = minX, maxX = -minX, maxY = -minX
-        for x in [-half.x, half.x] {
-            for y in [-half.y, half.y] {
-                let p = view.projectPoint(screen.presentation.convertPosition(SCNVector3(x, y, 0), to: nil))
-                minX = min(minX, CGFloat(p.x)); maxX = max(maxX, CGFloat(p.x))
-                minY = min(minY, CGFloat(p.y)); maxY = max(maxY, CGFloat(p.y))
-            }
+        // Oct 12: the four corners, in the desktop's reading order, so it can
+        // be drawn onto the monitor at any angle (not just a straight-on rectangle).
+        var corners: [CGPoint] = []
+        var inView = true
+        for (x, y) in [(-half.x, half.y), (half.x, half.y), (half.x, -half.y), (-half.x, -half.y)] {
+            let p = view.projectPoint(screen.presentation.convertPosition(SCNVector3(x, y, 0), to: nil))
+            if !(p.z > 0 && p.z < 1) { inView = false }
+            corners.append(view.convert(CGPoint(x: CGFloat(p.x), y: CGFloat(p.y)), to: nil))
         }
-        guard maxX > minX + 10, maxY > minY + 10 else { return }
-        let rect = view.convert(CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), to: nil)
-        withAnimation(.easeOut(duration: screenRect == nil ? 0.35 : 0.2)) { screenRect = rect }
+        // Whatever way the plane's axes run, the desktop reads left-to-right, top-down.
+        if corners[1].x < corners[0].x { corners = [corners[1], corners[0], corners[3], corners[2]] }
+        if corners[3].y < corners[0].y { corners = [corners[3], corners[2], corners[1], corners[0]] }
+        let xs = corners.map(\.x), ys = corners.map(\.y)
+        let rect = CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        guard inView, rect.width > 10, rect.height > 10, Self.homography(from: Self.canvas, to: corners) != nil else {
+            if placement.visible { placement.visible = false }       // (looking right away from it: kept, hidden)
+            return
+        }
+        // Only the first appearance animates (the projection itself can't be animated).
+        guard animated, placement.rect == nil else { placement.set(rect: rect, quad: corners); return }
+        withAnimation(.easeOut(duration: 0.35)) { placement.set(rect: rect, quad: corners) }
         diag("computer.screen.projected", ["rect": NSCoder.string(for: rect), "view": NSCoder.string(for: view.bounds.size)])
+    }
+
+    // MARK: Oct 11 -- pinch to look closer (CameraMagnifier)
+    //
+    // A pinch on the monitor (the SwiftUI screen) or on the room around it
+    // zooms the whole 3D view; the screen surface follows the monitor's
+    // projected rectangle, so it scales with everything else and every
+    // control keeps working at any zoom.
+
+    /// `windowPoint`: the pinch centre in window coordinates.
+    func pinchBegan(windowPoint: CGPoint, source: String, takeover: Bool = false) {
+        guard phase == .on, CameraMagnifier.applies, isFacingComputer, let controller, let view else { return }
+        CameraMagnifier.shared.onViewChanged = { [weak self] in self?.projectScreen(animated: false) }
+        CameraMagnifier.shared.begin(source: source, at: view.convert(windowPoint, from: nil), camera: controller.cameraNode,
+                                     view: view, takeover: takeover)
+    }
+
+    /// Oct 11: the pinch's fingers moved -- zoom and pan together.
+    func pinchMoved(windowPoint: CGPoint, scale: Double, source: String) {
+        guard let view else { return }
+        CameraMagnifier.shared.update(source: source, scale: scale, at: view.convert(windowPoint, from: nil))
+    }
+
+    /// Oct 11: one finger dragging the room around the monitor (only while zoomed).
+    func roomPanBegan() {
+        guard phase == .on, CameraMagnifier.applies else { return }
+        CameraMagnifier.shared.panBegan(source: "roomPan")
+    }
+
+    func roomPanChanged(translation: CGPoint) {
+        CameraMagnifier.shared.panChanged(source: "roomPan", translation: translation)
+    }
+
+    func roomPanEnded() {
+        CameraMagnifier.shared.panEnded(source: "roomPan")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.projectScreen(animated: false) }
+    }
+
+    func pinchChanged(scale: Double, source: String) {
+        CameraMagnifier.shared.update(source: source, scale: scale)
+    }
+
+    func pinchEnded(scale: Double, source: String) {
+        CameraMagnifier.shared.end(source: source, scale: scale)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.projectScreen(animated: false) }
     }
 
     /// The device rotated / the view resized while seated: re-seat for the
@@ -257,14 +371,237 @@ final class OfficeComputer: ObservableObject {
     func viewLayoutChanged() {
         guard phase == .on, let controller, let view else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            CameraMagnifier.shared.reset(animated: false)          // Oct 11: re-seat from the 1x view
             guard let self, self.phase == .on, let seat = self.seatedView(controller: controller, view: view) else { return }
             let camera = controller.cameraNode
             let position = self.local(seat.position, camera)
             self.seatPosition = position
+            self.seatYaw = seat.yaw
+            self.seatPitch = seat.pitch
+            self.lookYaw = 0
+            camera.removeAction(forKey: "officeComputerLook")
             camera.position = position
             camera.eulerAngles = SCNVector3(Float(seat.pitch), Float(seat.yaw), 0)
             self.projectScreenAfterNextFrame()
         }
+    }
+
+    // MARK: Oct 12 -- looking around from the chair
+    //
+    // Seated, the head turns (a horizontal drag, or LEFT/RIGHT) up to
+    // `lookLimit` either way from the straight-on view; the camera stays
+    // exactly where the chair puts it. Turned away, the monitor's surface is
+    // put away (it only belongs over the screen when facing it); a tap on the
+    // room then turns back to the monitor (faceComputer) instead of getting
+    // up. Facing it, everything is as before (a tap on the room gets up).
+
+    static let lookLimit: Double = 1.25                    // ~72 degrees either way
+    static let buttonTurn: Double = .pi / 4
+
+    /// Seated and looking at the monitor (not turned away; zoomed counts as facing).
+    var isFacingComputer: Bool { phase == .on && abs(lookYaw) < 0.04 }
+
+    /// Pitch for a given turn: straight on, the seat's slight look down at
+    /// the screen; turned away, level.
+    private func pitch(forOffset d: Double) -> Double { seatPitch * max(0, 1 - abs(d) / 0.6) }
+
+
+    /// A one-finger drag on the room (not zoomed in): the head turns.
+    func lookBegan() {
+        guard phase == .on, seatYaw != nil, let camera = controller?.cameraNode else { lookPanning = false; return }
+        lookPanning = true
+        camera.removeAction(forKey: "officeComputerLook")
+        lookBaseYaw = lookYaw
+    }
+
+    func lookChanged(translation: CGPoint) {
+        guard lookPanning, phase == .on, let seatYaw, let camera = controller?.cameraNode else { return }
+        // The same scale and sense as the ordinary drag-to-turn (140 pt = a quarter turn).
+        let d = max(-Self.lookLimit, min(Self.lookLimit, lookBaseYaw + Double(translation.x / 140) * .pi / 2))
+        lookYaw = d
+        camera.eulerAngles = SCNVector3(Float(pitch(forOffset: d)), Float(seatYaw + d), 0)
+    }
+
+    func lookEnded() {
+        guard lookPanning else { return }
+        lookPanning = false
+        // Let go nearly straight on: settle onto the monitor.
+        if phase == .on, abs(lookYaw) < 0.12 { faceComputer(duration: 0.2) }
+    }
+
+    /// LEFT / RIGHT while seated: an eighth of a turn each, within the limits.
+    func turn(left: Bool) {
+        guard phase == .on, let seatYaw, let camera = controller?.cameraNode, !CameraMagnifier.shared.isZoomed else { return }
+        var d = lookYaw + (left ? Self.buttonTurn : -Self.buttonTurn)       // from where it is going (quick presses add up)
+        d = max(-Self.lookLimit, min(Self.lookLimit, d))
+        if abs(d) < 0.12 { faceComputer(); return }
+        lookYaw = d
+        let turn = SCNAction.rotateTo(x: CGFloat(pitch(forOffset: d)), y: CGFloat(seatYaw + d), z: 0, duration: 0.35,
+                                      usesShortestUnitArc: true)
+        turn.timingMode = .easeInEaseOut
+        camera.runAction(turn, forKey: "officeComputerLook")
+        diag("computer.look.turn", ["left": left, "offset": String(format: "%.2f", d)])
+    }
+
+    /// Back to the straight-on monitor view (no move, the chair stays put);
+    /// the screen surface returns once it's there.
+    func faceComputer(duration: Double = 0.45, then action: (() -> Void)? = nil) {
+        guard phase == .on, let seatYaw, let camera = controller?.cameraNode else { return }
+        lookYaw = 0
+        let turn = SCNAction.rotateTo(x: CGFloat(seatPitch), y: CGFloat(seatYaw), z: 0, duration: duration, usesShortestUnitArc: true)
+        turn.timingMode = .easeInEaseOut
+        camera.runAction(turn, forKey: "officeComputerLook") { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.phase == .on else { return }
+                self.projectScreenAfterNextFrame()
+                if let action, self.facing { action() }
+            }
+        }
+        diag("computer.look.faceComputer", ["then": action != nil])
+    }
+
+    // MARK: Oct 12 -- the desktop drawn onto the monitor at any angle
+
+    /// Every frame while seated: if the camera moved (a turn, the lens), the
+    /// quad follows the monitor.
+    private func startFollowing() {
+        guard follower == nil else { return }
+        followTicker.onTick = { [weak self] in self?.followTick() }
+        let link = CADisplayLink(target: followTicker, selector: #selector(OfficeComputerTicker.tick))
+        link.add(to: .main, forMode: .common)
+        follower = link
+    }
+
+    private func stopFollowing() {
+        follower?.invalidate()
+        follower = nil
+        followTicker.onTick = nil
+    }
+
+    private func followTick() {
+        guard phase == .on, let camera = controller?.cameraNode else { return }
+        let t = camera.presentation.worldTransform
+        let fov = camera.presentation.camera?.fieldOfView ?? 0
+        if SCNMatrix4EqualToMatrix4(t, lastCameraTransform) && fov == lastFOV { return }
+        lastCameraTransform = t
+        lastFOV = fov
+        projectScreen(animated: false)
+    }
+    private var lastFOV: CGFloat = 0
+
+    /// The projective map from the desktop canvas onto `quad` (TL, TR, BR, BL),
+    /// as a 3x3 (row-major a b c / d e f / g h 1), or nil if degenerate.
+    static func homography(from canvas: CGSize, to quad: [CGPoint]) -> [Double]? {
+        guard quad.count == 4, canvas.width > 0, canvas.height > 0 else { return nil }
+        let x0 = Double(quad[0].x), y0 = Double(quad[0].y), x1 = Double(quad[1].x), y1 = Double(quad[1].y)
+        let x2 = Double(quad[2].x), y2 = Double(quad[2].y), x3 = Double(quad[3].x), y3 = Double(quad[3].y)
+        // Unit square (0,0) (1,0) (1,1) (0,1) -> TL TR BR BL (Heckbert).
+        let dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3
+        let dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3
+        var g = 0.0, h = 0.0
+        if abs(dx3) > 1e-9 || abs(dy3) > 1e-9 {
+            let den = dx1 * dy2 - dx2 * dy1
+            guard abs(den) > 1e-9 else { return nil }
+            g = (dx3 * dy2 - dx2 * dy3) / den
+            h = (dx1 * dy3 - dx3 * dy1) / den
+        }
+        let a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, c = x0
+        let d = y1 - y0 + g * y1, e = y3 - y0 + h * y3, f = y0
+        let w = Double(canvas.width), ht = Double(canvas.height)
+        let m = [a / w, b / ht, c, d / w, e / ht, f, g / w, h / ht, 1.0]
+        guard m.allSatisfy(\.isFinite) else { return nil }
+        return m
+    }
+
+    /// The same map as a transform for SwiftUI's projectionEffect (row-vector convention).
+    static func projection(from canvas: CGSize, to quad: [CGPoint]) -> CATransform3D {
+        guard let m = homography(from: canvas, to: quad) else { return CATransform3DIdentity }
+        var t = CATransform3DIdentity
+        t.m11 = CGFloat(m[0]); t.m12 = CGFloat(m[3]); t.m13 = 0; t.m14 = CGFloat(m[6])
+        t.m21 = CGFloat(m[1]); t.m22 = CGFloat(m[4]); t.m23 = 0; t.m24 = CGFloat(m[7])
+        t.m31 = 0; t.m32 = 0; t.m33 = 1; t.m34 = 0
+        t.m41 = CGFloat(m[2]); t.m42 = CGFloat(m[5]); t.m43 = 0; t.m44 = 1
+        return t
+    }
+
+    /// Where a window point falls on the desktop canvas (nil: not on the monitor).
+    func canvasPoint(forWindow p: CGPoint) -> CGPoint? {
+        guard let quad = screenQuad, let m = Self.homography(from: Self.canvas, to: quad) else { return nil }
+        // Inverse of the 3x3.
+        let (a, b, c, d, e, f, g, h, i) = (m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8])
+        let A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g
+        let det = a * A + b * B + c * C
+        guard abs(det) > 1e-12 else { return nil }
+        let inv = [A / det, -(b * i - c * h) / det, (b * f - c * e) / det,
+                   B / det, (a * i - c * g) / det, -(a * f - c * d) / det,
+                   C / det, -(a * h - b * g) / det, (a * e - b * d) / det]
+        let x = Double(p.x), y = Double(p.y)
+        let w = inv[6] * x + inv[7] * y + inv[8]
+        guard abs(w) > 1e-9 else { return nil }
+        let u = (inv[0] * x + inv[1] * y + inv[2]) / w, v = (inv[3] * x + inv[4] * y + inv[5]) / w
+        guard u >= 0, v >= 0, u <= Double(Self.canvas.width), v <= Double(Self.canvas.height) else { return nil }
+        return CGPoint(x: u, y: v)
+    }
+
+    /// The desktop's own buttons register where they are (canvas coordinates).
+    func setTapTarget(_ key: String, frame: CGRect?, action: @escaping () -> Void) {
+        if let frame { tapTargets[key] = (frame, action) } else { tapTargets[key] = nil }
+    }
+
+    /// A tap while looking away: back to the monitor -- and if it landed on
+    /// one of the desktop's buttons, that button is pressed once facing it.
+    func tapWhileTurned(windowPoint: CGPoint) {
+        var press: (() -> Void)?
+        if let p = canvasPoint(forWindow: windowPoint) {
+            press = tapTargets.values.first(where: { $0.frame.contains(p) })?.action
+        }
+        diag("computer.look.tapWhileTurned", ["onMonitor": canvasPoint(forWindow: windowPoint) != nil, "press": press != nil])
+        faceComputer(then: press)
+    }
+
+    // MARK: Oct 12 -- one deliberate tap seats the player
+
+    /// A tap/USE on the workstation that arrived while the player was still
+    /// moving (the end of a walk into the office, a pivot settling): the
+    /// walk is stopped and the sit happens as soon as the player is still
+    /// (within ~1.5 s) -- instead of the tap being spent as a brake and a
+    /// second tap needed. True = taken care of.
+    @discardableResult
+    func sitDownWhenSettled(controller: TapNavigationController, view: SCNView) -> Bool {
+        guard phase == .off else { return true }
+        // Only worth waiting for in the office itself, on the way to stillness;
+        // anything else is answered at once, exactly as before.
+        let inOffice = controller.currentFloorNumber == PlayerOffice.floor
+            && PlayerOffice.officeCells.subtracting(PlayerOffice.deskBayCells).contains(controller.currentCell)
+        let moving = controller.isFreeTapWalking || controller.continuousWalkState != .stopped
+            || controller.diagCanRotateBlockers.split(separator: ",").allSatisfy { ["animating", "dragRotating", "dragMoving"].contains(String($0)) }
+        guard inOffice, !controller.canRotate || controller.isFreeTapWalking || controller.continuousWalkState != .stopped,
+              moving else { return sitDown(controller: controller, view: view) }
+        if controller.isFreeTapWalking { controller.stopFreeTapWalk() }
+        controller.stopContinuousWalk(reason: "officeComputer")
+        if controller.canRotate { return sitDown(controller: controller, view: view) }
+        diag("computer.sit.queued", ["blockers": controller.diagCanRotateBlockers])
+        let deadline = CACurrentMediaTime() + 1.5
+        sitQueue += 1
+        let token = sitQueue
+        func attempt() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak controller, weak view] in
+                guard let self, let controller, let view, self.phase == .off, token == self.sitQueue else { return }
+                // A new walk since the tap: the player has changed their mind.
+                if controller.isFreeTapWalking || controller.continuousWalkState != .stopped {
+                    diag("computer.sit.queuedCancelled", [:]); return
+                }
+                if controller.canRotate {
+                    if !self.sitDown(controller: controller, view: view) { diag("computer.sit.queuedDeclined", [:]) }
+                } else if CACurrentMediaTime() < deadline {
+                    attempt()
+                } else {
+                    diag("computer.sit.queuedTimedOut", ["blockers": controller.diagCanRotateBlockers])
+                }
+            }
+        }
+        attempt()
+        return true
     }
 
     // MARK: Getting up (a tap on the room, outside the monitor)
@@ -276,6 +613,9 @@ final class OfficeComputer: ObservableObject {
     /// ordinary navigation.
     func getUp() {
         guard phase == .on, let controller else { return }
+        controller.cameraNode.removeAction(forKey: "officeComputerLook")    // Oct 12
+        lookPanning = false
+        CameraMagnifier.shared.reset(animated: true)               // Oct 11: back to the normal lens
         closeApp(reason: "gotUp")
         endSession(reason: "gotUp")
         withAnimation(.easeIn(duration: 0.18)) {
@@ -322,14 +662,22 @@ final class OfficeComputer: ObservableObject {
         closeApp(reason: reason)
         endSession(reason: reason)
         controller?.cameraNode.removeAction(forKey: "officeComputerSit")
+        controller?.cameraNode.removeAction(forKey: "officeComputerLook")   // Oct 12
         controller?.cameraNode.removeAction(forKey: "officeComputerStand")
         controller?.isSeatedAtComputer = false
+        CameraMagnifier.shared.reset(animated: false)              // Oct 11
         resetState()
         diag("computer.forceClosed", ["reason": reason])
     }
 
     private func resetState() {
+        stopFollowing()
+        tapTargets = [:]
+        placement.set(rect: nil, quad: nil)
         seatPosition = nil
+        seatYaw = nil
+        lookYaw = 0
+        lookPanning = false
         screenRect = nil
         controller = nil
         view = nil
@@ -431,33 +779,132 @@ final class OfficeComputer: ObservableObject {
 /// The computer's screen, laid exactly over the physical monitor's 3D screen
 /// while seated. Only that rectangle is interactive; everything around it is
 /// the room (the SCNView underneath), where a tap means "get up".
+/// Oct 12: where the monitor is on the device right now (observed by the overlay only).
+final class MonitorPlacement: ObservableObject {
+    @Published var rect: CGRect?
+    @Published private(set) var quad: [CGPoint]?
+    @Published var visible = true
+    func set(rect: CGRect?, quad: [CGPoint]?) {
+        self.rect = rect
+        self.quad = quad
+        if quad != nil, !visible { visible = true }
+    }
+}
+
+/// CADisplayLink's target (it needs an NSObject).
+final class OfficeComputerTicker: NSObject {
+    var onTick: (() -> Void)?
+    @objc func tick() { onTick?() }
+}
+
 struct OfficeComputerOverlayHost: View {
     @ObservedObject private var computer = OfficeComputer.shared
+    @ObservedObject private var placement = OfficeComputer.shared.placement
+    /// Oct 11: a pinch on the monitor is driving the camera magnifier.
+    @State private var pinching = false
+    /// Oct 12: a sideways drag begun on the monitor is turning the head.
+    @State private var surfaceLook = false
+    @State private var lookDecided = false
+    @State private var lookFrom: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
             let origin = geo.frame(in: .global).origin
             ZStack(alignment: .topLeading) {
-                if computer.phase == .on, let rect = computer.screenRect {
+                if computer.phase == .on, let quad = placement.quad, let rect = placement.rect, rect.width > 1 {
                     let canvas = OfficeComputer.canvas
                     let scale = rect.width / canvas.width
+                    // Oct 12: drawn onto the monitor's own quad at any angle. Laid out exactly as
+                    // before (scaled onto the monitor's bounding rectangle); the quad is a projection
+                    // inside that -- the identity when facing it, so touches there are as they were.
+                    let inCanvas = quad.map { CGPoint(x: ($0.x - rect.minX) / scale, y: ($0.y - rect.minY) / scale) }
                     ComputerScreen(computer: computer)
                         .frame(width: canvas.width, height: canvas.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        .projectionEffect(ProjectionTransform(OfficeComputer.projection(from: canvas, to: inCanvas)))
                         .scaleEffect(scale, anchor: .topLeading)
                         .frame(width: rect.width, height: rect.height, alignment: .topLeading)
-                        .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+                        // Oct 11: pinch ON the monitor = look closer (the whole
+                        // 3D view zooms; taps inside keep working, simultaneously).
+                        .simultaneousGesture(
+                            MagnifyGesture(minimumScaleDelta: 0.02)
+                                .onChanged { value in
+                                    if !pinching || !CameraMagnifier.shared.isDriving {
+                                        pinching = true
+                                        computer.pinchBegan(windowPoint: CGPoint(x: rect.minX + value.startAnchor.x * rect.width,
+                                                                                 y: rect.minY + value.startAnchor.y * rect.height),
+                                                            source: "monitor")
+                                    }
+                                    computer.pinchChanged(scale: Double(value.magnification), source: "monitor")
+                                }
+                                .onEnded { value in
+                                    pinching = false
+                                    computer.pinchEnded(scale: Double(value.magnification), source: "monitor")
+                                }
+                        )
+                        // Oct 12: a sideways drag that starts ON the monitor turns the head too
+                        // (the desktop has no sideways drags of its own; games keep theirs).
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 14, coordinateSpace: .global)
+                                .onChanged { value in
+                                    if !lookDecided {
+                                        // Decided once, at the start: sideways = a look; anything else is the desktop's.
+                                        lookDecided = true
+                                        guard computer.openGame == nil, !pinching, !CameraMagnifier.shared.isZoomed,
+                                              abs(value.translation.width) > abs(value.translation.height) * 1.4 else { return }
+                                        surfaceLook = true
+                                        lookFrom = value.translation.width
+                                        computer.lookBegan()
+                                    }
+                                    guard surfaceLook else { return }
+                                    computer.lookChanged(translation: CGPoint(x: value.translation.width - lookFrom, y: 0))
+                                }
+                                .onEnded { _ in
+                                    if surfaceLook { computer.lookEnded() }
+                                    surfaceLook = false
+                                    lookDecided = false
+                                }
+                        )
                         .offset(x: rect.minX - origin.x, y: rect.minY - origin.y)
+                        // Looking away, the desktop is seen, not touched: a tap there turns back to
+                        // it (and presses what was tapped) -- handled with the room's taps.
+                        .opacity(placement.visible ? 1 : 0)
+                        .allowsHitTesting(surfaceLook || (computer.facing && placement.visible))
                         .transition(.opacity)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .onChange(of: geo.size) { _, _ in computer.viewLayoutChanged() }
+            .onChange(of: computer.phase) { _, _ in                      // Oct 11
+                pinching = false
+                if surfaceLook { computer.lookEnded() }                 // Oct 12: never left mid-look
+                surfaceLook = false
+                lookDecided = false
+            }
         }
         .ignoresSafeArea()
     }
 }
 
+/// Oct 12: registers a desktop button's place (canvas coordinates) with the
+/// computer, so a tap on it while looking away can press it after turning back.
+private struct TapTarget: ViewModifier {
+    let computer: OfficeComputer
+    let key: String
+    let enabled: Bool
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ComputerScreen.space)) } action: { frame in
+                computer.setTapTarget(key, frame: enabled ? frame : nil, action: action)
+            }
+            .onDisappear { computer.setTapTarget(key, frame: nil, action: {}) }
+    }
+}
+
 private struct ComputerScreen: View {
+    static let space = "officeComputerCanvas"
     @ObservedObject var computer: OfficeComputer
     @ObservedObject private var mail = MailStore.shared
 
@@ -471,6 +918,7 @@ private struct ComputerScreen: View {
                 taskbar
             }
         }
+        .coordinateSpace(name: Self.space)
     }
 
     @ViewBuilder
@@ -499,6 +947,9 @@ private struct ComputerScreen: View {
                 .buttonStyle(.plain)
                 .disabled(!app.isAvailable)
                 .accessibilityIdentifier("computerIcon_\(app.id.rawValue)")
+                .modifier(TapTarget(computer: computer, key: "icon.\(app.id.rawValue)", enabled: app.isAvailable) {
+                    withAnimation(.easeOut(duration: 0.18)) { computer.open(app.id) }
+                })
             }
             Spacer()
         }
@@ -532,6 +983,9 @@ private struct ComputerScreen: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Desktop")
+            .modifier(TapTarget(computer: computer, key: "taskbar.home", enabled: true) {
+                withAnimation(.easeOut(duration: 0.18)) { computer.closeApp() }
+            })
             ForEach(ComputerApps.all.filter(\.isAvailable)) { app in
                 Button {
                     diag("computer.taskbar", ["tap": app.id.rawValue, "from": computer.openApp?.rawValue ?? "desktop"])
@@ -551,6 +1005,9 @@ private struct ComputerScreen: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("computerTaskbar_\(app.id.rawValue)")
+                .modifier(TapTarget(computer: computer, key: "taskbar.\(app.id.rawValue)", enabled: true) {
+                    withAnimation(.easeOut(duration: 0.18)) { computer.open(app.id) }
+                })
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 0) {

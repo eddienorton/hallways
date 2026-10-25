@@ -42,13 +42,26 @@ enum AdministrationReception {
     /// closer than the cell centre so the screen reads comfortably; still
     /// clear of the walking clearance).
     static let terminalLanding = WallFace(coord: photoStationCell, direction: .north)
-    static let terminalStandOff: Double = 0.3
+    /// Oct 11 (playtest 1): moved back from 0.3 (1.46 m from the wall) to
+    /// -0.1 (1.86 m) so the card dispenser cleared the bottom WALK row.
+    /// Oct 11 (playtest 2): too far -- the slot was seen almost edge-on and
+    /// the card was tiny. Now 0.15 (1.61 m) PLUS `terminalPitch`: standing in
+    /// this pose the view tilts gently down, so the card's top face is seen
+    /// as it emerges. At 5'8" the card sits ~73% down a portrait screen (clear
+    /// of WALK) and the whole monitor stays in view. This pose only.
+    static let terminalStandOff: Double = 0.15
+    /// The terminal pose's downward look (radians; negative = down, ~7 deg).
+    /// Held only while the player stands in the pose; any movement eases it
+    /// back to level (TapNavigationController.holdLandingPitch).
+    static let terminalPitch: Float = -0.12
 
     /// Oct 5: the private office behind the four-panel door in the south
     /// wall of (11,9) -- a one-cell anteroom (12,9), then a 2 x 2 room. (Two
     /// walkable cells side by side are always open to each other in this
     /// grid, so the office cannot touch row 11 anywhere but the door.)
     static let officeAnteroom = GridCoordinate(row: 12, col: 9)
+    /// Oct 21: the ADMINISTRATION glass doors' anchor (the vestibule, doors on its east side).
+    static let entranceDoorCell = GridCoordinate(row: 10, col: 7)
     static let officeCells: Set<GridCoordinate> = [
         GridCoordinate(row: 13, col: 8), GridCoordinate(row: 13, col: 9),
         GridCoordinate(row: 14, col: 8), GridCoordinate(row: 14, col: 9)
@@ -390,6 +403,8 @@ enum AdministrationReception {
     // MARK: The Administrator (stand-in)
 
     private static let standInName = "administratorStandIn"
+    /// Oct 19: (Contacts finds her body by it, for her portrait)
+    static var standInNodeName: String { standInName }
     private static let idleTiltKey = "idleTilt"
 
     /// Temporary: a tall, narrow, faintly official being -- slate uniform,
@@ -413,6 +428,8 @@ enum AdministrationReception {
                 body.runAction(.repeatForever(breathe))
                 head.runAction(idleTilt, forKey: idleTiltKey)
             }
+            model.runAction(idlePosture, forKey: idlePostureKey)     // Oct 11: more life
+            startIdleLife(on: root)
             setStanding(isStanding, on: root, duration: 0)
             diag("juanita.model", ["kind": "hallwaysian"])
             return root
@@ -483,6 +500,7 @@ enum AdministrationReception {
         breathe.timingMode = .easeInEaseOut
         body.runAction(.repeatForever(breathe))
         head.runAction(idleTilt, forKey: idleTiltKey)
+        startIdleLife(on: root)                                       // Oct 11: more life
         return root
     }
 
@@ -508,6 +526,7 @@ enum AdministrationReception {
     /// counter (back at her post). Only the shoulders move.
     static func setStanding(_ standing: Bool, on standIn: SCNNode, duration: Double = 0.45) {
         isStanding = standing
+        settleStampArm(on: standIn)                                   // Oct 11: never walk off mid-stamp
         for (name, pointArm) in [("adminArmPoint", true), ("adminArmRest", false)] {
             guard let arm = standIn.childNode(withName: name, recursively: true) else { continue }
             let pose = restPose(pointArm: pointArm)
@@ -528,9 +547,175 @@ enum AdministrationReception {
     /// door is ~66 degrees off her front, toward her left).
     private static let armPointOffice = SCNVector3(0, -0.4, 1.75)
 
+    /// Oct 11 (more life): her idle head is one long, unhurried cycle with
+    /// varied timing -- the old tilt, a glance off to one side, a look down
+    /// at the counter, a small tilt the other way -- always back to facing
+    /// the visitor in between, never more than a small angle away. Same key
+    /// and same resume point as the old single tilt, so every routine still
+    /// interrupts and restarts it exactly as before.
     private static var idleTilt: SCNAction {
-        .repeatForever(.sequence([.wait(duration: 5), .rotateTo(x: 0, y: 0, z: 0.12, duration: 0.9, usesShortestUnitArc: true),
-                                  .wait(duration: 2.5), .rotateTo(x: 0, y: 0, z: 0, duration: 0.9, usesShortestUnitArc: true)]))
+        func to(_ x: CGFloat, _ y: CGFloat, _ z: CGFloat, _ d: Double) -> SCNAction {
+            let a = SCNAction.rotateTo(x: x, y: y, z: z, duration: d, usesShortestUnitArc: true)
+            a.timingMode = .easeInEaseOut
+            return a
+        }
+        return .repeatForever(.sequence([
+            .wait(duration: 4.5, withRange: 3), to(0, 0, 0.12, 0.9), .wait(duration: 2.2, withRange: 1.2), to(0, 0, 0, 0.9),
+            .wait(duration: 3.5, withRange: 3), to(0, 0.22, 0, 0.7), .wait(duration: 1.2, withRange: 0.8), to(0, 0, 0, 0.7),
+            .wait(duration: 4, withRange: 3), to(0.09, 0, 0, 0.8), .wait(duration: 1.8, withRange: 1.2), to(0, 0, 0, 0.8),
+            .wait(duration: 3.5, withRange: 3), to(0, -0.16, -0.06, 0.8), .wait(duration: 1.4, withRange: 0.8), to(0, 0, 0, 0.8),
+        ]))
+    }
+
+    // MARK: Oct 11 -- more life (blinks, glances, posture, the stamp habit)
+    //
+    // Layered UNDER her routines, never over them: every routine (greeting,
+    // directions, the exit-guard refusals) pauses the blinks and glances and
+    // settles the stamp arm the moment it starts; they resume when it ends.
+    // Her position, facing, collision/keep-out, guard logic, patience timers,
+    // voice and Tinky's escort are untouched -- only her eyes, pupils, the
+    // stamp arm's elbow/wrist and the model's own slight lean move.
+    private static let idleBlinkKey = "juanitaIdleBlink"
+    private static let idleGlanceKey = "juanitaIdleGlance"
+    private static let idlePostureKey = "juanitaIdlePosture"
+    private static let idleStampKey = "juanitaIdleStamp"
+    /// Bumped by every routine; a pending resume from an older one does nothing.
+    private static var idleGeneration = 0
+    /// Where her pupils rest (the routines' looks assume the same place).
+    private static var idlePupilRest = SCNVector3Zero
+
+    private static func startIdleLife(on standIn: SCNNode) {
+        if let pupils = standIn.childNode(withName: "adminPupils", recursively: true) { idlePupilRest = pupils.position }
+        startBlinksAndGlances(on: standIn)
+        scheduleStampHabit(for: standIn)
+    }
+
+    private static func startBlinksAndGlances(on standIn: SCNNode) {
+        standIn.childNode(withName: "adminEyes", recursively: true)?.runAction(idleBlinks, forKey: idleBlinkKey)
+        standIn.childNode(withName: "adminPupils", recursively: true)?.runAction(idleGlances(rest: idlePupilRest), forKey: idleGlanceKey)
+    }
+
+    /// Unhurried blinks: one, another a few seconds later, now and then a double.
+    private static var idleBlinks: SCNAction {
+        let blink = SCNAction.customAction(duration: 0.16) { node, elapsed in
+            let u = Float(elapsed / 0.16)
+            node.scale = SCNVector3(1, 1 - 0.88 * sin(.pi * u), 1)
+        }
+        let settle = SCNAction.scale(to: 1, duration: 0)
+        let one = SCNAction.sequence([blink, settle])
+        let double = SCNAction.sequence([blink, settle, .wait(duration: 0.1), blink, settle])
+        return .repeatForever(.sequence([
+            .wait(duration: 3.6, withRange: 3), one,
+            .wait(duration: 4.4, withRange: 3.5), one,
+            .wait(duration: 5, withRange: 3), double,
+        ]))
+    }
+
+    /// Small sideways looks with the eyes only, always back to the visitor.
+    private static func idleGlances(rest: SCNVector3) -> SCNAction {
+        func glance(_ dx: Float, _ dy: Float, hold: Double) -> SCNAction {
+            let go = SCNAction.move(to: SCNVector3(rest.x + dx, rest.y + dy, rest.z), duration: 0.12)
+            go.timingMode = .easeOut
+            let back = SCNAction.move(to: rest, duration: 0.2)
+            back.timingMode = .easeInEaseOut
+            return .sequence([go, .wait(duration: hold, withRange: hold * 0.6), back])
+        }
+        return .repeatForever(.sequence([
+            .wait(duration: 6, withRange: 4), glance(0.013, 0, hold: 1.0),
+            .wait(duration: 5.5, withRange: 4), glance(-0.011, -0.004, hold: 0.8),
+            .wait(duration: 7, withRange: 4), glance(-0.013, 0.003, hold: 1.2),
+        ]))
+    }
+
+    /// Her weight shifting on her castors: a barely-there lean one way, then
+    /// the other, over many seconds. Runs on the model INSIDE the stand-in,
+    /// so the stand-in's position, facing and keep-out never move.
+    private static var idlePosture: SCNAction {
+        func lean(_ x: CGFloat, _ z: CGFloat, _ d: Double) -> SCNAction {
+            let a = SCNAction.rotateTo(x: x, y: 0, z: z, duration: d, usesShortestUnitArc: true)
+            a.timingMode = .easeInEaseOut
+            return a
+        }
+        return .repeatForever(.sequence([
+            lean(0.006, 0.012, 3.2), .wait(duration: 2.5, withRange: 2),
+            lean(-0.004, -0.01, 3.6), .wait(duration: 3, withRange: 2),
+            lean(0, 0, 2.8), .wait(duration: 2, withRange: 2),
+        ]))
+    }
+
+    /// A routine is starting: blinks and glances stop (eyes and pupils back
+    /// at rest, so the routine starts from a clean face) and the stamp arm
+    /// goes down. Blinks and glances resume once the routine is over.
+    private static func pauseIdleLife(on standIn: SCNNode, for duration: Double) {
+        idleGeneration += 1
+        let generation = idleGeneration
+        if let eyes = standIn.childNode(withName: "adminEyes", recursively: true) {
+            eyes.removeAction(forKey: idleBlinkKey)
+            eyes.scale = SCNVector3(1, 1, 1)
+        }
+        if let pupils = standIn.childNode(withName: "adminPupils", recursively: true) {
+            pupils.removeAction(forKey: idleGlanceKey)
+            pupils.position = idlePupilRest
+        }
+        settleStampArm(on: standIn)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.2) { [weak standIn] in
+            guard generation == idleGeneration, let standIn, standIn.parent != nil else { return }
+            startBlinksAndGlances(on: standIn)
+        }
+    }
+
+    /// The stamp arm's elbow and wrist at rest (from the asset; zero if absent).
+    private static func stampRest(_ joint: String) -> SCNVector3 {
+        HallwaysianJuanita.load()?.childNode(withName: joint, recursively: true)?.eulerAngles ?? SCNVector3Zero
+    }
+
+    /// Her personality, now and then: at the counter with nothing to do, the
+    /// rubber-stamp hand comes up, turns face-down and gives the air two
+    /// officious stamps. Modeled body only (it has the elbow and wrist), only
+    /// at her post, never during a routine or while she is away at the exit.
+    private static func scheduleStampHabit(for standIn: SCNNode) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 16...30)) { [weak standIn] in
+            guard let standIn, standIn.parent != nil else { return }      // the floor is gone
+            if CACurrentMediaTime() >= busyUntil, !isStanding, !AdministrationExitGuard.isAway {
+                performStampHabit(on: standIn)
+            }
+            scheduleStampHabit(for: standIn)
+        }
+    }
+
+    private static func performStampHabit(on standIn: SCNNode) {
+        guard let elbow = standIn.childNode(withName: "adminElbowPoint", recursively: true),
+              let wrist = standIn.childNode(withName: "adminHandPoint", recursively: true) else { return }
+        let elbowRest = stampRest("adminElbowPoint"), wristRest = stampRest("adminHandPoint")
+        func turn(_ joint: SCNVector3, by x: Float, _ d: Double, _ mode: SCNActionTimingMode = .easeInEaseOut) -> SCNAction {
+            let a = SCNAction.rotateTo(x: CGFloat(joint.x + x), y: CGFloat(joint.y), z: CGFloat(joint.z),
+                                       duration: d, usesShortestUnitArc: true)
+            a.timingMode = mode
+            return a
+        }
+        // Forearm forward (negative x swings it toward her front), the stamp
+        // turned face-down at the wrist, two quick dips, then back down.
+        let stamp = SCNAction.sequence([turn(elbowRest, by: -1.0, 0.07, .easeIn), turn(elbowRest, by: -1.25, 0.16, .easeOut)])
+        elbow.runAction(.sequence([turn(elbowRest, by: -1.25, 0.45), .wait(duration: 0.15), stamp,
+                                   .wait(duration: 0.12), stamp, .wait(duration: 0.35), turn(elbowRest, by: 0, 0.5)]),
+                        forKey: idleStampKey)
+        wrist.runAction(.sequence([turn(wristRest, by: 1.25, 0.45), .wait(duration: 1.13), turn(wristRest, by: 0, 0.5)]),
+                        forKey: idleStampKey)
+        diag("juanita.idle", ["gesture": "stamp"])
+    }
+
+    /// Stamp arm back to rest over a moment (a routine or a walk is starting).
+    private static func settleStampArm(on standIn: SCNNode) {
+        for joint in ["adminElbowPoint", "adminHandPoint"] {
+            guard let node = standIn.childNode(withName: joint, recursively: true),
+                  node.action(forKey: idleStampKey) != nil else { continue }
+            let rest = stampRest(joint)
+            node.removeAction(forKey: idleStampKey)
+            let back = SCNAction.rotateTo(x: CGFloat(rest.x), y: CGFloat(rest.y), z: CGFloat(rest.z), duration: 0.2,
+                                          usesShortestUnitArc: true)
+            back.timingMode = .easeOut
+            node.runAction(back, forKey: idleStampKey)
+        }
     }
 
     // MARK: The greeting (after the desk landing) and repeat requests
@@ -558,6 +743,11 @@ enum AdministrationReception {
     private static var greetedTarget: DirectionsTarget?
     /// One routine at a time -- taps during a routine are ignored.
     private static var busyUntil: CFTimeInterval = 0
+    /// Oct 15 (Smart Tap): she is at her post, in the middle of giving
+    /// directions (her greeting / repeat routine -- the point is part of it).
+    static var isGivingDirections: Bool {
+        CACurrentMediaTime() < busyUntil && directionsTarget != nil && !AdministrationExitGuard.isAway
+    }
     /// Set by a tap on the Administrator; consumed when the desk landing
     /// completes (or at once if already in the pose).
     static var directionsRequested = false
@@ -632,6 +822,10 @@ enum AdministrationReception {
         greetedTarget = target
         diag("administration.greet", ["target": target.rawValue])
         perform(.welcome, on: standIn)
+        // Oct 19: her first greeting is meeting her -- Contacts (once; kept across relaunches).
+        if ContactsStore.shared.meet(CharacterRegistry.juanitaID, body: standIn) {
+            diag("contacts.met", ["who": "juanita", "event": "greeting"])
+        }
         schedulePatienceTimer(for: standIn)
     }
 
@@ -856,6 +1050,7 @@ enum AdministrationReception {
         diag("juanita.gesture", ["mood": "\(mood)", "target": directionsTarget?.rawValue ?? "none",
                                  "voice": t.voice != nil, "silent": silent, "jabs": t.jabs, "duration": t.total])
         busyUntil = CACurrentMediaTime() + t.total
+        pauseIdleLife(on: standIn, for: t.total)                      // Oct 11: the routine owns her face
         func rot(_ x: CGFloat = 0, _ y: CGFloat = 0, _ z: CGFloat = 0, _ d: Double) -> SCNAction {
             .rotateTo(x: x, y: y, z: z, duration: d, usesShortestUnitArc: true)
         }
@@ -914,6 +1109,10 @@ enum AdministrationReception {
         case (_, true): HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.08, up: 0.7, hold: max(0, t.lowerAt - 0.7), down: 0.8)
         case (.exasperated, _): HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.12, up: 0.14, hold: max(0, t.lowerAt - 0.14))
         case (.impatient, _): HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.05, up: 0.12, hold: max(0, t.lowerAt - 0.12), down: 0.35)
+        // Oct 11 (more life): welcoming / friendly, she draws herself up a
+        // little to give the directions -- a modest perk, not a temper.
+        case (.welcome, _), (.friendly, _):
+            HallwaysianJuanita.raiseNeck(on: standIn, rise: 0.03, up: 0.3, hold: max(0, t.lowerAt - 0.3), down: 0.6)
         default: break
         }
 
@@ -1133,7 +1332,7 @@ extension AdministrationReception {
     /// little askew, ~0.24 m high. Origin at its base.
     static let boosterHeight: Float = 0.24
     static let boosterTopName = "administrationOfficeBoosterTop"
-    private static func makeBoosterStack() -> SCNNode {
+    static func makeBoosterStack() -> SCNNode {          // Oct 11: also the audition (Mr. Tinky's seat)
         let root = SCNNode()
         root.name = "administrationOfficeBooster"
         let pages = material(UIColor(red: 0.93, green: 0.9, blue: 0.82, alpha: 1), rough: 0.95)

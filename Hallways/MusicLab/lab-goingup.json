@@ -1,0 +1,77 @@
+{
+ "id": "going-up",
+ "title": "Going Up!",
+ "subtitle": "Hallways Originals #2",
+ "genre": "Swing",
+ "order": 2,
+ "bpm": 168,
+ "beatsPerBar": 4,
+ "loopFrames": 4032000,
+ "sampleRate": 44100,
+ "parts": [
+  {
+   "id": "juanita",
+   "musician": "Juanita",
+   "instrument": "trumpet",
+   "color": "#C8553D",
+   "loop": "lab-goingup-loop-juanita.caf",
+   "performance": "lab-goingup-perf-juanita.m4a"
+  },
+  {
+   "id": "tinky",
+   "musician": "Tinky",
+   "instrument": "drums",
+   "color": "#8A9BA8",
+   "loop": "lab-goingup-loop-tinky.caf",
+   "performance": "lab-goingup-perf-tinky.m4a"
+  },
+  {
+   "id": "gloria",
+   "musician": "Gloria",
+   "instrument": "upright bass",
+   "color": "#5B4B8A",
+   "loop": "lab-goingup-loop-gloria.caf",
+   "performance": "lab-goingup-perf-gloria.m4a"
+  },
+  {
+   "id": "eileen",
+   "musician": "Eileen",
+   "instrument": "piano",
+   "color": "#2E8B6E",
+   "loop": "lab-goingup-loop-eileen.caf",
+   "performance": "lab-goingup-perf-eileen.m4a"
+  },
+  {
+   "id": "telephone",
+   "musician": "Telephone",
+   "instrument": "tenor sax",
+   "color": "#D49A2A",
+   "loop": "lab-goingup-loop-telephone.caf",
+   "performance": "lab-goingup-perf-telephone.m4a"
+  },
+  {
+   "id": "chair",
+   "musician": "Chair",
+   "instrument": "trombone",
+   "color": "#9C5B3B",
+   "loop": "lab-goingup-loop-chair.caf",
+   "performance": "lab-goingup-perf-chair.m4a"
+  },
+  {
+   "id": "camera",
+   "musician": "Camera",
+   "instrument": "vibraphone",
+   "color": "#3C7DBF",
+   "loop": "lab-goingup-loop-camera.caf",
+   "performance": "lab-goingup-perf-camera.m4a"
+  },
+  {
+   "id": "pottle",
+   "musician": "Pottle",
+   "instrument": "clarinet",
+   "color": "#B0517E",
+   "loop": "lab-goingup-loop-pottle.caf",
+   "performance": "lab-goingup-perf-pottle.m4a"
+  }
+ ]
+}

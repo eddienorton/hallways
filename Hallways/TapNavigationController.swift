@@ -52,6 +52,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private(set) var eyeHeight: Float
     /// Units/sec while animating between cell centers.
     private let travelSpeed: Double = 6.0
+    /// Oct 20 ("automatic walking feels a little too fast"): every AUTOMATIC walk
+    /// -- a tap walk (and the glides a tap on a door or a desk makes), the
+    /// continuous walk (following a critter, a Smart Tap walk) and the latched
+    /// walk with no finger on it -- goes at 0.8 of its old pace. Not changed: the
+    /// hand-held walk and drags, the elevator (its threshold walk and rides),
+    /// residents, turning and looking, and an escort's walk (Mr. Tinky's, and GO
+    /// to his desk after the ID: their pacing stays exactly as it was).
+    static let autoWalkSpeedScale: Double = 0.8
+    /// The continuous walk's pace factor: the escort's own walk is left as it was.
+    static func continuousWalkPaceScale(escorting: Bool) -> Double { escorting ? 1 : autoWalkSpeedScale }
+    /// A tap walk's speed (m/s).
+    var autoWalkSpeed: Double { travelSpeed * Self.autoWalkSpeedScale }
     // Aspect-compensated lighting (see header note above).
     private weak var scene: SCNScene?
     private weak var headlampLight: SCNLight?
@@ -79,6 +91,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Oct 7: the player's cell just changed (Administration: leaving the
     /// counter stops Juanita's patience timer).
     var onCellChanged: ((GridCoordinate) -> Void)?
+    /// Oct 24 (onboarding polish): the player's heading changed (after a turn settles).
+    var onFacingChanged: ((Direction) -> Void)?
+    /// Oct 11: the PLAYER opened a Room Entrance door (tap or WALK) -- not a character.
+    var onRoomEntranceDoorOpened: ((GridCoordinate) -> Void)?
     /// Fired (main thread, same as onReachedEnd) INSTEAD of it, at the
     /// exact same scheduled arrival moment, when the player took
     /// camera control during this ride (playerHasTakenElevatorCameraControl).
@@ -106,6 +122,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Oct 5 (elevator staging): fired the moment a valid floor button is
     /// pressed, so the destination floor can be built during the ride.
     var onElevatorDestinationChosen: ((Int) -> Void)?
+    /// Oct 24 (onboarding polish): the floor the building is about to press for the
+    /// player (Admission's first ride), known ~2 s before the press -- so it can
+    /// start being prepared early for the shorter ride.
+    var onElevatorDestinationForeseen: ((Int) -> Void)?
     /// Fired (main thread, same as onReachedEnd) the instant a cash
     /// object is absorbed, with its dollar value -- ContentView wires
     /// this straight to MazeStore.addMoney(_:). Kept as a callback
@@ -195,6 +215,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             guard oldValue != facing else { return }
             diag("nav.facing", ["facing": facing, "from": oldValue, "cell": currentCell])   // Oct 8 flight recorder
             refreshFloorMapTexture()
+            onFacingChanged?(facing)
         }
     }
 
@@ -334,9 +355,18 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// isMissionComplete. Same one-Bool shape as checkersWon.
     @Published private(set) var woidleWon = false { didSet { refreshElevatorMissionSign() } }
     private(set) var extinguisherRestingTransforms: [GridCoordinate: (position: SCNVector3, eulerAngles: SCNVector3, scale: SCNVector3)]
-    private var extinguishedFireCoords: Set<GridCoordinate> = [] { didSet { refreshElevatorMissionSign() } }
+    private var extinguishedFireCoords: Set<GridCoordinate> = [] {
+        didSet {
+            refreshElevatorMissionSign()
+            // Oct 11 (resume): a fire put out stays out -- across floors and relaunches.
+            if !decorateModeEnabled {
+                ResumeState.markConsumed(.fire, floor: floorNumber, coords: extinguishedFireCoords.subtracting(oldValue))
+            }
+        }
+    }
     @Published private(set) var carryingExtinguisher = false
-    private var carriedExtinguisherNode: SCNNode?
+    // (Oct 16 II: what is SEEN in hand is ToolBelt's -- holdHallwayExtinguisher /
+    // dropHallwayExtinguisher. The old separate camera-attached node is gone.)
     private var extinguisherPickupInProgress = false
     private var pickedUpExtinguisherCoords: Set<GridCoordinate> = []
     private var extinguishingFireCoords: Set<GridCoordinate> = []
@@ -347,7 +377,15 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// re-adds each named node back into the scene, so Reset genuinely
     /// starts the floor over instead of leaving already-picked-up
     /// objects permanently missing.
-    private var collectedCoords: Set<GridCoordinate> = [] { didSet { refreshElevatorMissionSign() } }
+    private var collectedCoords: Set<GridCoordinate> = [] {
+        didSet {
+            refreshElevatorMissionSign()
+            // Oct 11 (resume): a collected object stays collected -- across floors and relaunches.
+            if !decorateModeEnabled {
+                ResumeState.markConsumed(.object, floor: floorNumber, coords: collectedCoords.subtracting(oldValue))
+            }
+        }
+    }
     /// Sept 21 (DECORATE one-cell movement): mirrors DecoratorState's
     /// `enabled` flag, kept in sync by ContentView's HallwaySceneView
     /// (see its updateUIView wiring block) rather than importing
@@ -641,15 +679,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Returns a description of the player's touch gesture in progress
     /// right now (nil = no finger mid-gesture).
     var activeTouchGesture: (() -> String?)?
-    /// Readable cadence: destination number lands 5.0 seconds after travel starts.
+    /// Readable cadence: the destination number lands leadIn + ElevatorTiming.ride(floors:) after travel starts.
     /// This schedules digits only; there is no separate travel/arrival timer.
     static let elevatorIndicatorLeadIn: TimeInterval = 0.5
     static let elevatorIndicatorCountingSpan: TimeInterval = 4.5
+    /// Oct 24 (onboarding polish): the first ride, Lobby -> Administration, which
+    /// the building presses for the player (admissionAutoFloor): from the press to
+    /// the destination number (the hand-off) in the depart beat + this, ~2.5 s
+    /// (was 0.1 + 0.5 + ElevatorTiming.ride(1) = ~7.5 s with "1" showing). Only
+    /// that ride: the escort's and the player's own rides keep their timing; the
+    /// doors, chime, indicator and arrival hand-off are the same as ever.
+    static let admissionRideSeconds: TimeInterval = 2.4
+    // Oct 24 (later): the escort's ride (Tinky's, Floor 2 -> 3, guidedAutoFloor)
+    // uses the same short pace. Both are the building's own one-floor rides; any
+    // other scripted ride keeps the ordinary timing unless it is named here.
 
+    /// Oct 18 (open the building): the car's one timing (ElevatorTiming -- the same
+    /// as residents' rides, the hall signs and the scheduler): 35% slower than the
+    /// old fixed 4.5 s count, and longer for a longer run. (Was: leadIn +
+    /// elevatorIndicatorCountingSpan * step / steps.)
     static func elevatorIndicatorStepDelay(step: Int, steps: Int) -> TimeInterval {
-        elevatorIndicatorLeadIn + elevatorIndicatorCountingSpan * Double(step) / Double(max(1, steps))
+        elevatorIndicatorLeadIn + ElevatorTiming.passing(step: step, of: max(1, steps))
     }
     private static let elevatorRecentreActionKey = "elevatorRecentre"
+    /// Oct 18 (open the building): this floor's elevator surround (the shaft's
+    /// sounds come from here), nil before a floor is built.
+    var elevatorExteriorNode: SCNNode? { scene?.rootNode.childNode(withName: "elevatorExteriorFrame", recursively: true) }
 
     /// Floors that exist (set by ContentView); a button for any other number
     /// just clicks.
@@ -872,6 +927,26 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// office computer until they are standing again where they were
     /// (OfficeComputer drives the camera meanwhile). Blocks walking/turning.
     var isSeatedAtComputer = false
+    /// Oct 11 (the staff meeting): true from the moment the player starts
+    /// sitting down at the conference table until they are standing again
+    /// (ConferenceMeeting drives the camera meanwhile). Blocks walking/turning.
+    var isSeatedInMeeting = false
+
+    /// Oct 11 (the staff meeting): ConferenceMeeting's stand-up glide has
+    /// brought the camera out beside the table to `position` facing `yaw`.
+    /// Same settle as getting up from the office computer.
+    func finishStandingFromMeeting(at position: SCNVector3, yaw: Double) {
+        cameraNode.position = SCNVector3(position.x, eyeHeight, position.z)
+        cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+        let cell = FreeWalkGeometry.containingCell(x: Double(position.x), z: Double(position.z), cellSize: Double(cellSize))
+        if cells.contains(cell) {
+            applyArrival(cell: cell, heading: nearestCardinal(toYaw: yaw))
+        } else {
+            diag("meeting.stand.cellMismatch", ["cell": cell, "kept": currentCell])
+        }
+        isSeatedInMeeting = false
+        diag("meeting.stood", ["cell": currentCell, "facing": facing, "yaw": yaw])
+    }
 
     /// Oct 7 (F, getting up): the player has stood up from the office
     /// computer and OfficeComputer's glide has brought the camera round the
@@ -891,7 +966,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         diag("computer.stood", ["cell": currentCell, "facing": facing, "yaw": yaw])
     }
 
-    var canRotate: Bool { !isSeatedAtComputer && activePictureMenu == nil && activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty }
+    var canRotate: Bool { !isSeatedAtComputer && !isSeatedInMeeting && activePictureMenu == nil && activePhotoBooth == nil && activeTicTacToeTerminal == nil && activeShellGameTerminal == nil && activeRockPaperScissorsTerminal == nil && activeHigherLowerTerminal == nil && activeFiveCardDrawTerminal == nil && activeSimonTerminal == nil && activeHangmanTerminal == nil && activeConnectFourTerminal == nil && activeCheckersTerminal == nil && activeWoidleTerminal == nil && !isAnimating && !isDragRotating && !isDragMoving && !elevatorInUse && !chuteInUse && !extinguisherPickupInProgress && extinguishingFireCoords.isEmpty && !evictionLocked }
 
     private enum SegmentPhase {
         case pivot      // rotating in place, position unchanged
@@ -1052,6 +1127,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// The current building, as FreeWalkGeometry sees it (cells + every
     /// open boundary, from the same openRunLength legality the grid walks use).
     func makeFreeWalkGeometry(blockingActiveFires: Bool = true) -> FreeWalkGeometry {
+        let perf = PerfMonitor.begin("geometry.build"); defer { PerfMonitor.end(perf) }   // Oct 21: measurement only
         // Oct 4 FREDDY SLICE: a still-burning fire's cell is closed to free
         // walking exactly like a shut door (the grid walk already refused to
         // enter it; the free walk had no fire rule at all). Out = open again.
@@ -1069,6 +1145,224 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         var geometry = FreeWalkGeometry(cells: cells, openEdges: open, cellSize: Double(cellSize))
         geometry.keepOuts = characterKeepOuts                          // Oct 9: Juanita's conversational distance
         return geometry
+    }
+
+    // MARK: Oct 16 -- BONZO'S EVICTION: the controller's side (BonzoEviction drives)
+    //
+    // While evictionLocked the player has no say: canRotate is false (every
+    // walk, turn, glide and HUD action refuses), the gesture handlers return
+    // early (ContentView), and no resume point is saved. The scripted parts use
+    // the controller's own elevator: put down on the landing, openElevator(),
+    // the building presses LOBBY (guidedAutoFloor), the ordinary arrival.
+
+    /// Set by BonzoEviction only.
+    var evictionLocked = false
+
+    /// Why the Big Shot may NOT grab the player right now (nil = he may).
+    func evictionRefusal() -> String? {
+        if decorateModeEnabled { return "decorate" }
+        if isSeatedAtComputer || isSeatedInMeeting { return "seated" }
+        if elevatorInUse || elevatorAwaitingEntryDirection != nil || isElevatorWaitingForFloor || arrivedElevatorDoorOpen {
+            return "elevator"
+        }
+        if chuteInUse || extinguisherPickupInProgress || !extinguishingFireCoords.isEmpty { return "busy" }
+        if activePictureMenu != nil || activePhotoBooth != nil || activeTicTacToeTerminal != nil || activeShellGameTerminal != nil
+            || activeRockPaperScissorsTerminal != nil || activeHigherLowerTerminal != nil || activeFiveCardDrawTerminal != nil
+            || activeSimonTerminal != nil || activeHangmanTerminal != nil || activeConnectFourTerminal != nil
+            || activeCheckersTerminal != nil || activeWoidleTerminal != nil { return "interaction" }
+        if pendingWallInteraction != nil { return "approach" }
+        if isAnimating && phase != .freeMove { return "moving" }          // (a step, turn or glide still under way)
+        if characterUsingElevator { return "elevatorBusy" }
+        if !elevatorReachableFloors.contains(1) || elevatorDoorwayFrame() == nil || elevatorMountDirection == nil { return "noLobbyRide" }
+        return nil
+    }
+
+    /// The grab: every movement of the player's stops where it is.
+    func evictionStopMovement() {
+        stopWalkLatch(reason: "eviction")
+        stopContinuousWalk(reason: "eviction")
+        if isFreeTapWalking { stopFreeTapWalk() }
+        setWalkingHeld(false)
+        cancelPendingWallInteraction("eviction")
+    }
+
+    /// This floor's elevator landing (cell centre, x/z) and the way out of the cab (unit, x/z).
+    func evictionLanding() -> (center: SIMD2<Float>, outward: SIMD2<Float>, cell: GridCoordinate)? {
+        guard let frame = elevatorDoorwayFrame() else { return nil }
+        let p = worldPosition(for: endCell)
+        return (SIMD2<Float>(p.x, p.z), frame.outward, endCell)
+    }
+
+    /// Floor 1: the walk from the elevator landing to the entrance -- cell
+    /// centres along the shortest open way (doors and walls as the player's own
+    /// walk has them), and the heading that faces the entrance doors.
+    func evictionRouteToEntrance() -> (points: [SIMD2<Float>], entranceHeading: SIMD2<Float>)? {
+        let g = makeFreeWalkGeometry()
+        var previous: [GridCoordinate: GridCoordinate] = [endCell: endCell]
+        var queue = [endCell]
+        var i = 0
+        while i < queue.count, previous[startCell] == nil {
+            let c = queue[i]; i += 1
+            for d in Direction.allCases where g.openEdges.contains(FreeWalkGeometry.Edge(cell: c, direction: d)) {
+                let n = GridCoordinate(row: c.row + d.delta.row, col: c.col + d.delta.col)
+                if previous[n] == nil { previous[n] = c; queue.append(n) }
+            }
+        }
+        guard previous[startCell] != nil else { return nil }
+        var cells = [startCell]
+        while let last = cells.last, last != endCell, let p = previous[last] { cells.append(p) }
+        cells.reverse()
+        let points = cells.map { c -> SIMD2<Float> in let w = worldPosition(for: c); return SIMD2<Float>(w.x, w.z) }
+        let out = startFacing.opposite
+        return (points, SIMD2<Float>(Float(out.delta.col), Float(out.delta.row)))
+    }
+
+    /// The lobby: the player is out of the cab (carried) -- forget the arrival's
+    /// in-the-cab state, so the street's reset puts them at the entrance, not
+    /// back at the elevator landing.
+    func evictionLeftCab() {
+        elevatorAwaitingEntryDirection = nil
+        elevatorEntryCellCenterPosition = nil
+    }
+
+    /// An eviction that couldn't go on: whatever the controller thought, the
+    /// player is where the camera is now -- that cell, the nearest compass
+    /// facing, out of any cab state, on legal floor (else that cell's centre).
+    func evictionResync() {
+        evictionLeftCab()
+        cameraNode.removeAllActions()
+        let g = makeFreeWalkGeometry()
+        let p = cameraNode.position
+        var cell = g.containingCell(x: Double(p.x), z: Double(p.z), previous: currentCell)
+        if !cells.contains(cell) { cell = currentCell }
+        if !g.isLegal(x: Double(p.x), z: Double(p.z)) {
+            let c = worldPosition(for: cell)
+            cameraNode.position = SCNVector3(c.x, eyeHeight, c.z)
+        } else {
+            cameraNode.position = SCNVector3(p.x, eyeHeight, p.z)
+        }
+        let yaw = Double(cameraNode.eulerAngles.y)
+        cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+        isAnimating = false
+        if phase == .freeMove { phase = .translate }
+        currentCell = cell
+        facing = nearestCardinal(toYaw: yaw)
+        diag("bonzo.resync", ["cell": cell, "facing": "\(facing)"])
+    }
+
+    /// Put down on the landing, square to the doors -- then the doors open
+    /// (openElevator: all its own checks). False = the elevator refused.
+    func evictionBoard() -> Bool {
+        guard let mount = elevatorMountDirection else { return false }
+        cameraNode.removeAllActions()
+        let p = worldPosition(for: endCell)
+        let yaw = Double(cameraNode.eulerAngles.y)
+        cameraNode.position = SCNVector3(p.x, eyeHeight, p.z)
+        cameraNode.eulerAngles = SCNVector3(0, Float(yaw + shortestDelta(from: yaw, to: mount.yaw)), 0)
+        isAnimating = false
+        if phase == .freeMove { phase = .translate }
+        currentCell = endCell
+        facing = mount
+        openElevator()
+        return elevatorInUse
+    }
+
+    // MARK: Oct 16 -- WALK LATCH (the one minimal tap-to-walk experiment)
+    //
+    // The ordinary held walk (long-press) is the steering wheel and the
+    // accelerator. The latch only lets it keep going with no finger down: a
+    // tap on empty scene starts the held walk latched; with no finger it
+    // walks straight on at its pace; any touch-and-drag (or long-press) IS the
+    // ordinary held walk again -- same steering, same throttle, same speeds --
+    // and lifting the finger goes back to walking on; a tap stops it. Nothing
+    // about steering, speed, collision or GO changes. Off: `-HallwaysNoWalkLatch YES`
+    // (and with `-HallwaysClassicControls YES`).
+
+    static var walkLatchOn: Bool { SmartTap.isOn && !UserDefaults.standard.bool(forKey: "HallwaysNoWalkLatch") }
+    /// Written on main, read by the render loop (the walkingHeld convention).
+    private(set) var walkLatched = false
+    /// A turn still to finish after the finger lifted (render loop).
+    private var latchTurnTarget: Double?
+    private var latchStall: Double = 0
+    /// Oct 16 (Bonzo PP, Part 1): the latched walk's cruising pace, as a share of
+    /// the held walk's (about 13 % slower). Render loop only (latchPaceScale).
+    /// (Floor 4 PP: 0.87 was still too quick -- another ~17 % off: 0.72.)
+    static let walkLatchPace: Double = 0.72
+    private var latchPaceScale: Double = 1
+
+    /// A latched walk is running (finger down or not).
+    var isWalkLatched: Bool { walkLatched && freeMoveHeld && isAnimating && phase == .freeMove }
+
+    /// Oct 20 (night): a tap this far off the view's own heading (horizontal
+    /// bearing to the tapped point) is not "walk on" but "go over there".
+    static let latchAheadTolerance: Double = 15 * .pi / 180
+
+    /// The tap lands roughly straight ahead of the view (nil bearing: ahead).
+    func tapAimsAhead(_ direction: (x: Double, z: Double)?) -> Bool {
+        Self.aimsAhead(direction, yaw: Double(cameraNode.eulerAngles.y))
+    }
+
+    /// Pure (tests): `direction` (x, z, unit) within latchAheadTolerance of `yaw`'s forward.
+    static func aimsAhead(_ direction: (x: Double, z: Double)?, yaw: Double) -> Bool {
+        guard let d = direction else { return true }
+        let bearing = atan2(-d.x, -d.z)                                   // (yaw h faces (-sin h, -cos h))
+        let off = atan2(sin(bearing - yaw), cos(bearing - yaw))
+        return abs(off) <= latchAheadTolerance
+    }
+
+    /// Tap on empty scene, standing still: the held walk, latched. False =
+    /// it can't start right now (the tap is the ordinary tap it always was).
+    func startWalkLatch() -> Bool {
+        guard Self.walkLatchOn, !walkLatched, !walkingHeld, continuousWalkState == .stopped, canRotate,
+              freeWalkApplies(held: true) else { return false }
+        walkLatched = true
+        latchTurnTarget = nil
+        latchStall = 0
+        heldDistance = 0
+        beginFreeHeldWalk()
+        guard freeMoveHeld, isAnimating, phase == .freeMove else {
+            walkLatched = false
+            return false
+        }
+        diag("walkLatch.start", ["cell": currentCell, "yaw": Double(cameraNode.eulerAngles.y)])
+        scheduleWalkLatchWatch()
+        return true
+    }
+
+    /// While latched with no finger down: anything that takes movement away
+    /// (an interaction opening, the elevator, a seat, a script, Decorate) ends it.
+    private func scheduleWalkLatchWatch() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.isWalkLatched else { return }
+            if !self.walkingHeld, let reason = self.continuousWalkBlockReason {
+                self.stopWalkLatch(reason: reason)
+                return
+            }
+            self.scheduleWalkLatchWatch()
+        }
+    }
+
+    /// Tap while latched: stop. With no finger down the walk ends where it is
+    /// on the next frame (exactly as letting go of a long-press always did).
+    func stopWalkLatch(reason: String) {
+        guard walkLatched else { return }
+        walkLatched = false
+        latchTurnTarget = nil
+        diag("walkLatch.stop", ["reason": reason, "cell": currentCell])
+    }
+
+    /// A fast horizontal swipe on a latched walk: the standing swipe's own
+    /// quarter-turn snap -- the next compass direction that way -- finished
+    /// by the walk at the held walk's turn rate.
+    func latchFlickTurn(left: Bool) {
+        guard isWalkLatched, !walkingHeld else { return }
+        // The next compass direction that way from where the view is now (at least 10 degrees on).
+        let current = Double(cameraNode.eulerAngles.y)
+        let deltas = Direction.allCases.map { shortestDelta(from: current, to: $0.yaw) }
+        let ahead = deltas.filter { left ? $0 > 0.17 : $0 < -0.17 }
+        guard let delta = left ? ahead.min() : ahead.max() else { return }
+        latchTurnTarget = current + delta
+        diag("walkLatch.flick", ["left": left, "degrees": Int((delta * 180 / .pi).rounded())])
     }
 
     /// Whether a player-controlled walk takes the free path right now.
@@ -1155,6 +1449,24 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cancelPendingWallInteraction("tap to stop")
         freeTapStopRequested = true
         navLog("free walk tap: stop requested")
+    }
+
+    /// A tap walk's timing (pure; Oct 20 -- moved here unchanged from
+    /// beginFreeWalkTap, its speed now passed in): how long it takes, its ramp
+    /// (0: the old one-cell smoothstep), and how long its turn takes.
+    static func tapWalkTiming(distance: Double, cellSize: Double, speed: Double, approach: Bool,
+                              turnAcrossWholeGlide: Bool) -> (duration: Double, ramp: Double, turn: Double) {
+        let oneCell = cellSize / speed
+        if distance > cellSize + 1e-6 {
+            let duration = distance / speed + freeTapRamp
+            // Oct 2: a wall-composition glide (only) turns across the whole
+            // approach, so it never arrives side-on and crabs into place.
+            return (duration, freeTapRamp, turnAcrossWholeGlide ? duration : oneCell)
+        }
+        // exactly the old tap glide
+        var duration = distance / speed
+        if approach { duration = max(duration, oneCell) }   // approach: always a full, unhurried turn
+        return (duration, 0, duration)
     }
 
     /// Distance along a tap walk after `elapsed` seconds: constant speed
@@ -1622,11 +1934,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// around it -- periodic, at each floor install and just before a report
     /// is shared (see DiagnosticRecorder.snapshotProvider). Reads only.
     func diagStateSnapshot(_ reason: String) {
+        let perf = PerfMonitor.begin("diag.snapshot"); defer { PerfMonitor.end(perf) }    // Oct 21: measurement only
         let p = cameraNode.position
         // Oct 9 (heating investigation): render rate, thermal state and the
         // floor's light census -- measurement only.
         RenderHealth.shared.startWatching()
-        let census = RenderHealth.census(scene?.rootNode)
+        // Oct 21: timed on its own; skipped (nodes=-1) with -HallwaysPerfNoCensus YES.
+        let census: (nodes: Int, lights: Int, byKind: String)
+        if PerfSwitches.noCensus {
+            census = (-1, -1, "skipped(PerfNoCensus)")
+        } else {
+            let c = PerfMonitor.begin("diag.census")
+            census = RenderHealth.census(scene?.rootNode)
+            PerfMonitor.end(c)
+        }
         diag("snapshot.render", [
             "reason": reason,
             "floor": floorNumber,
@@ -1658,6 +1979,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             "elevatorRide": isElevatorRideInProgress,
             "elevatorWaiting": isElevatorWaitingForFloor,
             "seated": isSeatedAtComputer,
+            "seatedInMeeting": isSeatedInMeeting,
             "phoneLift": Double(HallPhone.shared.lift),
             "phoneScreen": "\(HallPhone.shared.screen)",
             "journey": GuidedJourney.trip.map { "\($0.stage)" } ?? "none",
@@ -1669,8 +1991,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     var diagCanRotateBlockers: String {
         var b: [String] = []
         if isAnimating { b.append("animating") }
+        if evictionLocked { b.append("evictionLocked") }                   // (Oct 16)
         if isDragRotating { b.append("dragRotating") }
         if isSeatedAtComputer { b.append("seatedAtComputer") }
+        if isSeatedInMeeting { b.append("seatedInMeeting") }
         if isDragMoving { b.append("dragMoving") }
         if elevatorInUse { b.append("elevatorInUse") }
         if chuteInUse { b.append("chuteInUse") }
@@ -1743,22 +2067,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         freeTapEndYaw = finalYaw.map { Self.yaw(facing: FreeWalkGeometry.forward(yaw: $0), near: startYaw) }
             ?? travelDirection.map { Self.yaw(facing: $0, near: startYaw) } ?? startYaw
         segmentProgress = 0
-        let oneCell = Double(cellSize) / travelSpeed
-        if distance > Double(cellSize) + 1e-6 {
-            freeTapRampTime = Self.freeTapRamp
-            freeTapDuration = distance / travelSpeed + Self.freeTapRamp
-            // Oct 2: a wall-composition glide (only) turns across the whole
-            // approach, so it never arrives side-on and crabs into place.
-            freeTapTurnDuration = turnAcrossWholeGlide ? freeTapDuration : oneCell
-        } else {                                   // exactly the old tap glide
-            freeTapRampTime = 0
-            freeTapDuration = distance / travelSpeed
-            freeTapTurnDuration = freeTapDuration
-            if finalYaw != nil {                   // approach: always a full, unhurried turn
-                freeTapDuration = max(freeTapDuration, oneCell)
-                freeTapTurnDuration = freeTapDuration
-            }
-        }
+        // (Oct 20: at the automatic walks' pace -- autoWalkSpeedScale)
+        let timing = Self.tapWalkTiming(distance: distance, cellSize: Double(cellSize), speed: autoWalkSpeed,
+                                        approach: finalYaw != nil, turnAcrossWholeGlide: turnAcrossWholeGlide)
+        freeTapRampTime = timing.ramp
+        freeTapDuration = timing.duration
+        freeTapTurnDuration = timing.turn
         let walks = distance > 0.05
         freeTapStopRequested = false
         if cruiseActive || continuousWalkState != .stopped { stopContinuousWalk(reason: "tapWalk") }
@@ -1853,6 +2167,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         continuousRun = true
         heldSteeringActive = false
         heldThrottle = 1
+        latchPaceScale = 1                                          // (Oct 16: a new walk starts at full pace)
         phase = .freeMove
         isAnimating = true
         // Oct 2 (final audio rule): a hold started from standing is silent.
@@ -1892,6 +2207,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 guard let self else { return }
                 self.isAnimating = false
                 self.freeMoveHeld = false
+                if self.walkLatched, !self.walkingHeld { self.heldDistance = 0 }   // (Oct 16: the latch's pace ends with it)
+                self.walkLatched = false                            // (Oct 16: any end of the walk ends the latch)
+                self.latchTurnTarget = nil
                 self.heldSteeringActive = false
                 self.freeTapWalkActive = false
                 self.freeWalkFootstepsOn = false
@@ -1924,8 +2242,27 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     // outside this navigation update).
                     DispatchQueue.main.async { [weak self] in self?.landAtSpotIfApproaching() }
                 }
+                // Oct 20 (night): stopped right up at the closed elevator -- a step back
+                // to where its sign, doors and call buttons are all in view (after any
+                // landing above has had its turn: one that started wins).
+                DispatchQueue.main.async { [weak self] in self?.settleAtElevatorViewIfNeeded() }
             }
         }
+    }
+
+    /// Oct 22 (morning): following a critter, the player's walk spends much of
+    /// its time creeping behind it at the following gap -- and the footstep loop,
+    /// which never plays slower than an ordinary stride (SoundEffects.setWalkingPace
+    /// floors it at 1), ticked on at a full stride all through it; with the
+    /// critter walking just ahead, those steps read as the critter's.
+    /// Oct 22 (stability pass): even at a normal pace they still read as the
+    /// critter's (the player walks behind it in step), so while actively
+    /// following a critter the player's own steps are SILENT. They come back the
+    /// moment following ends (any other walk sets them as always). Escorts and
+    /// every other walk are exactly as before; no speed changes.
+    private func cruiseFootstepsWanted(moved: Double, dt: Double) -> Bool {
+        guard moved > 0.0005 else { return false }
+        return !cruiseGuidance.leaderBeside
     }
 
     /// Footsteps on/off, and (Oct 2) forward or backward loop while on. A
@@ -2132,6 +2469,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// TUNING: how far short of the decision's mouth (its near edge) the
     /// walk stops, metres. 0 = right at the mouth.
     static var smartWalkDecisionStopShort: Double = 0.4
+    /// Oct 11 (escort pacing): while a character escorts the player, WALK
+    /// keeps at least this far (metres, camera to the character's centre)
+    /// behind it -- braking smoothly to it on the ordinary braking curve and
+    /// picking up again as the guide moves on. Never overtakes, never pushes.
+    static let escortFollowGap: Double = 1.7
+    /// Oct 11: the held landing pitch (holdLandingPitch) -- which pose holds it.
+    var landingPitchKind: String?
+    var landingPitchGeneration = 0
     /// Where the last decision stop left the player, and its decision cell.
     private var cruiseDecisionStop: (cell: GridCoordinate, x: Float, z: Float)?
     /// Cells that are not decisions for this walk: where it started, and the
@@ -2148,15 +2493,27 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// (the existing LandingSpot.capsApproach -- conversation distance).
     private struct CruiseGuidance {
         var routeOnward: [GridCoordinate: Direction]? = nil
+        /// Oct 11: the escorting character's ground position (x, z), while escorting.
+        var leader: (x: Double, z: Double)? = nil
         var landingCaps: [(cell: GridCoordinate, face: Direction, x: Double, z: Double)] = []
+        /// Oct 20: the walk's pace factor (automatic walks 0.8; an escort's walk 1 -- as it was).
+        var paceScale: Double = TapNavigationController.autoWalkSpeedScale
+        /// Oct 20 (follow smoothness): the following gap holds with the critter
+        /// anywhere in front or to the side (round a corner) -- not only dead
+        /// ahead -- so the walk never sprints at a corner and brakes hard after it.
+        /// Following a critter only; an escort's walk keeps its own rule.
+        var leaderBeside = false
     }
     private var cruiseGuidance = CruiseGuidance()
     private var cruisePendingGuidance: CruiseGuidance?
 
     /// Main thread: what the walk should know about escorts and landings now.
     private func makeCruiseGuidance() -> CruiseGuidance {
+        let perf = PerfMonitor.begin("cruise.guidance"); defer { PerfMonitor.end(perf) }  // Oct 21: measurement only
         var guidance = CruiseGuidance()
-        if let route = CharacterLead.activeGuidedRoute, route.count >= 2 {
+        // (Oct 13: with no escort under way, GO's own route to Tinky's desk after the ID -- adminGoRoute.)
+        let adminRoute = adminGoRoute.flatMap { $0.contains(currentCell) ? $0 : nil }   // (only while still on it)
+        if let route = CharacterLead.activeGuidedRoute ?? adminRoute, route.count >= 2 {
             var onward: [GridCoordinate: Direction] = [:]
             for i in 0..<(route.count - 1) {
                 let a = route[i], b = route[i + 1]
@@ -2165,12 +2522,44 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 }
             }
             guidance.routeOnward = onward
+            if let p = CharacterLead.activeGuidePosition { guidance.leader = (Double(p.x), Double(p.y)) }
+            guidance.paceScale = Self.continuousWalkPaceScale(escorting: true)       // (Oct 20: the escort's pacing, untouched)
+        } else if let follow = followGuidance?(), follow.route.count >= 2 {
+            // Oct 20 (following a critter): the same escort walk -- its way, kept
+            // a following gap behind it (CritterFollow.swift supplies both).
+            var onward: [GridCoordinate: Direction] = [:]
+            for i in 0..<(follow.route.count - 1) {
+                let a = follow.route[i], b = follow.route[i + 1]
+                if let d = Direction.allCases.first(where: { $0.delta.row == b.row - a.row && $0.delta.col == b.col - a.col }) {
+                    onward[a] = d
+                }
+            }
+            guidance.routeOnward = onward
+            if let p = follow.leader { guidance.leader = (Double(p.x), Double(p.y)) }
+            guidance.leaderBeside = true
         }
         for spot in landingSpots where spot.capsApproach && (spot.isAvailable?() ?? true) {
             let p = landingPosition(spot)
             guidance.landingCaps.append((spot.face.coord, spot.face.direction, Double(p.x), Double(p.z)))
         }
+        // Oct 21: the walk toward Tinky stops in the anteroom (the centre of its cell).
+        if adminWalk == .towardTinky, adminRoute != nil {
+            let stop = Self.towardTinkyStop
+            guidance.landingCaps.append((stop.coord, stop.direction, Double(stop.coord.col) * Double(cellSize),
+                                         Double(stop.coord.row) * Double(cellSize)))
+        }
         return guidance
+    }
+
+    /// Does the following gap hold the walk back (pure)? The leader ahead along
+    /// the walk's direction `f` -- or, `beside` (following a critter), anywhere up
+    /// to well round to the side (within about 115 degrees of straight ahead):
+    /// round a corner from the player it still sets the pace. Behind: no.
+    static func leaderHolds(along f: (x: Double, z: Double), dx: Double, dz: Double, beside: Bool) -> Bool {
+        let dot = dx * f.x + dz * f.z
+        if dot > 0 { return true }
+        guard beside else { return false }
+        return dot > -0.42 * hypot(dx, dz)
     }
 
     /// Render thread: distance ahead to a capped landing spot's pose on this
@@ -2204,14 +2593,27 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let startYaw: Double, endYaw: Double
         let endHeading: Direction
         let serial: Int
+        /// Oct 12: a wide automatic corner's own pace (and an eased view); nil = the queued-turn rule.
+        var speed: Double? = nil
+        /// Oct 13: a SMOOTH corner's own path (nil = the quarter circle above).
+        var smooth: SmoothTurn? = nil
+        var route = false                     // Oct 13: an escort's turn (the guide's gap applies in it)
         var travelled: Double = 0
         var stall: Double = 0
-        var length: Double { radius * .pi / 2 }
+        var length: Double { smooth?.length ?? radius * .pi / 2 }
+        // Oct 13 (diagnostics): what the corner actually did.
+        var elapsed: Double = 0
+        var movedSum: Double = 0
+        var peakRate: Double = 0
+        var lastYaw: Double? = nil
+        var segment = 0
     }
 
     // Written on main, read by the render loop (same convention as walkingHeld).
     private var cruiseActive = false
     private var cruiseSession = 0
+    /// Oct 21: cruise watch passes (only for -HallwaysPerfSlowCruiseRebuild).
+    private var cruiseWatchPasses = 0
     private var cruiseRequest: (turn: ContinuousWalkTurn, serial: Int)?
     private var cruiseRequestSerial = 0
     // Render-loop state.
@@ -2250,6 +2652,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     static let cruiseDoorLead: Double = 1.5
     /// Speed through a doorway that has only just begun to swing open.
     static let cruiseDoorSpeed: Double = 3.5
+    /// The fast walk: the pace a sustained walk picks up after three cells (x the
+    /// normal walking speed, which is unchanged). Oct 19: 1.5 -> 1.35 (10% slower).
+    static let fastWalkPace: Double = 1.35
+    /// The classic held tap-walk's fast pace (after two cells). Oct 19: 1.6 -> 1.44 (10% slower).
+    static let fastWalkPaceClassic: Double = 1.44
     /// Run when the walk ends in front of something that refused it (e.g. the
     /// guarded Administration doors: Juanita's existing reaction).
     private var cruiseStopReaction: (() -> Void)?
@@ -2273,6 +2680,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Why a continuous walk can't run right now (nil = it can).
     private var continuousWalkBlockReason: String? {
         if isSeatedAtComputer { return "seatedAtComputer" }
+        if isSeatedInMeeting { return "seatedInMeeting" }
         if activePictureMenu != nil || activePhotoBooth != nil || activeTicTacToeTerminal != nil || activeShellGameTerminal != nil
             || activeRockPaperScissorsTerminal != nil || activeHigherLowerTerminal != nil || activeFiveCardDrawTerminal != nil
             || activeSimonTerminal != nil || activeHangmanTerminal != nil || activeConnectFourTerminal != nil
@@ -2296,7 +2704,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         case walk, stop, action(String), unavailable
         var label: String {
             switch self {
-            case .walk, .unavailable: return "WALK"
+            case .walk, .unavailable: return "GO"                // Oct 12: the WALK button now reads GO (display only)
             case .stop: return "STOP"
             case .action(let label): return label
             }
@@ -2344,8 +2752,19 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// player, judged by the same rules its tap uses (cell, facing, range,
     /// availability), or nil. Never a guess between several.
     func contextualTarget() -> HUDTarget? {
+        // Oct 12: THE BOX's REPLAY, offered for a few seconds after a tap on the projection screen.
+        if floorNumber == ConferenceRoom.floor, let replay = BoxReveal.replayTarget() { return replay }
+        // Oct 12 (the room remembers): during a REPLAY of THE BOX, SKIP.
+        if floorNumber == ConferenceRoom.floor, let skip = BoxReveal.skipTarget() { return skip }
+        // Oct 11 (the staff meeting): seated at the conference table, the one
+        // thing on offer is getting up again.
+        if isSeatedInMeeting { return ConferenceMeeting.standTarget() }
         guard !decorateModeEnabled, canRotate else { return nil }
         let yaw = Double(cameraNode.eulerAngles.y)
+        // Oct 11 (the staff meeting): the empty chair at the foot of the
+        // conference table, judged by the look at the chair itself (from the
+        // doorway cell it lies on a diagonal, so not by the cardinal facing).
+        if let target = ConferenceMeeting.sitTarget(controller: self, cell: currentCell, yaw: yaw) { return target }
         guard abs(shortestDelta(from: yaw, to: facing.yaw)) < Self.hudFacingTolerance else { return nil }
         let cell = currentCell, f = facing
         // The elevator (its call/board path, or stepping back into an open cab).
@@ -2353,7 +2772,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             if canReenterArrivedElevator {
                 return HUDTarget(label: "ENTER", kind: "elevatorReenter") { [weak self] in self?.advance(source: "HUD_ENTER") }
             }
-            if !elevatorInUse, !chuteInUse, !characterUsingElevator, elevatorAwaitingEntryDirection == nil,
+            if !elevatorInUse, !chuteInUse, !characterUsingElevator || characterCycleJoinable, elevatorAwaitingEntryDirection == nil,
                elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") == nil,
                isMissionComplete || !Self.missionGatesElevator, nextFloorNumber != floorNumber {
                 return HUDTarget(label: "OPEN", kind: "elevator") { [weak self] in self?.openElevator() }
@@ -2385,13 +2804,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 self?.composeWallView(kind, at: cell) { activate(cell) }
             }
         }
+        // Oct 11: carrying an extinguisher back to the empty bracket it came
+        // from -- hang it up again (it is otherwise carried until the floor
+        // is left; an accidental TAKE had no way back).
+        if carryingExtinguisher, extinguishingFireCoords.isEmpty, !extinguisherPickupInProgress,
+           pickedUpExtinguisherCoords.contains(cell), extinguisherCoords[cell] == f {
+            return HUDTarget(label: "RETURN", kind: "extinguisherReturn") { [weak self] in _ = self?.returnExtinguisher(at: cell) }
+        }
         // The wall extinguisher.
         if let coord = extinguisherAtCurrentCell {
             return HUDTarget(label: "TAKE", kind: "extinguisher") { [weak self] in _ = self?.pickUpExtinguisher(at: coord) }
         }
         let ahead = GridCoordinate(row: cell.row + f.delta.row, col: cell.col + f.delta.col)
-        // A live fire, only with the extinguisher in hand.
-        if carryingExtinguisher {
+        // A live fire, only with the extinguisher in hand (Oct 16: or one from Supplies).
+        if carryingExtinguisher || ToolBelt.carries(.extinguisher) {
             for coord in [cell, ahead] where fireCoords.contains(coord) && !extinguishedFireCoords.contains(coord) && canReachFire(at: coord) {
                 return HUDTarget(label: "SPRAY", kind: "fire") { [weak self] in _ = self?.extinguishFire(at: coord) }
             }
@@ -2401,8 +2827,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             return HUDTarget(label: "TAKE", kind: "pickup") { [weak self] in _ = self?.collectByTap(at: ahead) }
         }
         // The player's office computer, from inside the office, facing the desk.
+        // Oct 11 (USE fix): offered only when sitting down would actually be
+        // accepted -- sitDown also refuses while Mr. Tinky is still doing his
+        // goodbye at the desk (GuidedJourney.isPerformingInOffice), and USE
+        // used to stay lit then and do nothing at all.
         if floorNumber == PlayerOffice.floor, OfficeComputer.shared.phase == .off, let view = hudSceneView,
-           PlayerOffice.officeCells.subtracting(PlayerOffice.deskBayCells).contains(cell) {
+           PlayerOffice.officeCells.subtracting(PlayerOffice.deskBayCells).contains(cell),
+           OfficeComputer.shared.canSitDown(controller: self, view: view) {
             let desk = PlayerOffice.deskCenter, p = cameraNode.position
             let toDesk = atan2(-Double(desk.x - p.x), -Double(desk.y - p.z))
             if abs(shortestDelta(from: yaw, to: toDesk)) < Self.hudFacingTolerance + 10 * .pi / 180 {
@@ -2501,6 +2932,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     /// LEFT / RIGHT.
     func continuousWalkTurnTapped(_ turn: ContinuousWalkTurn) {
+        // Oct 12 (seated look): at the office computer LEFT/RIGHT turn the head.
+        if isSeatedAtComputer {
+            OfficeComputer.shared.turn(left: turn == .left)
+            return
+        }
         switch continuousWalkState {
         case .stopped:
             // In the elevator: the cab's own free look, as a quarter turn.
@@ -2523,11 +2959,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                makeFreeWalkGeometry().openEdges.contains(FreeWalkGeometry.Edge(cell: stop.cell, direction: target)) {
                 diag("cruise.decisionTurn", ["turn": "\(turn)", "toward": "\(target)", "decision": stop.cell])
                 startContinuousWalk()
-                if continuousWalkState != .stopped { queueContinuousWalkTurn(turn) }
-                return
+                if continuousWalkState != .stopped { queueContinuousWalkTurn(turn); return }
+                // (Oct 12: GO found no clear way from here -- the press is an ordinary pivot instead.)
+                guard continuousWalkBlockReason == nil, canRotate else { return }
             }
             cruiseDecisionStop = nil
             diag("cruise.pivot", ["turn": "\(turn)", "from": "\(facing)", "to": "\(target)"])
+            CruiseCornerNote.shared.post("PIVOT on the spot -- standing still, not at a junction stop")   // (Oct 13 diagnostics)
             rotate(toward: target, durationPerQuarterTurn: Self.pivotTurnDuration)
             hudPivotInFlight = isAnimating && phase == .pivot
         case .walking:
@@ -2553,6 +2991,10 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     func startContinuousWalk() {
         guard Self.continuousWalkExperimentOn, continuousWalkState == .stopped else { return }
+        if isWalkLatched { stopWalkLatch(reason: "go") }            // (Oct 16: GO takes over from a latched walk)
+        // Oct 11 (late, the cast audition): in the conference room, before
+        // the player has sat down, WALK takes them to their chair.
+        if ConferenceMeeting.interceptWalk(controller: self) { return }
         pendingHUDPivot = nil
         // A running tap walk ends in place first (same takeover a pinch uses).
         if isFreeTapWalking { takeOverFreeTapWalkForPinch() }
@@ -2618,10 +3060,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// The walk itself (movement is free right now).
     private func beginContinuousWalkMovement(preservingRequest: Bool = false) {
         cruiseStartDeadline = nil
-        cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
         freeWalkGeometry = makeFreeWalkGeometry()
         let position = cameraNode.position
         freeWalkCell = freeWalkGeometry?.containingCell(x: Double(position.x), z: Double(position.z), previous: currentCell) ?? currentCell
+        // Oct 12 (playtest: GO at an angle to a wall only nudged the view a few
+        // degrees, again and again): which way GO goes is decided HERE, from the
+        // corridor around the player -- not just the nearest compass direction
+        // of the camera, which can be the wall itself.
+        let startYaw = Double(cameraNode.eulerAngles.y)
+        adminGoRoute = makeAdminGoRoute()                            // Oct 13: after the ID, GO goes to Tinky
+        guard let startHeading = continuousWalkStartHeading(yaw: startYaw) else {
+            if continuousWalkState != .stopped { continuousWalkState = .stopped }
+            return                                                  // (any settle glide in flight finishes as it was)
+        }
+        cameraNode.removeAction(forKey: Self.freeLookAlignActionKey)
         freeMoveHeld = false
         freeTapWalkActive = false
         manualFootstepsFromAutoWalk = false
@@ -2651,10 +3103,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cruiseGeometryLock.unlock()
         cruiseDoorRequested = nil
         cruiseClock = 0
+        cruiseGentleUntil = 0                                       // (Oct 13)
+        smoothVeto = nil
         cruiseDoorSlowUntil = 0
         cruiseStopReaction = nil
-        let yaw = Double(cameraNode.eulerAngles.y)
-        cruiseHeadingYaw = yaw + shortestDelta(from: yaw, to: nearestCardinal(toYaw: yaw).yaw)
+        let yaw = startYaw
+        cruiseHeadingYaw = yaw + shortestDelta(from: yaw, to: startHeading.yaw)
+        if abs(cruiseHeadingYaw - yaw) > Self.cruiseAlignInPlace {   // (Oct 13 diagnostics)
+            CruiseCornerNote.shared.post("PIVOT -- GO turning onto the corridor before walking")
+        }
+        lastCruiseHeading = startHeading
         cruiseActive = true
         phase = .freeMove
         isAnimating = true
@@ -2663,8 +3121,330 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         } else {
             continuousWalkState = .walking
         }
-        diag("cruise.start", ["cell": currentCell, "heading": "\(nearestCardinal(toYaw: yaw))"])
+        diag("cruise.start", ["cell": currentCell, "heading": "\(startHeading)", "viewHeading": "\(nearestCardinal(toYaw: yaw))"])
         scheduleContinuousWalkWatch(session: cruiseSession)
+    }
+
+    // MARK: Oct 13 -- GO after the ID card (Administration, Floor 2)
+    //
+    // Once the card has been taken (Admission.isCompleted) and before Tinky's
+    // part of the prologue (his desk encounter still to come, no journey yet),
+    // GO from the reception floor walks the player to him: the room's own
+    // route finder (CharacterLead.route, the one the characters use) gives the
+    // cells from here to the spot in front of his desk; the walk follows it as
+    // it follows an escort's route (its corners, the office door opened by the
+    // walk's own door handling), turning the player round first if they face
+    // the kiosk; it ends on his desk's landing (capsApproach), which starts
+    // his encounter exactly as walking up to him does. Anything else: nil, GO
+    // as before.
+    private var adminGoRoute: [GridCoordinate]?
+
+    // MARK: Oct 15 -- Smart Tap entry points (ContentView's tap handler)
+
+    /// Smart Tap: walk to Tinky's desk along the room's route (the GO
+    /// behaviour above), when that route exists right now. True = walking.
+    func smartTapWalkToTinky() -> Bool {
+        guard continuousWalkState == .stopped else { return false }
+        cruiseDecisionStop = nil                                    // (an explicit request: no old junction stop applies)
+        guard makeAdminGoRoute() != nil else { return false }
+        startContinuousWalk()
+        return continuousWalkState != .stopped
+    }
+
+    /// Smart Tap: follow the escorting character (the escort walk WALK used
+    /// to start: his route, his pace, never overtaking). True = walking.
+    func smartTapFollowGuide() -> Bool {
+        guard continuousWalkState == .stopped, CharacterLead.activeGuidedRoute != nil else { return false }
+        startContinuousWalk()
+        return continuousWalkState != .stopped
+    }
+
+    // MARK: Oct 20 -- following a critter (CritterFollow.swift)
+
+    /// While a critter is followed: the way to it from here (cells) and where it
+    /// stands (nil: heading for the elevator after it). Read on the main thread.
+    var followGuidance: (() -> (route: [GridCoordinate], leader: SIMD2<Float>?)?)?
+
+    /// The walk the escort uses, toward the followed critter. True = walking.
+    func startFollowWalk() -> Bool {
+        guard continuousWalkState == .stopped, followGuidance?() != nil else { return false }
+        startContinuousWalk()
+        return continuousWalkState != .stopped
+    }
+
+    /// The player is steering by hand (a tap walk, a held or latched walk, a drag):
+    /// following lets go.
+    var playerIsSteering: Bool {
+        isFreeTapWalking || freeMoveHeld || walkingHeld || isWalkLatched || isDragMoving        // (looking around is not steering)
+    }
+
+    /// The direction the walk is going now (while walking). Oct 20 (later): the
+    /// walk's OWN heading (set as it starts, updated at each corner) -- not the
+    /// camera, which lags behind while the walk turns onto its way.
+    var walkHeading: Direction {
+        if cruiseActive, let h = lastCruiseHeading { return h }
+        return nearestCardinal(toYaw: Double(cameraNode.eulerAngles.y))
+    }
+
+    /// In the cab with the doors open: the panel's button for `floor`, pressed
+    /// as a tap on it would be -- the ID reader and all. True: departing.
+    @discardableResult
+    func pressElevatorFloorForFollow(_ floor: Int) -> Bool {
+        guard elevatorDoorsOpenIdle, floor != floorNumber, elevatorReachableFloors.contains(floor),
+              let cap = scene?.rootNode.childNode(withName: "elevatorControlButton_\(floor)", recursively: true) else { return false }
+        cap.removeAction(forKey: "press")
+        cap.runAction(.sequence([.moveBy(x: 0, y: 0, z: 0.006, duration: 0.06),
+                                 .moveBy(x: 0, y: 0, z: -0.006, duration: 0.14)]), forKey: "press")
+        ElevatorRideSound.click(on: cameraNode)
+        guard readEmployeeID(forFloor: floor, doors: "open") else { return false }      // (refused: as a tap would be)
+        let lit = SCNMaterial()
+        lit.lightingModel = .physicallyBased
+        lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
+        lit.emission.contents = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
+        lit.metalness.contents = 0.6
+        lit.roughness.contents = 0.3
+        cap.geometry?.materials = [lit]
+        cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)
+        diag("elevator.button.pressed", ["from": floorNumber, "to": floor, "doors": "open", "by": "follow"])
+        RocketElevator.markDeparture(from: floorNumber, to: floor)
+        closeWhenDoorwayClear(departTo: floor)
+        return true
+    }
+
+    /// Out of an arrived cab (the doors open) -- the same walk out a tap makes. True: stepping out.
+    @discardableResult
+    func stepOutOfElevatorForFollow() -> Bool {
+        guard canStartElevatorExit, !isAnimating, elevatorAwaitingEntryDirection != nil else { return false }
+        performElevatorEntryWalkOut()
+        return true
+    }
+
+    /// Oct 15 (direct interactions): a tap on the elevator's doors or call
+    /// panel from down the hall -- glide into the elevator's cell (the same
+    /// collision-slid glide a tap on any door makes), then exactly what a tap
+    /// there does: step back into an arrived cab, or open the doors (all of
+    /// openElevator's own checks: mission, ID, busy). A glide cut short
+    /// (round a corner) just ends there -- the elevator refuses, nothing else.
+    /// Oct 22 (hall call): then what a tap there does now -- `button` (+1 up, -1
+    /// down) pressed: that call; the doors: the call buttons framed (no call).
+    func approachElevatorAndOpen(button: Int? = nil) -> Bool {
+        guard currentCell != endCell, let mount = elevatorMountDirection, canRotate, !elevatorInUse else { return false }
+        let c = worldPosition(for: endCell)
+        return beginWallComposition(kind: "elevatorApproach", face: WallFace(coord: endCell, direction: mount),
+                                    at: SCNVector3(c.x, cameraNode.position.y, c.z)) { [weak self] in
+            guard let self else { return }
+            self.tapElevatorExterior(button: button)
+        }
+    }
+
+    /// Oct 15: glide to `position`, turning to `yaw` on the way (the short way
+    /// round), then run `interact` -- the door/kiosk landing's own glide, for
+    /// a pose that isn't square to a wall (the office filing cabinet).
+    @discardableResult
+    func approachPose(kind: String, position: SCNVector3, yaw: Double, then interact: @escaping () -> Void) -> Bool {
+        guard canRotate else { return false }
+        let start = cameraNode.position
+        let startYaw = Double(cameraNode.eulerAngles.y)
+        let targetYaw = startYaw + shortestDelta(from: startYaw, to: yaw)
+        let dx = Double(position.x - start.x), dz = Double(position.z - start.z)
+        let distance = (dx * dx + dz * dz).squareRoot()
+        if distance < 0.05 && abs(targetYaw - startYaw) < 0.05 { interact(); return true }
+        beginFreeWalkTap(travelDirection: distance > 1e-6 ? (dx / distance, dz / distance) : nil,
+                         travelDistance: distance, finalYaw: targetYaw, turnAcrossWholeGlide: true)
+        guard freeTapWalkActive else { return false }
+        pendingWallInteraction = (kind, targetYaw, interact)
+        return true
+    }
+
+    /// Where the landing `kind` would put the player (nil: no such spot now).
+    func landingSpotPosition(_ kind: String) -> SCNVector3? {
+        guard let spot = landingSpots.first(where: { $0.kind == kind && ($0.isAvailable?() ?? true) }) else { return nil }
+        return landingPosition(spot)
+    }
+
+    private func makeAdminGoRoute() -> [GridCoordinate]? {
+        // Oct 21 (one tap, one walk): an Administration walk asked for by a tap or the card.
+        if let walk = adminWalk { return makeAdminWalkRoute(walk) }
+        guard cruiseDecisionStop == nil,                            // (a LEFT/RIGHT from a junction stop is the player's)
+              currentFloorNumber == AdministrationReception.floor, Admission.isCompleted, !Admission.isPrologueCompleted,
+              GuidedJourney.trip == nil, CharacterLead.activeGuidedRoute == nil, FredOfficeEncounter.isAvailable else { return nil }
+        let goal = FredOfficeEncounter.landing.coord
+        let here = currentCell
+        let area = AdministrationExitGuard.receptionCells.union([AdministrationReception.officeDoorCell, AdministrationReception.officeAnteroom])
+        guard here != goal, area.contains(here), let context = FredLead.context ?? GuidedJourney.context,
+              let route = CharacterLead.route(from: here, to: goal, cells: context.cells, doors: context.doors), route.count >= 2 else {
+            return nil
+        }
+        diag("cruise.adminRoute", ["from": here, "to": goal, "cells": route.count])
+        // Oct 19: no on-screen "to Tinky's desk (n cells)" any more -- the route is
+        // unchanged; the distance stays in the diagnostics line above.
+
+        return route
+    }
+
+    // MARK: Oct 21 -- ONE TAP, ONE WALK (Administration)
+    //
+    // Two walks the onboarding needs, both the continuous walk on a room route
+    // (the admin GO route's own machinery: the arrived cab stepped out of, the
+    // glass or office door opened by the walk's own door handling, the corners
+    // smooth, stopped exactly on a capped pose, any tap or drag stops it and
+    // nothing ever resumes it):
+    //   .toJuanita     a tap on the Administration glass doors from the elevator
+    //                  or the vestibule (before the ID) -- out of the cab, through
+    //                  the doors as they open, and on to her counter's pose (the
+    //                  receptionDesk landing: capsApproach -- the walk stops ON it;
+    //                  her greeting runs as for any arrival there).
+    //   .towardTinky   1.5 s after the ID card is taken (the player still at the
+    //                  kiosk, untouched): round, through the office door, and stop
+    //                  in the anteroom with Tinky ahead at his desk -- never his
+    //                  desk landing (that's the player's next tap).
+    enum AdminWalk: Equatable { case toJuanita, towardTinky }
+    private(set) var adminWalk: AdminWalk?
+    /// The pending card-taken walk's token (a newer request, or any input, voids it).
+    private var adminWalkToken = 0
+    /// Where the walk toward Tinky stops: the anteroom, facing his office.
+    static let towardTinkyStop = WallFace(coord: AdministrationReception.officeAnteroom, direction: .south)
+
+    private func makeAdminWalkRoute(_ walk: AdminWalk) -> [GridCoordinate]? {
+        guard currentFloorNumber == AdministrationReception.floor, GuidedJourney.trip == nil, CharacterLead.activeGuidedRoute == nil,
+              let context = FredLead.context ?? GuidedJourney.context else { return nil }
+        let goal: GridCoordinate
+        let area: Set<GridCoordinate>
+        switch walk {
+        case .toJuanita:
+            guard !Admission.isCompleted else { return nil }
+            goal = AdministrationReception.deskLanding.coord
+            area = AdministrationExitGuard.receptionCells.union([endCell, GridCoordinate(row: endCell.row, col: endCell.col + 1)])
+        case .towardTinky:
+            guard Admission.isCompleted, !Admission.isPrologueCompleted, FredOfficeEncounter.isAvailable else { return nil }
+            goal = Self.towardTinkyStop.coord
+            area = AdministrationExitGuard.receptionCells.union([AdministrationReception.officeDoorCell])
+        }
+        let here = currentCell
+        guard here != goal, area.contains(here),
+              let route = CharacterLead.route(from: here, to: goal, cells: context.cells, doors: context.doors), route.count >= 2 else {
+            return nil
+        }
+        diag("cruise.adminWalkRoute", ["walk": "\(walk)", "from": here, "to": goal, "cells": route.count])
+        return route
+    }
+
+    /// A tap on the Administration glass doors from the elevator side: the whole
+    /// way to Juanita, in one walk. True: walking (or about to: stepping out of the cab first).
+    @discardableResult
+    func startAdminWalk(_ walk: AdminWalk) -> Bool {
+        guard continuousWalkState == .stopped, !isAnimating || elevatorAwaitingEntryDirection != nil else { return false }
+        adminWalkToken += 1
+        adminWalk = walk
+        cruiseDecisionStop = nil                                    // (an explicit request: no old junction stop applies)
+        guard makeAdminWalkRoute(walk) != nil || (walk == .toJuanita && elevatorAwaitingEntryDirection != nil) else {
+            adminWalk = nil
+            return false
+        }
+        startContinuousWalk()
+        if continuousWalkState == .stopped { adminWalk = nil; return false }
+        diag("adminWalk.start", ["walk": "\(walk)", "cell": currentCell, "inCab": elevatorAwaitingEntryDirection != nil])
+        return true
+    }
+
+    /// The ID card was just taken: in `delay` seconds -- if the player is still
+    /// standing at the kiosk, hands off -- round and on toward Tinky's office.
+    func scheduleWalkTowardTinky(after delay: TimeInterval) {
+        adminWalkToken += 1
+        let token = adminWalkToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.adminWalkToken == token else { return }
+            guard self.currentFloorNumber == AdministrationReception.floor, Admission.isCompleted, !Admission.isPrologueCompleted,
+                  FredOfficeEncounter.isAvailable, GuidedJourney.trip == nil,
+                  self.isInLandingPose(AdministrationIDTerminal.landingKind),       // (still there: no step, no turn meanwhile)
+                  !self.isAnimating, self.continuousWalkState == .stopped, self.activeTouchGesture?() == nil else {
+                diag("adminWalk.towardTinky.skipped", ["cell": self.currentCell])
+                return
+            }
+            self.startAdminWalk(.towardTinky)
+        }
+    }
+
+    /// Is there a capped landing pose (Juanita's counter...) along `direction`
+    /// within `distance` of where the player stands? (A tap that way then walks to
+    /// it and stops on it -- never past it and back.)
+    func cappedLandingAhead(direction: (x: Double, z: Double)?, distance: Double?) -> Bool {
+        guard let direction, let distance else { return false }
+        return approachCap(from: cameraNode.position, forward: direction, requested: distance + 0.5) != nil
+    }
+
+    /// Oct 12 (playtest): the way the last walk went (its start, or the
+    /// corridor a corner turned into) -- "recent travel" for GO's choice.
+    private var lastCruiseHeading: Direction?
+    /// Oct 12: a walk that starts this far (radians) off its corridor turns
+    /// on the spot first, then walks (never a slide along a wall).
+    static let cruiseAlignInPlace: Double = 0.45
+    /// Oct 12: two side corridors whose angles from the view differ by less
+    /// than this are a genuine tie (the view square on to the wall).
+    static let cruiseHeadingTie: Double = 15 * .pi / 180
+
+    /// Oct 12 (playtest: GO angled at a wall). Which way GO walks, from the
+    /// view and the walkable ways out of the player's cell:
+    ///  - the compass direction nearest the view, when that way is open (as before);
+    ///  - else (the view is on a wall), the side corridor nearest the view:
+    ///    one open side -> that one; both -> the one the view leans to; a
+    ///    genuine tie (the view square on to the wall) -> the way the player
+    ///    was last walking, if it is one of them; otherwise no walk at all
+    ///    (nil -- GO does nothing; LEFT/RIGHT or a swipe choose).
+    ///  - no side open either (a real dead end ahead): as before (the walk
+    ///    finds the dead end and stops).
+    /// Never the way back behind the player.
+    private func continuousWalkStartHeading(yaw: Double) -> Direction? {
+        let viewHeading = nearestCardinal(toYaw: yaw)
+        guard let g = freeWalkGeometry else { return viewHeading }
+        let cell = freeWalkCell
+        // Oct 13: GO's route to Tinky's desk (after the ID): its first step,
+        // whichever way the player happens to face -- turning round if need be.
+        if let route = adminGoRoute, let i = route.firstIndex(of: cell), i + 1 < route.count {
+            let next = route[i + 1]
+            if let d = Direction.allCases.first(where: { $0.delta.row == next.row - cell.row && $0.delta.col == next.col - cell.col }) {
+                diag("cruise.heading", ["cell": cell, "view": "\(viewHeading)", "chosen": "\(d)", "why": "adminRouteToTinky"])
+                return d
+            }
+        }
+        // Oct 20 (following a critter): its way from here, whichever way the
+        // player faces -- turning round if need be (as GO's route to Tinky).
+        if CharacterLead.activeGuidedRoute == nil, let route = followGuidance?()?.route,
+           let i = route.firstIndex(of: cell), i + 1 < route.count {
+            let next = route[i + 1]
+            if let d = Direction.allCases.first(where: { $0.delta.row == next.row - cell.row && $0.delta.col == next.col - cell.col }) {
+                diag("cruise.heading", ["cell": cell, "view": "\(viewHeading)", "chosen": "\(d)", "why": "followingCritter"])
+                return d
+            }
+        }
+        func open(_ d: Direction) -> Bool { g.openEdges.contains(FreeWalkGeometry.Edge(cell: cell, direction: d)) }
+        if open(viewHeading) { return viewHeading }
+        let sides = [viewHeading.left, viewHeading.right].filter(open)
+        // Following an escort: the way the guide's route goes on, if it is one of them.
+        if let onward = makeCruiseGuidance().routeOnward?[cell], sides.contains(onward) {
+            diag("cruise.heading", ["cell": cell, "view": "\(viewHeading)", "chosen": "\(onward)", "why": "escortRoute"])
+            return onward
+        }
+        var choice: Direction?
+        var why = ""
+        switch sides.count {
+        case 0:
+            choice = viewHeading; why = "deadEnd"
+        case 1:
+            choice = sides[0]; why = "onlyWayOn"
+        default:
+            let a = abs(shortestDelta(from: yaw, to: sides[0].yaw)), b = abs(shortestDelta(from: yaw, to: sides[1].yaw))
+            if abs(a - b) >= Self.cruiseHeadingTie {
+                choice = a < b ? sides[0] : sides[1]; why = "viewLeans"
+            } else if let last = lastCruiseHeading, sides.contains(last) {
+                choice = last; why = "recentTravel"
+            } else {
+                choice = nil; why = "tie"
+            }
+        }
+        diag("cruise.heading", ["cell": cell, "view": "\(viewHeading)", "chosen": choice.map { "\($0)" } ?? "none", "why": why,
+                                "offBy": Int((abs(shortestDelta(from: yaw, to: (choice ?? viewHeading).yaw)) * 180 / .pi).rounded())])
+        return choice
     }
 
     /// Ends the walk NOW, in place (main thread). A turn in progress settles
@@ -2672,6 +3452,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// rests between corridors. Safe to call when nothing is running.
     func stopContinuousWalk(reason: String) {
         if reason != "stopButton" { pendingHUDPivot = nil }
+        adminGoRoute = nil                                          // (Oct 13)
+        if adminWalk != nil { diag("adminWalk.end", ["walk": "\(adminWalk!)", "why": reason]) }
+        adminWalk = nil                                             // (Oct 21: never resumed)
         let wasActive = cruiseActive
         cruiseActive = false
         cruiseSession += 1
@@ -2693,13 +3476,32 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             movementPace = 1
             SoundEffects.setWalkingPace(1)
             if let arc {
+                CruiseCornerNote.shared.post("curve INTERRUPTED (\(reason))")    // (Oct 12 diagnostics)
                 // Mid-corner: finish the rotation (position is already legal).
-                let settle = SCNAction.rotateTo(x: 0, y: CGFloat(arc.endYaw), z: 0, duration: 0.18, usesShortestUnitArc: true)
+                // (Oct 12: a little longer for more of a wide corner still to turn.)
+                // (Oct 13: stopped part way round a SMOOTH corner -- settle onto
+                // whichever corridor the view is nearer, from where the body is.)
+                let current = Double(cameraNode.eulerAngles.y)
+                let settleHeading = arc.smooth != nil ? nearestCardinal(toYaw: current) : arc.endHeading
+                let settleYaw = arc.smooth != nil ? current + shortestDelta(from: current, to: settleHeading.yaw) : arc.endYaw
+                let left = abs(settleYaw - current)
+                let settle = SCNAction.rotateTo(x: 0, y: CGFloat(settleYaw), z: 0, duration: 0.18 + 0.2 * min(1, left / (.pi / 2)),
+                                                usesShortestUnitArc: true)
                 settle.timingMode = .easeOut
                 cameraNode.runAction(settle, forKey: Self.freeLookAlignActionKey)
-                if facing != arc.endHeading { facing = arc.endHeading }
+                if facing != settleHeading { facing = settleHeading }
             } else {
-                let heading = nearestCardinal(toYaw: Double(cameraNode.eulerAngles.y))
+                // Oct 12: stopped while still turning on the spot (GO from an angled
+                // view): finish onto the corridor it chose, never left at an angle.
+                let current = Double(cameraNode.eulerAngles.y)
+                let heading = abs(cruiseHeadingYaw - current) > 0.02 ? nearestCardinal(toYaw: cruiseHeadingYaw)
+                                                                     : nearestCardinal(toYaw: current)
+                if abs(cruiseHeadingYaw - current) > 0.02 {
+                    let settle = SCNAction.rotateTo(x: 0, y: CGFloat(current + shortestDelta(from: current, to: heading.yaw)), z: 0,
+                                                    duration: 0.18, usesShortestUnitArc: true)
+                    settle.timingMode = .easeOut
+                    cameraNode.runAction(settle, forKey: Self.freeLookAlignActionKey)
+                }
                 if facing != heading { facing = heading }
             }
         }
@@ -2720,12 +3522,17 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 self.stopContinuousWalk(reason: "movementTakenOver")
                 return
             }
-            let fresh = self.makeFreeWalkGeometry()
-            let guidance = self.makeCruiseGuidance()
-            self.cruiseGeometryLock.lock()
-            self.cruisePendingGeometry = fresh
-            self.cruisePendingGuidance = guidance
-            self.cruiseGeometryLock.unlock()
+            // Oct 21 (TEST ONLY, -HallwaysPerfSlowCruiseRebuild YES): rebuild once a
+            // second instead of every pass. Off: every pass, exactly as before.
+            self.cruiseWatchPasses += 1
+            if !PerfSwitches.slowCruiseRebuild || self.cruiseWatchPasses % 7 == 0 {
+                let fresh = self.makeFreeWalkGeometry()
+                let guidance = self.makeCruiseGuidance()
+                self.cruiseGeometryLock.lock()
+                self.cruisePendingGeometry = fresh
+                self.cruisePendingGuidance = guidance
+                self.cruiseGeometryLock.unlock()
+            }
             self.scheduleContinuousWalkWatch(session: session)
         }
     }
@@ -2744,6 +3551,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             self.cruiseRequestSerial += 1
             self.cruiseRequest = nil
             if self.continuousWalkState != .stopped { self.continuousWalkState = .stopped }
+            if self.adminWalk != nil { diag("adminWalk.end", ["walk": "\(self.adminWalk!)", "why": reason]) }
+            self.adminWalk = nil                                    // (Oct 21: the walk is over -- arrived or stopped)
+            self.adminGoRoute = nil
             diag("cruise.stop", ["reason": reason, "cell": self.currentCell, "facing": "\(self.facing)"])
             let reaction = follow ?? self.cruiseStopReaction
             self.cruiseStopReaction = nil
@@ -2758,6 +3568,52 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Distances (along `heading`, from `x,z`) to the end of the straight
     /// corridor ahead (stopped at wall clearance) and to the entry point of
     /// the first `side` opening whose entry point is still ahead.
+    // MARK: Oct 12 -- WIDE AUTOMATIC CORNERS
+    //
+    // An AUTOMATIC corner (a corridor's only way on -- never a turn the player
+    // queued, never a decision, never an escort's turn: the guide walks ~1.7 m
+    // ahead and would be in the way of a wide arc) is walked as
+    // a wider quarter circle at close to walking pace, instead of the tight
+    // 0.34 m / 0.3 s whip the queued turns use:
+    //   radius  up to cruiseAutoTurnRadius, and never more than the distance
+    //           still ahead to the corner cell's centre (so a walk that starts
+    //           close to a corner still takes it -- just tighter);
+    //   speed   cruiseAutoTurnPaceFactor x the walking speed;
+    //   view    eased along the arc (smoothstep), so turning in and out of the
+    //           corner has no jolt in the rate of turn.
+    // The whole arc lies inside the corner cell (radius < half a cell): from R
+    // before its centre on the corridor's centreline to R along the new one.
+    // Inside that cell its closed sides are never approached (the arc stays on
+    // the open sides of both centrelines) and its distance from the inner
+    // wall corner is >= sqrt(2h^2 - 2hR + R^2) >= h (h = half a cell = 1.76 m),
+    // above the 1.4 m clearance -- and every step still goes through
+    // slideEndpoint, the stall check and freeWalkTrackCell (cell events) as
+    // before. Not widened (the old radius): a doorway on the way out, or the
+    // elevator cell. A corner too close to widen fully gets what fits, and
+    // never takes less than cruiseAutoTurnMinTime to turn.
+    static let cruiseAutoTurnRadius: Double = 1.2
+    static let cruiseAutoTurnPaceFactor: Double = 0.65
+    static let cruiseAutoTurnMinTime: Double = 0.4
+
+    /// Render thread: the radius for an automatic corner at `cell` turning to `side`,
+    /// `base` metres ahead (to the cell's centre). `radius` = the tight one.
+    private func autoCornerRadius(cell: GridCoordinate, side: Direction, base: Double, radius: Double) -> Double {
+        // (Oct 12, curve diagnostics: why a corner stays tight is kept for the note.)
+        guard let g = freeWalkGeometry else { autoCornerWhy = "no geometry"; return radius }
+        guard base >= radius - 1e-6 else { autoCornerWhy = "too close to the corner to curve"; return radius }
+        let wide = min(Self.cruiseAutoTurnRadius, g.cellSize / 2 - 0.3)
+        guard wide > radius else { autoCornerWhy = "cells too small"; return radius }
+        // Exclusions: doors on the way out, the elevator.
+        if cell == endCell { autoCornerWhy = "elevator cell"; return radius }
+        if roomEntranceDoorAnchor(from: cell, direction: side) != nil || bathroomDoorAnchor(from: cell, direction: side) != nil
+            || windowRoomDoorAnchor(from: cell, direction: side) != nil { autoCornerWhy = "doorway on the way out"; return radius }
+        let r = max(radius, min(wide, base))
+        autoCornerWhy = r < wide - 0.01 ? String(format: "only %.2f m to the corner", base) : ""
+        return r
+    }
+    /// Render thread (Oct 12 diagnostics): why the last automatic corner got the radius it did.
+    private var autoCornerWhy = ""
+
     private struct CruiseScan {
         var stop: Double = .infinity       // distance to where the walk must stop
         var turn: Double?                  // distance to a corner's entry point
@@ -2768,7 +3624,136 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         var decision = false               // Smart WALK: `stop` is just short of a decision
         var decisionCell: GridCoordinate?
         var routeTurn = false              // the turn follows an escort's route
+        var turnRadius: Double = 0         // Oct 12: the corner's radius (wide for automatic corners)
+        var turnNote = ""                  // Oct 12 (diagnostics): why that radius
+        var turnCell: GridCoordinate?      // Oct 13: the cell the corner turns in
+        var smooth: SmoothTurn?            // Oct 13: the smooth path planned for it (nil = an arc)
     }
+
+    // MARK: Oct 13 -- SMOOTH CORNERS ("make corner turns feel like walking")
+    //
+    // A corner the walk takes while MOVING -- an automatic L-corner, an escort's
+    // turn, or a LEFT/RIGHT the player chose (while walking, or from a junction
+    // stop) -- follows a curvature-continuous path instead of a quarter circle:
+    // a quintic Bezier whose first three control points lie on the corridor
+    // it leaves and last three on the one it joins. So the path
+    //   - leaves the old corridor exactly along it, with zero curvature, and
+    //     joins the new one the same way: the rate of turn grows from 0 and
+    //     falls back to 0 (no jolt at either end);
+    //   - begins up to 3 m before the corner cell's centre and ends up to 3 m
+    //     down the new corridor (less when a corner or junction follows at
+    //     once, or the player is closer than that);
+    //   - and the view is the path's own tangent all the way -- it looks where
+    //     it is going, never ahead to the destination heading.
+    // The pace through it is steady: what keeps the turn rate at or under
+    // smoothTurnMaxRate (~92 deg/s) at the tightest point, between
+    // smoothTurnMinSpeed and the walking speed; the walk eases down to it
+    // early (smoothTurnBrake, half the ordinary brake) and back up gently
+    // after (smoothTurnExitAccel).
+    // SAFETY: every point of the planned path (80 samples) must pass the
+    // walk's own collision rule (FreeWalkGeometry.isLegal: the 1.4 m wall
+    // clearance, the rounded inner corner, missing cells, closed doors, the
+    // characters' keep-outs) or a shorter one is tried, and failing all of
+    // them the corner is the old quarter circle. Every step along it still
+    // goes through slideEndpoint, the stall check and freeWalkTrackCell (cell
+    // events). Not smoothed: a doorway on the way out of the corner, the
+    // elevator cell. (Model of an L-corner in these 3.52 m cells: entry 3 m ->
+    // tightest radius 2.2 m, 3.6 m/s, 4.9 m path, 1.4 s.)
+    struct SmoothTurn {
+        var xs: [Double] = [], zs: [Double] = [], cum: [Double] = [], yaws: [Double] = []
+        var length: Double = 0
+        var minRadius: Double = .infinity
+        var speed: Double = 0
+        var entry: Double = 0
+    }
+    static let smoothTurnEntries: [Double] = [3.0, 2.6, 2.2, 1.8, 1.4]
+    static let smoothTurnMaxRate: Double = 1.6           // rad/s at the tightest point
+    static let smoothTurnMinSpeed: Double = 2.2
+    static let smoothTurnBrake: Double = 5
+    static let smoothTurnExitAccel: Double = 4
+    /// After a smooth corner, the walk picks up its pace gently until then (walk clock).
+    private var cruiseGentleUntil: Double = 0
+
+    /// Render thread: a smooth path from (sx, sz) -- on the corridor along
+    /// `heading`, before `cell`'s centre -- turning into `side`, or nil if it
+    /// would not be legal everywhere.
+    private func planSmoothTurn(_ g: FreeWalkGeometry, sx: Double, sz: Double, cell: GridCoordinate,
+                                heading: Direction, side: Direction, startYaw: Double) -> SmoothTurn? {
+        let u = Self.unit(heading), s = Self.unit(side)
+        let cx = Double(cell.col) * g.cellSize, cz = Double(cell.row) * g.cellSize
+        let dIn = -((sx - cx) * u.x + (sz - cz) * u.z)                // how far before the centre it starts
+        guard dIn >= (Self.smoothTurnEntries.last ?? 1.4) - 0.05 else { return nil }
+        // The new corridor must go straight on through the next cell (a plain
+        // two-way passage, no door, not the elevator): the path ends up to 3 m
+        // down it, and the walk's own look-ahead (junction stops, doors,
+        // corners) takes over from there with room to spare. A junction,
+        // corner or door right after the corner: no smooth path (the walk
+        // must still see and stop for it) -- the quarter circle instead.
+        let after = GridCoordinate(row: cell.row + side.delta.row, col: cell.col + side.delta.col)
+        let afterOpen = Direction.allCases.filter { g.openEdges.contains(FreeWalkGeometry.Edge(cell: after, direction: $0)) }
+        guard after != endCell, afterOpen.count == 2, afterOpen.contains(side), afterOpen.contains(side.opposite),
+              roomEntranceDoorAnchor(from: after, direction: side) == nil, bathroomDoorAnchor(from: after, direction: side) == nil,
+              windowRoomDoorAnchor(from: after, direction: side) == nil else {
+            smoothWhy = "a junction, corner or door right after it"
+            return nil
+        }
+        // A landing stop (a counter, a desk) on the curve's cells would be missed: not here.
+        let before = GridCoordinate(row: cell.row - heading.delta.row, col: cell.col - heading.delta.col)
+        if cruiseGuidance.landingCaps.contains(where: { [before, cell, after].contains($0.cell) }) {
+            smoothWhy = "a stop point on the corner"
+            return nil
+        }
+        // A doorway on the way INTO the corner cell, crossed while already turning: not here.
+        if dIn > g.cellSize / 2,
+           roomEntranceDoorAnchor(from: cell, direction: heading.opposite) != nil || bathroomDoorAnchor(from: cell, direction: heading.opposite) != nil
+            || windowRoomDoorAnchor(from: cell, direction: heading.opposite) != nil {
+            smoothWhy = "a doorway just before the corner"
+            return nil
+        }
+        let dOut = min(dIn, Self.smoothTurnEntries.first ?? 3)
+        let ex = cx + s.x * dOut, ez = cz + s.z * dOut
+        let px: [Double] = [sx, sx + u.x * dIn / 3, sx + u.x * 2 * dIn / 3, ex - s.x * 2 * dOut / 3, ex - s.x * dOut / 3, ex]
+        let pz: [Double] = [sz, sz + u.z * dIn / 3, sz + u.z * 2 * dIn / 3, ez - s.z * 2 * dOut / 3, ez - s.z * dOut / 3, ez]
+        let binom: [Double] = [1, 5, 10, 10, 5, 1]
+        let n = 80
+        var t = SmoothTurn()
+        t.entry = dIn
+        for i in 0...n {
+            let k = Double(i) / Double(n)
+            var x = 0.0, z = 0.0
+            for j in 0...5 {
+                let w = binom[j] * pow(1 - k, Double(5 - j)) * pow(k, Double(j))
+                x += w * px[j]; z += w * pz[j]
+            }
+            if i > 0, !g.isLegal(x: x, z: z) { return nil }
+            t.xs.append(x); t.zs.append(z)
+        }
+        // Lengths, and the view: the path's own tangent (unwrapped from the start).
+        t.cum = [0]
+        for i in 1...n { t.cum.append(t.cum[i - 1] + hypot(t.xs[i] - t.xs[i - 1], t.zs[i] - t.zs[i - 1])) }
+        t.length = t.cum[n]
+        guard t.length > 0.5 else { return nil }
+        var previous = Self.yaw(facing: (x: u.x, z: u.z), near: startYaw)
+        let offset = startYaw - previous                             // the view's small misalignment at the start, faded out
+        for i in 0...n {
+            let a = max(0, i - 1), b = min(n, i + 1)
+            let dir = i == 0 ? (x: u.x, z: u.z) : i == n ? (x: s.x, z: s.z) : (x: t.xs[b] - t.xs[a], z: t.zs[b] - t.zs[a])
+            previous = Self.yaw(facing: dir, near: previous)
+            t.yaws.append(previous + offset * max(0, 1 - t.cum[i] / (0.25 * t.length)))
+        }
+        for i in 1...n {
+            let ds = t.cum[i] - t.cum[i - 1]
+            if ds > 1e-6 { t.minRadius = min(t.minRadius, ds / max(1e-9, abs(t.yaws[i] - t.yaws[i - 1]))) }
+        }
+        t.speed = max(Self.smoothTurnMinSpeed, min(travelSpeed, Self.smoothTurnMaxRate * t.minRadius))
+        return t
+    }
+
+    /// Render thread (diagnostics): why the last corner could not be smooth.
+    private var smoothWhy = ""
+    /// Render thread: a smooth corner whose path stopped fitting at its very start
+    /// (someone stepped into it) -- this walk takes that corner the ordinary way.
+    private var smoothVeto: (cell: GridCoordinate, side: Direction)?
 
     /// Looks down the corridor ahead (along `heading`, from `x,z`): where it
     /// ends, the first `side` opening whose entry point is still ahead, and
@@ -2793,17 +3778,57 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             let after = GridCoordinate(row: c.row + heading.delta.row, col: c.col + heading.delta.col)
             return !open(before, s) && !open(after, s)
         }
+        // Oct 13: the longest legal smooth corner at `c` into `s`, starting where it may.
+        func smooth(_ c: GridCoordinate, _ s: Direction) -> (d: Double, path: SmoothTurn)? {
+            if c == endCell { smoothWhy = "elevator cell"; return nil }
+            if roomEntranceDoorAnchor(from: c, direction: s) != nil || bathroomDoorAnchor(from: c, direction: s) != nil
+                || windowRoomDoorAnchor(from: c, direction: s) != nil { smoothWhy = "doorway on the way out"; return nil }
+            if let veto = smoothVeto, veto.cell == c, veto.side == s { smoothWhy = "the curve was blocked at its start"; return nil }
+            // Far off: not planned yet (it is, well before the walk need slow for it).
+            if base - (Self.smoothTurnEntries.first ?? 3) > cruiseSpeed * cruiseSpeed / (2 * Self.smoothTurnBrake) + 2 {
+                smoothWhy = "far ahead"; return nil
+            }
+            var tried = false
+            smoothWhy = ""
+            for entry in Self.smoothTurnEntries where entry <= base + 1e-6 {
+                tried = true
+                let sx = x + u.x * (base - entry), sz = z + u.z * (base - entry)
+                if let path = planSmoothTurn(g, sx: sx, sz: sz, cell: c, heading: heading, side: s, startYaw: cruiseHeadingYaw) {
+                    // Only if the walk can ease down to its pace in time (never a sudden drop).
+                    guard cruiseSpeed * cruiseSpeed <= path.speed * path.speed + 2 * Self.cruiseBrake * (base - entry) + 0.5 else {
+                        smoothWhy = "seen too late to ease into"; continue
+                    }
+                    return (base - entry, path)
+                }
+            }
+            if !tried { smoothWhy = String(format: "only %.1f m to the corner", max(0, base)) }
+            else if smoothWhy.isEmpty { smoothWhy = "no room for a curve here" }
+            return nil
+        }
+        func take(_ c: GridCoordinate, _ s: Direction, fromRequest: Bool, route: Bool, tightRadius r: Double, note: String,
+                  planned: (d: Double, path: SmoothTurn)?? = nil) -> Bool {
+            if let sm = planned ?? smooth(c, s) {
+                result.turn = max(0, sm.d); result.smooth = sm.path; result.turnRadius = sm.path.minRadius
+            } else {
+                let d = base - r
+                guard d >= -1e-6 else { return false }
+                result.turn = max(0, d); result.turnRadius = r
+                result.turnNote = note.isEmpty ? smoothWhy : note
+            }
+            result.turnSide = s; result.turnFromRequest = fromRequest; result.routeTurn = route; result.turnCell = c
+            return true
+        }
         for _ in 0..<16 {
             if let side, result.turn == nil, g.openEdges.contains(FreeWalkGeometry.Edge(cell: cell, direction: side)) {
-                let d = base - radius
-                if d >= -1e-6 { result.turn = max(0, d); result.turnSide = side; result.turnFromRequest = true }
+                _ = take(cell, side, fromRequest: true, route: false, tightRadius: radius, note: "")
             }
             // Follow the leader: where an escort's route turns, turn (an
             // explicit LEFT/RIGHT found above still wins).
             if result.turn == nil, let onward = routeOnward?[cell], onward == heading.left || onward == heading.right,
                open(cell, onward) {
-                let d = base - radius
-                if d >= -1e-6 { result.turn = max(0, d); result.turnSide = onward; result.turnFromRequest = false; result.routeTurn = true }
+                // (Oct 13: smooth too -- the walk's following-gap brake now also
+                // works inside a smooth corner; failing that, the tight one.)
+                _ = take(cell, onward, fromRequest: false, route: true, tightRadius: radius, note: "")
             }
             // Smart WALK: a genuine choice ahead -> stop on its centre. With a
             // turn queued, only where that turn exists (pressed too late to
@@ -2838,8 +3863,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     let behind = GridCoordinate(row: cell.row - heading.delta.row, col: cell.col - heading.delta.col)
                     if ways.count == 1, openWays(cell) == 2, openWays(behind) <= 2,
                        openWays(GridCoordinate(row: cell.row + ways[0].delta.row, col: cell.col + ways[0].delta.col)) <= 2 {
-                        let d = base - radius
-                        if d >= -1e-6 { result.turn = max(0, d); result.turnSide = ways[0]; result.turnFromRequest = false }
+                        // Oct 13: smooth first; else the Oct 12 wide circle, else tight.
+                        let planned = smooth(cell, ways[0])
+                        if planned == nil {
+                            let why = smoothWhy
+                            let r = autoCornerRadius(cell: cell, side: ways[0], base: base, radius: radius)
+                            _ = take(cell, ways[0], fromRequest: false, route: false, tightRadius: r,
+                                     note: why + (autoCornerWhy.isEmpty ? "" : "; " + autoCornerWhy), planned: .some(nil))
+                        } else {
+                            _ = take(cell, ways[0], fromRequest: false, route: false, tightRadius: radius, note: "", planned: .some(planned))
+                        }
                     }
                 }
                 return result
@@ -2861,9 +3894,81 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let position = cameraNode.position
         let px = Double(position.x), pz = Double(position.z)
 
+        if var arc = cruiseArc, let path = arc.smooth {
+            // ---- Oct 13: in a SMOOTH corner -- along the planned path at its steady
+            // pace (eased to, never snapped), the view on the path's tangent.
+            var target = path.speed * cruiseGuidance.paceScale                // (Oct 20: automatic walks at 0.8)
+            if arc.route, let leader = cruiseGuidance.leader {        // following a guide round his turn: never close past the gap
+                let lookYaw = Double(cameraNode.eulerAngles.y)
+                if Self.leaderHolds(along: (-sin(lookYaw), -cos(lookYaw)), dx: leader.x - px, dz: leader.z - pz,
+                                    beside: cruiseGuidance.leaderBeside) {   // (only while he is ahead -- a critter: or beside)
+                    let room = max(0, hypot(leader.x - px, leader.z - pz) - Self.escortFollowGap)
+                    target = min(target, (2 * Self.cruiseBrake * room).squareRoot())
+                }
+            }
+            if cruiseSpeed < target { cruiseSpeed = min(target, cruiseSpeed + Self.cruiseAccel * dt) }
+            else { cruiseSpeed = max(target, cruiseSpeed - Self.cruiseBrake * dt) }
+            arc.travelled = min(path.length, arc.travelled + cruiseSpeed * dt)
+            var i = arc.segment
+            while i < path.cum.count - 2, path.cum[i + 1] < arc.travelled { i += 1 }
+            arc.segment = i
+            let span = max(1e-9, path.cum[i + 1] - path.cum[i])
+            let f = min(1, max(0, (arc.travelled - path.cum[i]) / span))
+            let tx = path.xs[i] + (path.xs[i + 1] - path.xs[i]) * f
+            let tz = path.zs[i] + (path.zs[i + 1] - path.zs[i]) * f
+            let yaw = path.yaws[i] + (path.yaws[i + 1] - path.yaws[i]) * f
+            let next = g.slideEndpoint(from: SCNVector3(position.x, eyeHeight, position.z), dx: tx - px, dz: tz - pz)
+            let moved = Double(hypotf(next.x - position.x, next.z - position.z))
+            let wanted = hypot(tx - px, tz - pz)
+            cameraNode.position = next
+            cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+            freeWalkTrackCell(next)
+            // (diagnostics: what it actually did)
+            arc.elapsed += dt
+            arc.movedSum += moved
+            if let last = arc.lastYaw, dt > 0 { arc.peakRate = max(arc.peakRate, abs(yaw - last) / dt) }
+            arc.lastYaw = yaw
+            arc.stall = wanted > 0.001 && moved < wanted * 0.5 ? arc.stall + dt : 0
+            if arc.stall > 0.12 {
+                // Someone stands in the corner: stop, facing the way the path is going there.
+                cruiseHeadingYaw = yaw
+                cruiseArc = nil
+                CruiseCornerNote.shared.post("smooth turn BLOCKED -- walk stopped")
+                endContinuousWalkFromRenderer(reason: "blockedInTurn")
+                return
+            }
+            if arc.travelled >= path.length - 1e-9 {
+                cameraNode.eulerAngles = SCNVector3(0, Float(arc.endYaw), 0)
+                cruiseHeadingYaw = arc.endYaw
+                lastCruiseHeading = arc.endHeading
+                cruiseArc = nil
+                cruiseGentleUntil = cruiseClock + 1.0
+                CruiseCornerNote.shared.post(String(format: "SMOOTH done  avg %.1f m/s  peak %.0f deg/s  %.1f s",
+                                                    arc.movedSum / max(arc.elapsed, 1e-6), arc.peakRate * 180 / .pi, arc.elapsed))
+                diag("cruise.smoothTurnDone", ["avgSpeed": (arc.movedSum / max(arc.elapsed, 1e-6) * 10).rounded() / 10,
+                                               "peakDegPerSec": Int(arc.peakRate * 180 / .pi), "seconds": (arc.elapsed * 100).rounded() / 100])
+                let serial = arc.serial, session = cruiseSession, heading = arc.endHeading
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.cruiseSession == session else { return }
+                    if self.cruiseRequestSerial == serial, case .walkingQueued = self.continuousWalkState {
+                        self.cruiseRequest = nil
+                        self.continuousWalkState = .walking
+                    }
+                    diag("cruise.turnDone", ["cell": self.currentCell, "heading": "\(heading)"])
+                }
+            } else {
+                cruiseArc = arc
+            }
+            cruiseDistance += moved
+            setFreeWalkFootsteps(cruiseFootstepsWanted(moved: moved, dt: dt))
+            SoundEffects.setWalkingPace(Float(max(0.6, min(1.5, cruiseSpeed / travelSpeed))))
+            return
+        }
+
         if var arc = cruiseArc {
             // ---- In the corner: follow the quarter circle at turn speed.
-            let turnSpeed = Self.cruiseTurnSpeed(radius: arc.radius)
+            // (Oct 20: a tight corner at the walk's pace; a wide one's own speed is already scaled)
+            let turnSpeed = arc.speed ?? Self.cruiseTurnSpeed(radius: arc.radius) * cruiseGuidance.paceScale
             cruiseSpeed += (turnSpeed - cruiseSpeed) * (1 - exp(-dt / 0.08))
             let step = max(0.2, cruiseSpeed) * dt
             arc.travelled = min(arc.length, arc.travelled + step)
@@ -2874,7 +3979,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             let moved = Double(hypotf(next.x - position.x, next.z - position.z))
             let wanted = hypot(tx - px, tz - pz)
             cameraNode.position = next
-            let f = arc.travelled / arc.length
+            let linear = arc.travelled / arc.length
+            let f = arc.speed == nil ? linear : linear * linear * (3 - 2 * linear)   // (Oct 12: wide corners ease in and out)
             let yaw = arc.startYaw + (arc.endYaw - arc.startYaw) * f
             cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
             freeWalkTrackCell(next)
@@ -2885,12 +3991,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 cameraNode.eulerAngles = SCNVector3(0, Float(arc.endYaw), 0)
                 cruiseHeadingYaw = arc.endYaw
                 cruiseArc = nil
+                CruiseCornerNote.shared.post("curve BLOCKED -- walk stopped")    // (Oct 12 diagnostics)
                 endContinuousWalkFromRenderer(reason: "blockedInTurn")
                 return
             }
             if arc.travelled >= arc.length - 1e-9 {
                 cameraNode.eulerAngles = SCNVector3(0, Float(arc.endYaw), 0)
                 cruiseHeadingYaw = arc.endYaw
+                lastCruiseHeading = arc.endHeading                  // (Oct 12: recent travel)
                 cruiseArc = nil
                 let serial = arc.serial, session = cruiseSession, heading = arc.endHeading
                 DispatchQueue.main.async { [weak self] in
@@ -2906,7 +4014,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 cruiseArc = arc
             }
             cruiseDistance += moved
-            setFreeWalkFootsteps(moved > 0.0005)
+            setFreeWalkFootsteps(cruiseFootstepsWanted(moved: moved, dt: dt))
             SoundEffects.setWalkingPace(Float(max(0.6, min(1.5, cruiseSpeed / travelSpeed))))
             return
         }
@@ -2916,6 +4024,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         if yaw != cruiseHeadingYaw {
             yaw = Self.rateLimitedYaw(current: yaw, target: cruiseHeadingYaw, maxStep: Self.heldWalkMaxTurnRate * dt)
             cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+        }
+        // Oct 12 (playtest): well off the corridor (GO from a view angled at a
+        // wall) -- turn on the spot first, then walk.
+        if abs(cruiseHeadingYaw - yaw) > Self.cruiseAlignInPlace {
+            cruiseSpeed = 0
+            setFreeWalkFootsteps(false)
+            return
         }
         let heading = nearestCardinal(toYaw: cruiseHeadingYaw)
         var request: (turn: ContinuousWalkTurn, serial: Int)?
@@ -2939,16 +4054,36 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             scan.door = nil
             scan.elevator = false
             scan.decision = false
+            scan.smooth = nil                                       // (Oct 13)
             landing = true
         }
 
         // Speed: sustained pace like a hold (1.5x after three cells), braking
         // for the corridor's end and for a queued corner's entry speed.
-        let sustained = travelSpeed * (cruiseDistance >= 3 * g.cellSize ? 1.5 : 1.0)
+        // (Oct 20: an automatic walk's pace -- cruiseGuidance.paceScale, 0.8; an escort's, 1)
+        let pace = cruiseGuidance.paceScale
+        let sustained = travelSpeed * pace * (cruiseDistance >= 3 * g.cellSize ? Self.fastWalkPace : 1.0)
         var limit = min(sustained, (2 * Self.cruiseBrake * scan.stop).squareRoot())
-        let turnSpeed = Self.cruiseTurnSpeed(radius: radius)
-        if let t = scan.turn { limit = min(limit, (turnSpeed * turnSpeed + 2 * Self.cruiseBrake * t).squareRoot()) }
-        if cruiseClock < cruiseDoorSlowUntil { limit = min(limit, Self.cruiseDoorSpeed) }
+        // (Oct 12: a wide automatic corner is entered at its own, walking-pace speed.)
+        let wideCorner = scan.turn != nil && scan.smooth == nil && !scan.turnFromRequest && scan.turnRadius > radius + 1e-6
+        let turnSpeed = pace * (scan.smooth.map { $0.speed }
+            ?? (wideCorner ? min(travelSpeed * Self.cruiseAutoTurnPaceFactor, scan.turnRadius * .pi / 2 / Self.cruiseAutoTurnMinTime)
+                           : Self.cruiseTurnSpeed(radius: scan.turn != nil && scan.turnRadius > 0 ? scan.turnRadius : radius)))
+        // (Oct 13: a smooth corner is eased into from further out -- half the ordinary brake.)
+        let cornerBrake = scan.smooth != nil ? Self.smoothTurnBrake : Self.cruiseBrake
+        if let t = scan.turn { limit = min(limit, (turnSpeed * turnSpeed + 2 * cornerBrake * t).squareRoot()) }
+        if cruiseClock < cruiseDoorSlowUntil { limit = min(limit, Self.cruiseDoorSpeed * pace) }
+        // Oct 11 (escort pacing): following a guide, never close past the
+        // following gap -- the walk slows behind him, stands while he waits,
+        // and goes on as he does. Only while the guide is ahead of the player.
+        if let leader = cruiseGuidance.leader {
+            let f = Self.unit(heading)
+            let dx = leader.x - px, dz = leader.z - pz
+            if Self.leaderHolds(along: (f.x, f.z), dx: dx, dz: dz, beside: cruiseGuidance.leaderBeside) {
+                let room = max(0, hypot(dx, dz) - Self.escortFollowGap)
+                limit = min(limit, (2 * Self.cruiseBrake * room).squareRoot())
+            }
+        }
         // A closed door ahead: ask for it once, early enough to keep walking.
         if let door = scan.door, door != cruiseDoorRequested,
            scan.stop <= cruiseSpeed * cruiseSpeed / (2 * Self.cruiseBrake) + Self.cruiseDoorLead {
@@ -2957,7 +4092,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             let session = cruiseSession
             DispatchQueue.main.async { [weak self] in self?.continuousWalkReachedDoor(door, session: session) }
         }
-        if cruiseSpeed < limit { cruiseSpeed = min(limit, cruiseSpeed + Self.cruiseAccel * dt) } else { cruiseSpeed = limit }
+        // (Oct 13: out of a smooth corner the pace comes back gently.)
+        let accel = cruiseClock < cruiseGentleUntil ? Self.smoothTurnExitAccel : Self.cruiseAccel
+        if cruiseSpeed < limit { cruiseSpeed = min(limit, cruiseSpeed + accel * dt) } else { cruiseSpeed = limit }
         var step = cruiseSpeed * dt
 
         // The corner starts exactly at its entry point.
@@ -2983,7 +4120,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cameraNode.position = next
         cruiseDistance += moved
         freeWalkTrackCell(next)
-        setFreeWalkFootsteps(moved > 0.0005)
+        setFreeWalkFootsteps(cruiseFootstepsWanted(moved: moved, dt: dt))
         SoundEffects.setWalkingPace(Float(max(0.6, min(1.5, cruiseSpeed / travelSpeed))))
 
         if arriving {
@@ -2992,6 +4129,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             } else {
                 let late = request?.turn
                 let cell = scan.decisionCell ?? freeWalkCell
+                CruiseCornerNote.shared.post("STOP at a junction -- not an auto corner")   // (Oct 12 diagnostics)
                 endContinuousWalkFromRenderer(reason: "decision") { [weak self] in self?.continuousWalkDecisionStop(cell: cell, late: late) }
             }
             return
@@ -3001,13 +4139,55 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // A queued turn is consumed; a forced L-corner leaves any queued
             // request for a later opening untouched.
             var serial = -1
-            if scan.turnFromRequest, let request { cruiseConsumedSerial = request.serial; serial = request.serial }
+            if scan.turnFromRequest, let request { serial = request.serial }
+            // (Oct 13: a request is consumed only once its corner actually starts.)
+            func consume() { if scan.turnFromRequest, let request { cruiseConsumedSerial = request.serial } }
             if !scan.turnFromRequest { diag(scan.routeTurn ? "cruise.routeTurn" : "cruise.forcedTurn", ["toward": "\(side)"]) }
             let u = Self.unit(heading), s = Self.unit(side)
             let endYaw = Self.yaw(facing: (x: s.x, z: s.z), near: cruiseHeadingYaw)
-            cruiseArc = CruiseArc(centerX: Double(next.x) + radius * s.x, centerZ: Double(next.z) + radius * s.z,
-                                  headX: u.x, headZ: u.z, sideX: s.x, sideZ: s.z, radius: radius,
-                                  startYaw: yaw, endYaw: endYaw, endHeading: side, serial: serial)
+            // Oct 13: a SMOOTH corner -- planned again from exactly here; if that
+            // no longer fits (someone stepped into it), the quarter circle below.
+            if scan.smooth != nil, let cell = scan.turnCell {
+                if let path = planSmoothTurn(g, sx: Double(next.x), sz: Double(next.z), cell: cell, heading: heading, side: side, startYaw: yaw) {
+                    var arc = CruiseArc(centerX: Double(next.x), centerZ: Double(next.z), headX: u.x, headZ: u.z, sideX: s.x, sideZ: s.z,
+                                        radius: path.minRadius, startYaw: yaw, endYaw: endYaw, endHeading: side, serial: serial,
+                                        speed: path.speed)
+                    arc.smooth = path
+                    arc.route = scan.routeTurn
+                    consume()
+                    smoothVeto = nil
+                    cruiseArc = arc
+                    let kind = scan.turnFromRequest ? "your LEFT/RIGHT" : scan.routeTurn ? "escort's route" : "corner"
+                    CruiseCornerNote.shared.post(String(format: "SMOOTH turn  r>=%.1f m  %.1f m/s  %.1f s  (%@)",
+                                                        path.minRadius, path.speed, path.length / path.speed, kind))
+                    diag("cruise.smoothTurn", ["cell": "\(cell.row),\(cell.col)", "toward": "\(side)", "entry": (path.entry * 100).rounded() / 100,
+                                               "minRadius": (path.minRadius * 100).rounded() / 100, "speed": (path.speed * 10).rounded() / 10,
+                                               "length": (path.length * 100).rounded() / 100, "kind": kind, "entrySpeed": (cruiseSpeed * 10).rounded() / 10])
+                    cruiseStall = 0
+                    return
+                }
+                // Someone stepped into it: no smooth corner here this walk -- go
+                // on straight; the scan offers this corner the ordinary way next frame.
+                smoothVeto = (cell, side)
+                diag("cruise.smoothVetoed", ["cell": "\(cell.row),\(cell.col)", "toward": "\(side)"])
+                cruiseStall = 0
+                return
+            }
+            consume()
+            smoothVeto = nil
+            let r = scan.turnRadius > 0 ? scan.turnRadius : radius
+            cruiseArc = CruiseArc(centerX: Double(next.x) + r * s.x, centerZ: Double(next.z) + r * s.z,
+                                  headX: u.x, headZ: u.z, sideX: s.x, sideZ: s.z, radius: r,
+                                  startYaw: yaw, endYaw: endYaw, endHeading: side, serial: serial,
+                                  speed: wideCorner ? turnSpeed : nil)
+            if wideCorner { diag("cruise.wideCorner", ["radius": (r * 100).rounded() / 100, "speed": (turnSpeed * 10).rounded() / 10]) }
+            // Oct 12 (developer diagnostics): which corner code ran, and why.
+            let why: String
+            if wideCorner { why = String(format: "WIDE curve  r %.2f m  %.1f m/s", r, turnSpeed) + (scan.turnNote.isEmpty ? "" : "  (\(scan.turnNote))") }
+            else if scan.turnFromRequest { why = String(format: "TIGHT turn  r %.2f m  -- your LEFT/RIGHT: ", r) + scan.turnNote }
+            else if scan.routeTurn { why = String(format: "TIGHT turn  r %.2f m  -- escort's route: ", r) + scan.turnNote }
+            else { why = String(format: "TIGHT turn  r %.2f m  -- ", r) + (scan.turnNote.isEmpty ? "auto corner" : scan.turnNote) }
+            CruiseCornerNote.shared.post(why)
             cruiseStall = 0
             return
         }
@@ -3250,6 +4430,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
 
     init(cameraNode: SCNNode, scene: SCNScene, cells: Set<GridCoordinate>, cellSize: CGFloat, startCell: GridCoordinate, startFacing: Direction, endCell: GridCoordinate, objects: [GridCoordinate: ObjectKind] = [:], objectNodes: [GridCoordinate: SCNNode] = [:], destinations: [GridCoordinate: ObjectKind] = [:], destinationNodes: [GridCoordinate: SCNNode] = [:], elevatorLeftDoor: SCNNode? = nil, elevatorRightDoor: SCNNode? = nil, elevatorMountDirection: Direction? = nil, elevatorButtonNodes: [Int: SCNNode] = [:], floorNumber: Int = 1, nextFloorNumber: Int? = nil, floorMaps: [GridCoordinate: Direction] = [:], floorMapPlaneNodes: [SCNNode] = [], missionSigns: [GridCoordinate: Direction] = [:], exitSigns: [GridCoordinate: Direction] = [:], pictures: Set<WallFace> = [], mirrors: [GridCoordinate: Direction] = [:], fires: Set<GridCoordinate> = [], fireNodes: [GridCoordinate: SCNNode] = [:], extinguishers: [GridCoordinate: Direction] = [:], extinguisherNodes: [GridCoordinate: SCNNode] = [:], photoBooths: [GridCoordinate: (direction: Direction, expression: PhotoBoothExpression)] = [:], photoBoothNodes: [GridCoordinate: SCNNode] = [:], ticTacToeTerminals: [GridCoordinate: Direction] = [:], ticTacToeTerminalNodes: [GridCoordinate: SCNNode] = [:], shellGameStations: [GridCoordinate: Direction] = [:], shellGameStationNodes: [GridCoordinate: SCNNode] = [:], rockPaperScissorsTerminals: [GridCoordinate: Direction] = [:], rockPaperScissorsTerminalNodes: [GridCoordinate: SCNNode] = [:], higherLowerTerminals: [GridCoordinate: Direction] = [:], higherLowerTerminalNodes: [GridCoordinate: SCNNode] = [:], fiveCardDrawTerminals: [GridCoordinate: Direction] = [:], fiveCardDrawTerminalNodes: [GridCoordinate: SCNNode] = [:], simonTerminals: [GridCoordinate: Direction] = [:], simonTerminalNodes: [GridCoordinate: SCNNode] = [:], hangmanTerminals: [GridCoordinate: Direction] = [:], hangmanTerminalNodes: [GridCoordinate: SCNNode] = [:], connectFourTerminals: [GridCoordinate: Direction] = [:], connectFourTerminalNodes: [GridCoordinate: SCNNode] = [:], checkersTerminals: [GridCoordinate: Direction] = [:], checkersTerminalNodes: [GridCoordinate: SCNNode] = [:], woidleTerminals: [GridCoordinate: Direction] = [:], woidleTerminalNodes: [GridCoordinate: SCNNode] = [:], roomDoors: [GridCoordinate: RoomDoorPlacement] = [:], itemRooms: [GridCoordinate: Int] = [:], bathroomDoors: [GridCoordinate: Direction] = [:], windowRooms: [GridCoordinate: WindowRoomPlacement] = [:], roomEntranceDoors: [GridCoordinate: Direction] = [:], missionObjectKind: ObjectKind? = nil, hasCompletedInitialEntrance: Bool = false) {
+        PerfMonitor.gauge("navControllers", +1)                            // Oct 21: live count (measurement)
         self.cameraNode = cameraNode
         self.scene = scene
         self.cells = cells
@@ -3698,8 +4879,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         extinguisherRestingTransforms.removeValue(forKey: coord)
         pickedUpExtinguisherCoords.remove(coord)
         if carryingExtinguisher {
-            carriedExtinguisherNode?.removeFromParentNode()
-            carriedExtinguisherNode = nil
+            ToolBelt.dropHallwayExtinguisher(animated: false)
             carryingExtinguisher = false
         }
         extinguishingFireCoords.remove(coord)
@@ -4566,7 +5746,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // Free look: no one-gesture quarter-turn limit (same unclamped
         // math the elevator ride's updateElevatorCameraDrag uses).
         let clamped = freeLookEnabled ? fraction : max(-1, min(1, fraction))
+        let scnT = FrameTiming.start()                                    // Oct 24: SceneKit wait (measurement only)
         cameraNode.eulerAngles = SCNVector3(0, Float(dragBaseYaw + clamped * .pi / 2), 0)
+        FrameTiming.shared.record(.scnCamera, since: scnT)
     }
 
     // Eddie, Sept 13: was a flat 50% threshold -- "the positional
@@ -4753,6 +5935,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// points, dy positive = finger moved down = forward).
     func updateFreePan(dx: Double, dy: Double, pointsPerQuarterTurn: Double, pointsPerCell: Double) {
         guard isFreePanning, pointsPerQuarterTurn > 0, pointsPerCell > 0 else { return }
+        let panT = FrameTiming.start()                                    // Oct 24: one swipe step (measurement only)
+        defer { FrameTiming.shared.record(.pan, since: panT) }
         updateDragRotate(fraction: dx / pointsPerQuarterTurn)
         let fingerDy = dy - freePanLastDy
         let fingerDx = dx - freePanLastDx
@@ -4767,10 +5951,14 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             updateFreePanFootsteps(fingerDx: fingerDx, fingerDy: fingerDy, forwardTravel: 0) // pivot only
             return
         }
+        let readT = FrameTiming.start()                                   // Oct 24: SceneKit waits (measurement only)
         let forward = FreeWalkGeometry.forward(yaw: Double(cameraNode.eulerAngles.y))
         let position = cameraNode.position
+        FrameTiming.shared.record(.scnCamera, since: readT)
         let next = geometry.slideEndpoint(from: position, dx: forward.x * step, dz: forward.z * step)
+        let writeT = FrameTiming.start()
         cameraNode.position = next
+        FrameTiming.shared.record(.scnCamera, since: writeT)
         let moved = Double(hypotf(next.x - position.x, next.z - position.z))
         freePanForwardTravel += step > 0 ? moved : -moved
         freeWalkTrackCell(next)
@@ -5188,13 +6376,19 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private var heldBlockedFireCoord: GridCoordinate?
 
     func setWalkingHeld(_ held: Bool) {
+        // Oct 16 (WALK LATCH): a finger lifting off a latched walk -- the turn it
+        // was still asking for is finished, and the walk keeps its pace.
+        if !held, walkLatched, heldSteeringActive, heldSteeringYaw != heldSteeringTargetYaw {
+            latchTurnTarget = Double(cameraNode.eulerAngles.y) + (heldSteeringTargetYaw - heldSteeringYaw)
+        }
+        if held { latchTurnTarget = nil; latchStall = 0 }
         walkingHeld = held
         heldSteeringActive = false
         heldThrottle = 1
         if held {
             decorateHeldStepTaken = false
         } else {
-            heldDistance = 0
+            if !walkLatched { heldDistance = 0 }
             heldBlockedFireCoord = nil
             manualFootstepsFromAutoWalk = false // the takeover hold (if any) is over
         }
@@ -5885,6 +7079,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     func reset() {
         defer { refreshElevatorMissionSign() }
         stopContinuousWalk(reason: "reset")
+        walkLatched = false                                         // (Oct 16)
+        latchTurnTarget = nil
         setWalkingHeld(false)
         heldEndpointLookActive = false
         freeDragMoveActive = false
@@ -5906,8 +7102,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         standaloneRotation = false
         cameraNode.position = worldPosition(for: startCell)
         cameraNode.eulerAngles = SCNVector3(0, Float(startFacing.yaw), 0)
-        carriedExtinguisherNode?.removeFromParentNode()
-        carriedExtinguisherNode = nil
+        if carryingExtinguisher { ToolBelt.dropHallwayExtinguisher(animated: false) }
         carryingExtinguisher = false
         completedPhotoBooths.removeAll()
         activePhotoBooth = nil
@@ -6281,15 +7476,16 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                     guard let self, self.fireInteractionID == interactionID else { return }
                     wallNode?.removeFromParentNode()
                     self.pickedUpExtinguisherCoords.insert(coord)
+                    self.lastPickedExtinguisherCoord = coord        // (Oct 13: where a swipe puts it back)
                     self.refreshFloorMapTexture()
-                    let carried = HallwayScene.makeCarriedFireExtinguisherNode()
-                    self.cameraNode.addChildNode(carried)
-                    self.carriedExtinguisherNode = carried
+                    // Oct 16 (II): into a hand, through the tool system -- the one and only
+                    // carried extinguisher (the old camera-attached copy is gone).
+                    ToolBelt.holdHallwayExtinguisher()
                     self.carryingExtinguisher = true
                     self.extinguisherPickupInProgress = false
                     SoundEffects.playExtinguisherGrab()
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    self.showMessage("Extinguisher ready. Tap a fire to put it out.")
+                    self.showBrief("Extinguisher ready. Tap a fire to put it out.", seconds: 4)   // (Oct 16: goes by itself)
                 }
             }
         ]), forKey: "extinguisherPickup")
@@ -6308,8 +7504,82 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard canRotate, canReachFireFixture(at: coord), !carryingExtinguisher,
               !pickedUpExtinguisherCoords.contains(coord),
               extinguisherNodes[coord]?.parent != nil else { return false }
+        // Oct 16 (Supplies II): it takes a hand -- with two tools carried, the hands are full.
+        if ToolBelt.isFull {
+            Supplies.refuse(nil, controller: self)
+            return true
+        }
         collectExtinguisherIfPresent(at: coord)
         return extinguisherPickupInProgress
+    }
+
+    /// Oct 11: puts the carried extinguisher back on the empty bracket at
+    /// `coord` (where it was taken from) -- the reverse of the pickup. Fires
+    /// already out stay out; it can be taken again.
+    @discardableResult
+    func returnExtinguisher(at coord: GridCoordinate) -> Bool {
+        guard canRotate, carryingExtinguisher, extinguishingFireCoords.isEmpty, !extinguisherPickupInProgress,
+              pickedUpExtinguisherCoords.contains(coord), let wallNode = extinguisherNodes[coord] else { return false }
+        ToolBelt.dropHallwayExtinguisher(animated: false)
+        carryingExtinguisher = false
+        pickedUpExtinguisherCoords.remove(coord)
+        wallNode.removeAllActions()
+        if let resting = extinguisherRestingTransforms[coord] {
+            wallNode.position = resting.position
+            wallNode.eulerAngles = resting.eulerAngles
+            wallNode.scale = resting.scale
+        }
+        wallNode.opacity = 0
+        if wallNode.parent == nil { scene?.rootNode.addChildNode(wallNode) }
+        wallNode.runAction(.fadeIn(duration: 0.2))
+        refreshFloorMapTexture()
+        SoundEffects.playExtinguisherGrab()
+        diag("extinguisher.returned", ["cell": coord])
+        return true
+    }
+
+    // MARK: Oct 13 -- swipe the held extinguisher away (back to its bracket)
+
+    private var lastPickedExtinguisherCoord: GridCoordinate?
+
+    /// The held extinguisher's area on screen (its projected bounds, a little
+    /// enlarged for a finger), or nil when nothing is held.
+    func heldExtinguisherScreenRect(in view: SCNView) -> CGRect? {
+        guard carryingExtinguisher else { return nil }
+        // Oct 16 (II): held in a hand -- its drawn shape and its hand's corner.
+        return ToolBelt.hallwayExtinguisherRect(in: view)
+    }
+
+    /// A swipe up that began on the held extinguisher: it goes back on the
+    /// bracket it came from (wherever the player is) -- the same restoring
+    /// RETURN does in front of the bracket. Fires already out stay out.
+    @discardableResult
+    func putAwayExtinguisher() -> Bool {
+        guard carryingExtinguisher, extinguishingFireCoords.isEmpty, !extinguisherPickupInProgress,
+              !isSeatedAtComputer, !isSeatedInMeeting, !isElevatorRideInProgress else { return false }
+        let coord = lastPickedExtinguisherCoord.flatMap { pickedUpExtinguisherCoords.contains($0) ? $0 : nil }
+            ?? pickedUpExtinguisherCoords.first(where: { extinguisherNodes[$0] != nil })
+        ToolBelt.dropHallwayExtinguisher(animated: true)
+        carryingExtinguisher = false
+        // Oct 16 (II): never stuck in hand -- with no bracket to go back to (its
+        // fixture was removed meanwhile), it still leaves the hand.
+        guard let coord, let wallNode = extinguisherNodes[coord] else {
+            diag("extinguisher.putAwayNoBracket", ["playerCell": currentCell])
+            return true
+        }
+        pickedUpExtinguisherCoords.remove(coord)
+        wallNode.removeAllActions()
+        if let resting = extinguisherRestingTransforms[coord] {
+            wallNode.position = resting.position
+            wallNode.eulerAngles = resting.eulerAngles
+            wallNode.scale = resting.scale
+        }
+        wallNode.opacity = 0
+        if wallNode.parent == nil { scene?.rootNode.addChildNode(wallNode) }
+        wallNode.runAction(.fadeIn(duration: 0.3))
+        refreshFloorMapTexture()
+        diag("extinguisher.putAway", ["cell": coord, "playerCell": currentCell])
+        return true
     }
 
     var extinguisherAtCurrentCell: GridCoordinate? {
@@ -6472,7 +7742,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         guard canRotate, canReachFire(at: coord),
               fireCoords.contains(coord), !extinguishedFireCoords.contains(coord),
               let fire = fireNodes[coord], fire.parent != nil else { return false }
-        guard carryingExtinguisher else {
+        // Oct 16 (Supplies): a fire extinguisher from Supplies, carried, does exactly what a wall one does.
+        guard carryingExtinguisher || ToolBelt.carries(.extinguisher) else {
             // Sept 27 (Floor 5 active-fire bare-tap response, ouch.mp3):
             // the narrowest point a deliberate TAP on a reachable ACTIVE
             // fire is confirmed while NOT carrying the extinguisher --
@@ -6490,6 +7761,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             return true
         }
         extinguishingFireCoords.insert(coord)
+        ToolBelt.extinguisherInUse(seconds: 3.4)                       // Oct 16 (V): tray -- the extinguisher is seen, spraying
         let interactionID = fireInteractionID
         let spray = SCNNode(geometry: SCNCone(topRadius: 0.01, bottomRadius: 0.16, height: 0.6))
         let sprayMaterial = SCNMaterial()
@@ -7036,6 +8308,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private func swingRoomEntranceDoorOpen(at coord: GridCoordinate) {
         guard !openRoomEntranceDoors.contains(coord), let doorDirection = roomEntranceDoors[coord] else { return }
         openRoomEntranceDoors.insert(coord)
+        onRoomEntranceDoorOpened?(coord)                    // Oct 11 (MeetingProcession)
         // Sept 27 (Room Entrance open sound): fires exactly once per
         // real open transition -- this guard above already refuses to
         // re-enter while the door is already open, so there is no
@@ -7062,17 +8335,75 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// the elevator (ride, cab, panel, camera) is involved. False if the car
     /// isn't idle with both doors shut.
     @discardableResult
-    func runCharacterElevatorDeparture(boarding: @escaping (@escaping () -> Void) -> Void,
+    func runCharacterElevatorDeparture(who: String = "a character", purpose: CharacterElevatorPurpose = .other,
+                                       resident: Bool = false,
+                                       willOpen: (() -> Void)? = nil,
+                                       boarding: @escaping (@escaping () -> Void) -> Void,
                                        completion: @escaping () -> Void) -> Bool {
+        carOnItsWay = false
         guard !characterUsingElevator, !elevatorInUse, !chuteInUse, !arrivedElevatorDoorOpen,
               elevatorAwaitingEntryDirection == nil,
               let left = elevatorLeftDoor, let right = elevatorRightDoor, let direction = elevatorMountDirection,
               let leftClosed = elevatorLeftClosedPosition, let rightClosed = elevatorRightClosedPosition,
               left.action(forKey: "arrivalCloseBehind") == nil, right.action(forKey: "arrivalCloseBehind") == nil else {
-            diag("elevator.character.refused", [:])
+            let reason = characterElevatorRefusal ?? "unknown"
+            diag("elevator.character.refused", ["reason": reason])
+            elevatorLog("character door cycle refused (\(who)): \(reason)")
             return false
         }
+        // Oct 19 (one car): only with the actual car standing here. Elsewhere it's
+        // called for this character and the cycle is refused for now ("the car is
+        // on its way") -- the caller tries again, as for any busy elevator.
+        if let gate = carGate, !gate(floorNumber, "script:" + who) {
+            carOnItsWay = true
+            diag("elevator.character.refused", ["reason": "the car is on its way"])
+            elevatorLog("character door cycle for \(who): the car isn't here -- called it")
+            return false
+        }
+        carOnItsWay = false
+        let doorsWereShut = elevatorDoorsShut
+        left.removeAction(forKey: Self.carDoorsActionKey)
+        right.removeAction(forKey: Self.carDoorsActionKey)
+        carDoorsTarget = nil
         characterUsingElevator = true
+        // (Oct 19: carOnItsWay is reset at the top of every request)
+        // Oct 18 (inter-floor life): what this cycle is, for the ELEVATOR panel and
+        // the hall indicator -- a record of THIS cycle's own steps, nothing more.
+        setCharacterElevatorPhase("chime, doors opening", who: who, purpose: purpose)
+        // Oct 18 (building life): the cycle ends exactly once -- when the doors'
+        // close finishes, or at the latest after characterElevatorLimit (a
+        // scene that stopped running its actions -- behind the Grid Editor, say
+        // -- must never leave the elevator held for good). On the watchdog the
+        // doors are put back shut at once and `completion` runs; a scene that
+        // is already gone (no controller) is left alone, as before.
+        characterElevatorCycle += 1
+        let cycle = characterElevatorCycle
+        let state = CharacterElevatorCycleState()
+        state.joinable = resident                              // (Oct 19: a resident's doors the player may step through)
+        currentCharacterCycle = state
+        let end: (String) -> Void = { [weak self] how in
+            guard !state.ended, let self else { return }
+            state.ended = true
+            if self.characterElevatorCycle == cycle {
+                self.characterUsingElevator = false
+                self.setCharacterElevatorPhase(nil, who: nil, purpose: nil)
+                self.answerQueuedPlayerCall()
+            }
+            diag(how == "closed" ? "elevator.character.closed" : how == "joined" ? "elevator.character.joined" : "elevator.character.watchdog", ["cycle": cycle])
+            elevatorLog(how == "closed" ? "character door cycle \(cycle) closed"
+                        : how == "joined" ? "character door cycle \(cycle) ended with the doors open: the player is getting in too"
+                                        : "character door cycle \(cycle) WATCHDOG: doors snapped shut after \(Int(Self.characterElevatorLimit))s")
+            completion()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.characterElevatorLimit) { [weak self] in
+            guard !state.ended, self != nil else { return }
+            if state.yielded { end("joined"); return }          // (the player's doors now: never snapped shut)
+            left.removeAllActions()
+            right.removeAllActions()
+            left.position = leftClosed
+            right.position = rightClosed
+            end("watchdog")
+        }
         let alongWallX: Float, alongWallZ: Float
         switch direction {
         case .north, .south: (alongWallX, alongWallZ) = (1, 0)
@@ -7096,21 +8427,28 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             let outside = frame.center + frame.outward * Float(cellSize) * 0.5     // the elevator's hallway cell
             chimeGain = CritterAudio.buildingGain(at: SIMD3<Float>(outside.x, 1.5, outside.y))
         }
-        SoundEffects.playElevatorArrival(gain: chimeGain)
-        let delay = SCNAction.wait(duration: SoundEffects.elevatorDoorOpeningDelay)
+        if doorsWereShut { SoundEffects.playElevatorArrival(gain: chimeGain) }    // (Oct 19: the car's doors already open: it's here, no second chime)
+        let delay = SCNAction.wait(duration: doorsWereShut ? SoundEffects.elevatorDoorOpeningDelay : 0)
         diag("elevator.character.opening", ["chimeGain": Double(chimeGain)])
-        left.runAction(.sequence([delay, move(left, leftOpen)]))
+        elevatorLog("character door cycle \(cycle) opening for \(who) on floor \(floorNumber) (chime gain \(String(format: "%.2f", chimeGain)))")
+        LifeLog.event(who, "elevator.doorCycle", floor: floorNumber, ["cycle": cycle, "chimeGain": Double(chimeGain)])
+        // Oct 19: whoever is coming out appears as the doors start to part (never popping in after).
+        let parting = SCNAction.run { _ in DispatchQueue.main.async { if !state.ended { willOpen?() } } }
+        left.runAction(.sequence([delay, parting, move(left, leftOpen)]))
         right.runAction(.sequence([delay, move(right, rightOpen)])) { [weak self] in
             DispatchQueue.main.async {
+                guard !state.ended else { return }                   // (the watchdog already ended it)
+                if !state.yielded { self?.setCharacterElevatorPhase(purpose.isArrival ? "doors open: \(who) stepping out" : "doors open: \(who) boarding",
+                                                who: who, purpose: purpose) }
                 boarding {
-                    guard let self else { completion(); return }
+                    guard self != nil else { completion(); return }
+                    guard !state.ended else { return }
+                    if state.yielded { end("joined"); return }      // (Oct 19: the player has the doors: they close with their ride)
+                    state.closing = true
+                    self?.setCharacterElevatorPhase("doors closing", who: who, purpose: purpose)
                     left.runAction(move(left, leftClosed))
-                    right.runAction(move(right, rightClosed)) { [weak self] in
-                        DispatchQueue.main.async {
-                            self?.characterUsingElevator = false
-                            diag("elevator.character.closed", [:])
-                            completion()
-                        }
+                    right.runAction(move(right, rightClosed)) {
+                        DispatchQueue.main.async { end("closed") }
                     }
                 }
             }
@@ -7119,6 +8457,257 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
     /// Oct 6: true while a character's door cycle runs (the player can't board).
     private(set) var characterUsingElevator = false
+    /// Oct 18 (inter-floor life): the running character door cycle -- who, what
+    /// for, which of its steps, since when (nil: none running). Set only by
+    /// runCharacterElevatorDeparture's own steps; read by the ELEVATOR panel.
+    private(set) var characterElevatorCycleInfo: (who: String, purpose: CharacterElevatorPurpose, phase: String, since: Date)?
+    /// Oct 18 (elevator life): the player tapped while a character had the doors:
+    /// answered when that cycle ends (if within 20 s and they're still there).
+    private(set) var playerCallPending = false
+    private var playerCallAt: Date?
+
+    private func answerQueuedPlayerCall() {
+        guard playerCallPending else { return }
+        playerCallPending = false
+        guard let at = playerCallAt, Date().timeIntervalSince(at) < 20, currentCell == endCell else {
+            elevatorLog("queued player call dropped (stale or the player walked away)")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, !self.characterUsingElevator, !self.elevatorInUse, self.currentCell == self.endCell else { return }
+            elevatorLog("answering the queued player call")
+            self.openElevator()
+        }
+    }
+
+    /// Oct 18: what the hall's floor indicator was last set to (nil: as built).
+    var hallIndicatorShown: (floor: Int, direction: Int)?
+    var hallIndicatorLitMaterial: SCNMaterial?
+
+    private func setCharacterElevatorPhase(_ phase: String?, who: String?, purpose: CharacterElevatorPurpose?) {
+        if let phase, let who, let purpose {
+            characterElevatorCycleInfo = (who, purpose, phase, Date())
+            LifeLog.event(who, "elevator.phase", floor: floorNumber, ["phase": phase, "purpose": purpose.text])
+        } else {
+            characterElevatorCycleInfo = nil
+        }
+        // (Oct 19: the hall sign and the ELEVATOR panel follow the car, four times a second.)
+    }
+    /// Oct 18 (diagnostics): why runCharacterElevatorDeparture would refuse right
+    /// now (nil: it wouldn't) -- the first of its conditions that fails.
+    var characterElevatorRefusal: String? {
+        if carOnItsWay { return "the car is on its way" }
+        if characterUsingElevator { return "another character's door cycle is running" }
+        if elevatorInUse { return "the player's elevator is in use" }
+        if chuteInUse { return "the chute is in use" }
+        if arrivedElevatorDoorOpen { return "the player's arrival doors are open" }
+        if elevatorAwaitingEntryDirection != nil { return "the player is stepping in" }
+        if elevatorLeftDoor == nil || elevatorRightDoor == nil || elevatorMountDirection == nil
+            || elevatorLeftClosedPosition == nil || elevatorRightClosedPosition == nil { return "no elevator doors on this floor" }
+        if elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") != nil || elevatorRightDoor?.action(forKey: "arrivalCloseBehind") != nil {
+            return "the doors are closing behind the player"
+        }
+        return nil
+    }
+    /// Oct 18: which character door cycle is current (the watchdog's guard).
+    private var characterElevatorCycle = 0
+    /// Oct 18: a character's door cycle is over by this long after it began,
+    /// whatever SceneKit did (it normally takes about 4-8 s).
+    static var characterElevatorLimit: TimeInterval = 20
+    private final class CharacterElevatorCycleState {
+        var ended = false
+        /// Its doors have begun to close (too late for the player to join).
+        var closing = false
+        /// Oct 19: the player got in too: the doors are theirs now -- the cycle
+        /// ends when its character is in (or out), without closing them.
+        var yielded = false
+        /// A resident's (not a scripted character's): the player may join it.
+        var joinable = false
+    }
+    private var currentCharacterCycle: CharacterElevatorCycleState?
+
+    /// Oct 19 (sharing the car): a resident's door cycle the player can step into
+    /// -- running, its doors open or opening, not yet closing.
+    var characterCycleJoinable: Bool {
+        guard characterUsingElevator, let c = currentCharacterCycle else { return false }
+        return !c.ended && !c.closing && !c.yielded && c.joinable
+    }
+
+    /// The player is boarding through a resident's open doors: the cycle lets
+    /// them go (it won't close them, its watchdog won't snap them shut) and the
+    /// elevator is the player's from here; the resident still gets in (or out).
+    private func yieldCharacterCycleToPlayer() {
+        guard let c = currentCharacterCycle, characterCycleJoinable else { return }
+        c.yielded = true
+        characterUsingElevator = false
+        let who = characterElevatorCycleInfo?.who ?? "a resident"
+        setCharacterElevatorPhase(nil, who: nil, purpose: nil)
+        diag("elevator.character.joinedByPlayer", ["who": who])
+        elevatorLog("character door cycle for \(who): the player is getting in too -- the doors stay open for them")
+    }
+
+    // MARK: Oct 19 -- the one car (ElevatorScheduler.swift)
+
+    /// Is the car standing here for `who` ("player", "script:<name>")? True: its
+    /// doors are theirs now. False: it isn't here -- it has been called instead.
+    /// (nil: no building car -- a test's lone controller: as before.)
+    var carGate: ((_ floor: Int, _ who: String) -> Bool)?
+    /// The player's ride is setting off (from, to): the car runs with them.
+    var onElevatorTravel: ((_ from: Int, _ to: Int) -> Void)?
+    /// A character's door cycle was refused because the car was called instead.
+    private(set) var carOnItsWay = false
+    static let carDoorsActionKey = "carDoors"
+    /// What the building's doors were last told to do here (nil: nothing yet / taken over).
+    private var carDoorsTarget: Bool?
+
+    /// The player is in the cab (boarding, waiting for a floor, riding, or
+    /// standing in an arrived cab) -- not merely near it.
+    var playerInCab: Bool {
+        elevatorInUse || isElevatorWaitingForFloor || elevatorAwaitingEntryDirection != nil
+    }
+
+    /// The player is standing at this floor's elevator (its hallway cell).
+    var playerAtElevatorCell: Bool { currentCell == endCell && !playerInCab }
+
+    /// The doors closing behind the player after they stepped out are still moving.
+    var doorsClosingBehindPlayer: Bool {
+        elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") != nil || elevatorRightDoor?.action(forKey: "arrivalCloseBehind") != nil
+    }
+
+    /// How far open the doors are as drawn now (0 shut .. 1 fully open).
+    var elevatorDoorsOpenFraction: Double {
+        guard let right = elevatorRightDoor, let rc = elevatorRightClosedPosition else { return 0 }
+        let scnT = pthread_main_np() != 0 ? FrameTiming.start() : 0       // Oct 24: SceneKit wait, main only (measurement)
+        let r = right.presentation.position
+        FrameTiming.shared.record(.scnDoorFrac, since: scnT)
+        return min(1, max(0, Double(hypotf(r.x - rc.x, r.z - rc.z)) / 0.8))
+    }
+
+    /// The building's doors are free to be the car's (nobody else's in play).
+    var carDoorsAvailable: Bool {
+        !elevatorInUse && !characterUsingElevator && !arrivedElevatorDoorOpen && elevatorAwaitingEntryDirection == nil
+            && !isElevatorWaitingForFloor && !doorsClosingBehindPlayer && !chuteInUse
+    }
+
+    /// The car's own doors on this floor (it stopped here for someone else -- a
+    /// resident in or out, a call): open (the arrival chime, then the slide) or
+    /// shut. The same slide as every door cycle, to absolute positions, so a
+    /// change of mind mid-slide simply turns round. Nothing while the player's
+    /// or a character's doors are in play. Repeating an order already carried
+    /// out does nothing.
+    func runCarDoors(open: Bool) {
+        guard carDoorsAvailable, let left = elevatorLeftDoor, let right = elevatorRightDoor, let direction = elevatorMountDirection,
+              let leftClosed = elevatorLeftClosedPosition, let rightClosed = elevatorRightClosedPosition else { return }
+        let moving = left.action(forKey: Self.carDoorsActionKey) != nil || right.action(forKey: Self.carDoorsActionKey) != nil
+        if carDoorsTarget == open, moving { return }
+        let fraction = elevatorDoorsOpenFraction
+        if !moving, open ? fraction > 0.97 : fraction < 0.02 { carDoorsTarget = open; return }
+        carDoorsTarget = open
+        let ax: Float, az: Float
+        switch direction {
+        case .north, .south: (ax, az) = (1, 0)
+        case .east, .west: (ax, az) = (0, 1)
+        }
+        let slide: Float = 0.8
+        let leftTo = open ? SCNVector3(leftClosed.x - slide * ax, leftClosed.y, leftClosed.z - slide * az) : leftClosed
+        let rightTo = open ? SCNVector3(rightClosed.x + slide * ax, rightClosed.y, rightClosed.z + slide * az) : rightClosed
+        // (the remaining part of the slide, at the doors' one pace)
+        let remaining = open ? 1 - fraction : fraction
+        let duration = max(0.15, 1.6 * remaining)
+        var wait: TimeInterval = 0
+        if open, fraction < 0.02 {
+            var gain: Float = 1
+            if let frame = elevatorDoorwayFrame() {
+                let outside = frame.center + frame.outward * Float(cellSize) * 0.5
+                gain = CritterAudio.buildingGain(at: SIMD3<Float>(outside.x, 1.5, outside.y))
+            }
+            SoundEffects.playElevatorArrival(gain: gain)                    // (the car has arrived here: the chime)
+            wait = SoundEffects.elevatorDoorOpeningDelay
+        }
+        func slideTo(_ p: SCNVector3) -> SCNAction {
+            let a = SCNAction.move(to: p, duration: duration)
+            a.timingMode = .easeInEaseOut
+            return .sequence([.wait(duration: wait), a])
+        }
+        left.removeAction(forKey: Self.carDoorsActionKey)
+        right.removeAction(forKey: Self.carDoorsActionKey)
+        left.runAction(slideTo(leftTo), forKey: Self.carDoorsActionKey)
+        right.runAction(slideTo(rightTo), forKey: Self.carDoorsActionKey)
+        diag("elevator.carDoors", ["open": open, "floor": floorNumber])
+    }
+
+    // Oct 19 -- THE DOORS, HEARD: whatever moves them (the player's boarding and
+    // arrival, the ride's close, the doors closing behind them, a resident's stop,
+    // a character's cycle, the threshold swipe), the sound follows the doors'
+    // own movement: the opening slide as they start to part, the closing slide as
+    // they start to close, the clunk as they meet. Once per movement.
+    private var doorMotion = ElevatorDoorMotion()
+    private var doorSoundTimer: Timer?
+    /// The doors as last heard (for the car to mirror the player's and a character's doors).
+    var elevatorDoorPhase: ElevatorDoorMotion.Phase { doorMotion.phase }
+    var elevatorDoorPhaseForCar: BuildingElevator.Doors { doorMotion.doors }
+    /// The player is standing in an arrived (or boarded) cab with its doors open or opening.
+    var arrivedElevatorDoorOpenForCar: Bool { arrivedElevatorDoorOpen }
+
+    func enableDoorSounds() {
+        guard doorSoundTimer == nil, elevatorRightDoor != nil else { return }
+        doorMotion = ElevatorDoorMotion(fraction: elevatorDoorsOpenFraction)
+        let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] t in
+            MainActor.assumeIsolated {
+                guard let self else { t.invalidate(); PerfMonitor.gauge("doorSoundTimers", -1); return }
+                self.sampleDoorSounds()
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        doorSoundTimer = t
+        PerfMonitor.gauge("doorSoundTimers", +1)                           // Oct 21: live count (measurement)
+    }
+
+    func disableDoorSounds() {
+        if doorSoundTimer != nil { PerfMonitor.gauge("doorSoundTimers", -1) }
+        doorSoundTimer?.invalidate()
+        doorSoundTimer = nil
+    }
+
+    /// Oct 22 (stability pass): this floor's controller has just been replaced by
+    /// the next floor's. Its 20 Hz door-sound timer only ever stopped when the
+    /// controller itself went away -- and the diagnostics showed one replaced
+    /// controller (and its timer) still alive for the rest of the session
+    /// ("navControllers=2 doorSoundTimers=2" from the 7 -> 12 ride on), its
+    /// timer sampling a scene no one could see 20 times a second. Now its
+    /// periodic work stops the moment it's replaced, whatever still holds it;
+    /// and if it's still alive 10 s later the flight recorder says so
+    /// (leak.navController), so the holder can be found.
+    private(set) var isRetired = false
+    func retire() {
+        guard !isRetired else { return }
+        isRetired = true
+        disableDoorSounds()
+        let me = String(describing: ObjectIdentifier(self))
+        diag("navController.retired", ["controller": me, "floor": floorNumber])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self else { return }
+            diag("leak.navController", ["controller": me, "floor": self.floorNumber,
+                                        "note": "still alive 10 s after it was replaced"])
+        }
+    }
+
+    private func sampleDoorSounds() {
+        let perf = PerfMonitor.begin("doorSounds.sample"); defer { PerfMonitor.end(perf) }  // Oct 21: measurement only
+        guard let node = elevatorExteriorNode ?? elevatorRightDoor, node.parent != nil || node === elevatorRightDoor else { return }
+        for cue in doorMotion.update(fraction: elevatorDoorsOpenFraction, at: CACurrentMediaTime()) {
+            ElevatorDoorSound.play(cue, on: elevatorRightDoor ?? node)
+            diag("elevator.doorSound", ["cue": "\(cue)", "floor": floorNumber])
+        }
+    }
+
+    /// Oct 19: both doors at their shut positions (as drawn now).
+    var elevatorDoorsShut: Bool {
+        guard let left = elevatorLeftDoor, let right = elevatorRightDoor,
+              let lc = elevatorLeftClosedPosition, let rc = elevatorRightClosedPosition else { return true }
+        let l = left.presentation.position, r = right.presentation.position
+        return hypotf(l.x - lc.x, l.z - lc.z) < 0.03 && hypotf(r.x - rc.x, r.z - rc.z) < 0.03
+    }
 
     /// Oct 6 (guided journey): the elevator doorway on this floor in world
     /// x/z -- the midpoint of the two doors' closed positions, and the unit
@@ -7379,7 +8968,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     // shared function while still scoping the new visible effect to
     // only the popup, per Eddie's "do not casually change another map
     // UI as collateral damage."
-    func currentFloorMapImage(backgroundOpacity: CGFloat = 1, simplified: Bool = false, includeWallObjectIndicators: Bool = false) -> UIImage {
+    func currentFloorMapImage(backgroundOpacity: CGFloat = 1, simplified: Bool = false, includeWallObjectIndicators: Bool = false,
+                              gridSize: Int = 15) -> UIImage {
         let missionItemCells = objectKinds.filter { $0.value == missionObjectKind && !collectedCoords.contains($0.key) }.map { $0.key }
         let missionDestinationCells = destinationKinds.filter { $0.value == missionObjectKind }.map { $0.key }
         // Sept 27 (Floor 5 fire/extinguisher map markers): same
@@ -7436,7 +9026,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let exitSignFaces: Set<WallFace> = includeWallObjectIndicators
             ? Set(exitSignDirections.map { WallFace(coord: $0.key, direction: $0.value) })
             : []
-        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, headingYaw: Double(cameraNode.eulerAngles.y), missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, fireCells: activeFireCells, extinguisherCells: Array(availableExtinguisherCells), photoBoothCells: Array(photoBoothCoords), gameCells: Array(gameMapCells), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil, backgroundOpacity: backgroundOpacity, simplified: simplified, wallObjectFaces: wallObjectFaces, doorFaces: doorFaces, exitSignFaces: exitSignFaces)
+        return HallwayScene.makeFloorMapTexture(cells: cells, end: endCell, playerAt: currentCell, facing: facing, headingYaw: Double(cameraNode.eulerAngles.y), missionItemCells: missionItemCells, missionDestinationCells: missionDestinationCells, fireCells: activeFireCells, extinguisherCells: Array(availableExtinguisherCells), photoBoothCells: Array(photoBoothCoords), gameCells: Array(gameMapCells), roomDoors: roomDoors, itemRooms: itemRooms, bathroomDoors: bathroomDoors, paintedCells: missionObjectKind == .paintBucket ? paintedCells : nil, backgroundOpacity: backgroundOpacity, simplified: simplified, wallObjectFaces: wallObjectFaces, doorFaces: doorFaces, exitSignFaces: exitSignFaces, gridSize: gridSize)
     }
 
     private var applyingArrival = false
@@ -7447,11 +9037,12 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         collectObjectIfPresent(at: cell)
         applyingArrival = false
         refreshFloorMapTexture()
+        saveResumePoint(reason: "cell")                    // Oct 11 (resume)
     }
 
     private func refreshFloorMapTexture() {
         guard !applyingArrival, !floorMapPlaneNodes.isEmpty else { return }
-        let image = currentFloorMapImage()
+        let image = currentFloorMapImage(gridSize: HallwayScene.floorMapGridSize(for: cells))   // Oct 17: wall maps fit the whole floor
         for plane in floorMapPlaneNodes {
             plane.geometry?.materials.first?.diffuse.contents = image
         }
@@ -7913,6 +9504,8 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// Guards playControlledArrivalDoorOpen() below against firing
     /// twice for the same arrival.
     private var controlledArrivalDoorsOpened = false
+    /// Oct 15 (Rocket Elevator): this arrival's turn-to-the-doors time.
+    private var arrivalFaceDoorsSeconds: TimeInterval = TapNavigationController.elevatorArrivalFaceDoorsDuration
 
     /// Eddie, Sept 16 (spatially-truthful controlled arrival): called
     /// once by ContentView's ElevatorCurtainOverlay, the instant it
@@ -7935,6 +9528,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// they're looking the other way -- with no dependency on the
     /// camera being centered on them at all.
     func playControlledArrivalDoorOpen() {
+        let rocketArrival = RocketElevator.consumeArrival()         // (Oct 15: consumed whatever happens next)
         guard arrivedElevatorDoorOpen, !controlledArrivalDoorsOpened else {
             elevatorLog("controlled arrival door-open skipped -- arrivedElevatorDoorOpen=\(arrivedElevatorDoorOpen) alreadyOpened=\(controlledArrivalDoorsOpened)")
             return
@@ -7959,17 +9553,21 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // turn/snap animation can be reused safely, prefer
         // consistency." Doors should open the same way everywhere.
         let slide: CGFloat = 0.8
-        let elevatorSlideDuration: TimeInterval = 1.6
+        // (Oct 15, Rocket Elevator: a fast ride's doors open fast -- and the
+        // way out is live the moment they're open.)
+        let elevatorSlideDuration: TimeInterval = rocketArrival ? RocketElevator.doorOpen : RocketElevator.classicDoorSlide
         let openLeft = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
         let openRight = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
         openLeft.timingMode = .easeInEaseOut
         openRight.timingMode = .easeInEaseOut
+        arrivalFaceDoorsSeconds = rocketArrival ? RocketElevator.faceDoors : Self.elevatorArrivalFaceDoorsDuration
         ElevatorArrivalTrace.shared.doorsScheduled(x: rightDoor.presentation.position.x, z: rightDoor.presentation.position.z)
         leftDoor.runAction(openLeft)
         rightDoor.runAction(openRight) { [weak self] in
             DispatchQueue.main.async {
                 guard let self, self.arrivedElevatorDoorOpen, !self.elevatorInUse else { return }
                 self.arrivalExitPermitted = true
+                if rocketArrival { RocketElevator.markControlReturned(floor: self.floorNumber) }
             }
         }
         beginArrivalFaceDoors(direction: direction)
@@ -8029,7 +9627,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             elevatorLog("arrival face-doors SKIPPED -- already facing straight out of the doorway")
             return
         }
-        let duration = Self.elevatorArrivalFaceDoorsDuration * max(0.5, min(1, max(abs(turn) / (.pi / 2), slide / 0.8)))
+        let duration = arrivalFaceDoorsSeconds * max(0.5, min(1, max(abs(turn) / (.pi / 2), slide / 0.8)))
         let lookRevision = elevatorLookRevision
         var reportedFirstFrame = false
         let spin = SCNAction.customAction(duration: duration) { [weak self] node, elapsed in
@@ -8082,8 +9680,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         diag("elevator.openDoors.closing", ["floor": floorNumber, "departTo": floor])
         left.removeAllActions()
         right.removeAllActions()
-        let closeLeft = SCNAction.move(to: leftClosed, duration: 1.6)
-        let closeRight = SCNAction.move(to: rightClosed, duration: 1.6)
+        // (Oct 15, Rocket Elevator: a floor chosen by the player -- quick doors.)
+        let closeSeconds = floor != nil && RocketElevator.isOn && elevatorCinematicAutoFloor == nil
+            ? RocketElevator.doorClose : RocketElevator.classicDoorSlide
+        let closeLeft = SCNAction.move(to: leftClosed, duration: closeSeconds)
+        let closeRight = SCNAction.move(to: rightClosed, duration: closeSeconds)
         closeLeft.timingMode = .easeInEaseOut
         closeRight.timingMode = .easeInEaseOut
         left.runAction(closeLeft)
@@ -8120,15 +9721,17 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         performElevatorThresholdWalk(to: target, entering: false)
     }
 
-    private func performElevatorThresholdWalk(to target: SCNVector3, entering: Bool) {
+    /// `keepYaw` (Oct 19, elevator swipe): a BACKWARD crossing -- the player
+    /// keeps looking where they look (backing in or out), no turn to the doorway.
+    private func performElevatorThresholdWalk(to target: SCNVector3, entering: Bool, keepYaw: Bool = false) {
         // Only an explicit threshold crossing requests alignment. Looking during
         // this glide takes ownership of yaw; translation still finishes safely.
         elevatorRightDoor?.removeAction(forKey: Self.elevatorArrivalDwellKey)
         let direction = entering ? elevatorMountDirection : elevatorAwaitingEntryDirection
         let startYaw = Double(cameraNode.eulerAngles.y)
-        let turn = shortestDelta(from: startYaw, to: direction?.yaw ?? startYaw)
+        let turn = keepYaw ? 0 : shortestDelta(from: startYaw, to: direction?.yaw ?? startYaw)
         let lookRevision = elevatorLookRevision
-        if let direction { facing = direction }
+        if let direction, !keepYaw { facing = direction }
         let start = cameraNode.position
         // Oct 6 (exit through the opening): leaving an arrived cab from an
         // off-centre spot (e.g. in front of the panel, beside the doors) must
@@ -8219,6 +9822,624 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
     }
 
+    // MARK: Oct 19 -- THE ELEVATOR THRESHOLD BY SWIPE
+    //
+    // The doorway between an open cab and its hallway cell is not a grid
+    // edge: the cab is off the grid (the player inside is "at" the hallway
+    // cell, offset into the cab), so neither the grid drag (openRunLength)
+    // nor the free walk's wall geometry can carry a drag across it -- and,
+    // inside, every pan was taken as cab look (isElevatorRideInProgress).
+    // Only the tap reached the threshold walk. A vertical swipe now asks
+    // here which crossing it would make (finger down = forward, up =
+    // backward, along where the player is LOOKING), and makes it with the
+    // same threshold walk the tap uses. Closed doors: no crossing.
+
+    enum ElevatorThresholdCrossing: Equatable { case exit, enter }
+
+    /// The doors are open to the hallway behind a player who has just stepped
+    /// out: open, or still closing behind them (a step back reopens them).
+    private var elevatorOpenBehindPlayer: Bool {
+        arrivedElevatorDoorOpen
+            || elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") != nil
+            || elevatorRightDoor?.action(forKey: "arrivalCloseBehind") != nil
+    }
+
+    /// Which crossing a vertical swipe would make right now (nil: none).
+    /// `forward`: finger down (walk forward); false: finger up (walk backward).
+    func elevatorThresholdCrossing(forward: Bool) -> ElevatorThresholdCrossing? {
+        Self.thresholdCrossing(yaw: Double(cameraNode.eulerAngles.y), forward: forward,
+                               insideExit: elevatorAwaitingEntryDirection, exitPermitted: canStartElevatorExit,
+                               atElevatorCell: currentCell == endCell, mount: elevatorMountDirection,
+                               doorsOpen: elevatorOpenBehindPlayer || mayBoardThroughCarDoors,   // (Oct 20: a resident's open doors too)
+                               busy: isAnimating || elevatorInUse || chuteInUse || characterUsingElevator || evictionLocked
+                                   || elevatorLeftClosedPosition == nil || elevatorRightClosedPosition == nil)
+    }
+
+    /// A swipe could cross the threshold one way or the other (outside: the
+    /// pan then waits a few points to see which way it goes).
+    var elevatorThresholdNearby: Bool {
+        elevatorAwaitingEntryDirection == nil
+            && (elevatorThresholdCrossing(forward: true) != nil || elevatorThresholdCrossing(forward: false) != nil)
+    }
+
+    /// The rule, pure (tests): walking where the player looks (forward) or
+    /// away from it (backward), within 60 degrees of the way through the doorway.
+    static func thresholdCrossing(yaw: Double, forward: Bool, insideExit: Direction?, exitPermitted: Bool,
+                                              atElevatorCell: Bool, mount: Direction?, doorsOpen: Bool,
+                                              busy: Bool) -> ElevatorThresholdCrossing? {
+        guard !busy else { return nil }
+        var travel = forward ? yaw : yaw + .pi
+        travel = atan2(sin(travel), cos(travel))
+        func within(_ d: Direction) -> Bool {
+            let delta = atan2(sin(d.yaw - travel), cos(d.yaw - travel))
+            return abs(delta) < .pi / 3
+        }
+        if let exit = insideExit {
+            return exitPermitted && within(exit) ? .exit : nil
+        }
+        guard atElevatorCell, let mount, doorsOpen, within(mount) else { return nil }
+        return .enter
+    }
+
+    /// The swipe's crossing, made at once (a flick, and the tests): out of the
+    /// cab, or back into it. Same walk, speed and states as the tap's.
+    @discardableResult
+    func crossElevatorThreshold(forward: Bool) -> Bool {
+        guard beginThresholdScrub(forward: forward) else { return false }
+        endThresholdScrub(commit: true)
+        return true
+    }
+
+    // Oct 19 (later): THE SWIPE IS CONTINUOUS. The finger walks the player
+    // along the very path the threshold walk takes (in the cab: to the
+    // doorway's centreline, then out to the hallway cell's centre; outside:
+    // straight back into the cab), a cell per dragMoveDistance points, as a
+    // hallway drag does. Released far enough (or flicked), the threshold walk
+    // carries on FROM WHERE THE PLAYER IS -- no jump; short, a short glide
+    // back to where the drag began.
+    private struct ThresholdScrub {
+        let crossing: ElevatorThresholdCrossing
+        let forward: Bool
+        let path: [SCNVector3]
+        let length: Float
+        let reopenedDoors: Bool
+        /// Oct 20: stepping in through the car's doors, open for a resident (not the player's own).
+        var viaCarDoors = false
+    }
+    private var thresholdScrub: ThresholdScrub?
+    var isThresholdScrubbing: Bool { thresholdScrub != nil }
+
+    /// Begins the scrub (false: no crossing here now -- the pan stays what it was).
+    @discardableResult
+    func beginThresholdScrub(forward: Bool) -> Bool {
+        guard thresholdScrub == nil, let crossing = elevatorThresholdCrossing(forward: forward) else {
+            diag("elevator.thresholdSwipe.refused", ["forward": forward, "cell": currentCell, "awaiting": elevatorAwaitingEntryDirection != nil,
+                                                     "doorsOpen": elevatorOpenBehindPlayer, "elevatorInUse": elevatorInUse])
+            return false
+        }
+        let start = cameraNode.position
+        var path = [start]
+        var reopened = false
+        var viaCar = false
+        switch crossing {
+        case .exit:
+            guard let exit = elevatorAwaitingEntryDirection, let centre = elevatorEntryCellCenterPosition else { return false }
+            if let aligned = elevatorDoorwayCentrelinePoint(from: start, exit: exit),
+               hypot(Double(aligned.x - start.x), Double(aligned.z - start.z)) > 0.05 { path.append(aligned) }
+            path.append(centre)
+            isDraggingElevatorCamera = false
+        case .enter:
+            guard let mount = elevatorMountDirection, let left = elevatorLeftDoor, let right = elevatorRightDoor,
+                  let leftClosed = elevatorLeftClosedPosition, let rightClosed = elevatorRightClosedPosition else { return false }
+            if !arrivedElevatorDoorOpen, !elevatorOpenBehindPlayer, mayBoardThroughCarDoors {
+                // Oct 20 (sharing the car): the car's doors stand open here for a
+                // resident -- the player steps in through them too. They stay the
+                // car's (held open for the player) until the crossing is made.
+                viaCar = true
+                holdCarDoorway?(true)
+            } else if !arrivedElevatorDoorOpen {
+                // Closing behind the player: back to open, from wherever they are (a door's safety edge).
+                let along: (x: Float, z: Float) = (mount == .north || mount == .south) ? (1, 0) : (0, 1)
+                let slide: Float = 0.8
+                left.removeAllActions()
+                right.removeAllActions()
+                let openLeft = SCNAction.move(to: SCNVector3(leftClosed.x - slide * along.x, leftClosed.y, leftClosed.z - slide * along.z), duration: 0.6)
+                let openRight = SCNAction.move(to: SCNVector3(rightClosed.x + slide * along.x, rightClosed.y, rightClosed.z + slide * along.z), duration: 0.6)
+                openLeft.timingMode = .easeInEaseOut
+                openRight.timingMode = .easeInEaseOut
+                left.runAction(openLeft)
+                right.runAction(openRight)
+                arrivedElevatorDoorOpen = true
+                reopened = true
+            }
+            let c = worldPosition(for: endCell)
+            let entry = SCNVector3(c.x, start.y, c.z)
+            elevatorEntryCellCenterPosition = entry
+            let distance = Float(HallwayScene.ElevatorGeometry(cellSize: cellSize).entryDistance)
+            path.append(SCNVector3(entry.x + Float(mount.delta.col) * distance, entry.y, entry.z + Float(mount.delta.row) * distance))
+        }
+        var length: Float = 0
+        for i in 1..<path.count { length += hypotf(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z) }
+        stopContinuousWalk(reason: "thresholdSwipe")
+        cameraNode.removeAction(forKey: Self.elevatorArrivalFaceDoorsActionKey)
+        cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)
+        thresholdScrub = ThresholdScrub(crossing: crossing, forward: forward, path: path, length: length, reopenedDoors: reopened,
+                                        viaCarDoors: viaCar)
+        phase = .scriptedWalkOut                         // (the finger owns the position; the grid renderer stays out)
+        isAnimating = true                               // (no tap, turn or second walk meanwhile)
+        diag("elevator.thresholdSwipe.began", ["crossing": crossing == .exit ? "exit" : "enter", "forward": forward,
+                                               "metres": length, "reopenedDoors": reopened, "viaCarDoors": viaCar, "floor": floorNumber])
+        return true
+    }
+
+    /// The finger's travel along the swipe, in cells (toward the crossing; never past its end).
+    func updateThresholdScrub(cells: Double) {
+        guard let scrub = thresholdScrub else { return }
+        if scrub.viaCarDoors { holdCarDoorway?(true) }                       // (Oct 20: the car waits while the finger walks in)
+        var d = max(0, min(Float(cells) * Float(cellSize), scrub.length * 0.97))
+        var p = scrub.path[0]
+        for i in 1..<scrub.path.count {
+            let a = scrub.path[i - 1], b = scrub.path[i]
+            let leg = hypotf(b.x - a.x, b.z - a.z)
+            if d <= leg || i == scrub.path.count - 1 {
+                let k = leg > 0 ? min(1, d / leg) : 1
+                p = SCNVector3(a.x + (b.x - a.x) * k, a.y, a.z + (b.z - a.z) * k)
+                break
+            }
+            d -= leg
+        }
+        cameraNode.position = p
+    }
+
+    /// Released: on through the doorway from here, or back to where it began.
+    func endThresholdScrub(commit: Bool) {
+        guard let scrub = thresholdScrub else { return }
+        thresholdScrub = nil
+        isAnimating = false
+        phase = .translate
+        // Oct 20 (sharing the car): in through a resident's open doors -- they become
+        // the player's here (as a tap on them would make them). The car gone meanwhile
+        // (or the floor refusing now): back out to where the swipe began, as if short.
+        var commit = commit
+        if scrub.viaCarDoors {
+            if commit, !boardThroughCarDoors() {
+                diag("elevator.thresholdSwipe.carGone", ["floor": floorNumber])
+                commit = false
+            }
+            holdCarDoorway?(false)
+        }
+        if commit {
+            diag("elevator.thresholdSwipe", ["crossing": scrub.crossing == .exit ? "exit" : "enter", "forward": scrub.forward, "floor": floorNumber])
+            switch scrub.crossing {
+            case .exit:
+                if scrub.forward { performElevatorEntryWalkOut() }          // (exactly the tap's walk out, from here)
+                else if let target = elevatorEntryCellCenterPosition { performElevatorThresholdWalk(to: target, entering: false, keepYaw: true) }
+            case .enter:
+                arrivalExitPermitted = true                                  // (inside again, the way out is live, as on arrival)
+                performElevatorThresholdWalk(to: scrub.path[scrub.path.count - 1], entering: true, keepYaw: !scrub.forward)
+                refreshElevatorMissionSign()
+            }
+            return
+        }
+        // Not far enough: a short glide back to where the drag began.
+        diag("elevator.thresholdSwipe.cancelled", ["crossing": scrub.crossing == .exit ? "exit" : "enter"])
+        let from = cameraNode.position, to = scrub.path[0]
+        let back = Double(hypotf(to.x - from.x, to.z - from.z))
+        phase = .scriptedWalkOut
+        isAnimating = true
+        let glide = SCNAction.move(to: to, duration: max(0.12, min(0.4, back / max(0.1, Double(travelSpeed)))))
+        glide.timingMode = .easeOut
+        cameraNode.runAction(glide, forKey: "elevatorThresholdGlideBack") { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isAnimating = false
+                self.phase = .translate
+                if scrub.crossing == .enter, scrub.reopenedDoors { self.closeArrivedElevatorAfterExit() }   // (still out: they close again)
+            }
+        }
+    }
+
+    /// The pan that turned out to be a threshold swipe lets go of the look it
+    /// began (inside: the cab look), leaving the view where it is.
+    func releasePanForElevatorThreshold() {
+        isDraggingElevatorCamera = false               // (the view stays where it is: no snap)
+    }
+
+    // MARK: Oct 20 (night) -- STANDING AT A USEFUL DISTANCE FROM THE ELEVATOR
+    //
+    // iPhone: walked right up to the closed doors, the doors fill the screen --
+    // the floor sign above them cut off, the call buttons off the right edge.
+    // Free walk lets the eye come to 0.36 m past the elevator cell's centre:
+    // 1.28 m from the frame's face, where the 75-degree (vertical) lens in a
+    // portrait screen sees only +/-0.45 m across. The doors' frame, the sign
+    // and the call panel span about 1.5 m and reach 2.7 m up.
+    //
+    // When a walk of any kind ENDS there (held, tap, latched -- the one place
+    // every walk ends, finishFreeMove), facing the closed doors, the player
+    // eases back (0.45 s, the view's yaw kept) to the point -- worked out from
+    // the real parts of the elevator front in this scene, the camera's lens and
+    // the screen's shape -- where all of it is in view: about 2.1 m from the
+    // frame, a little toward the call panel, still in the elevator's cell (so
+    // calling, the doors, boarding, swipes: all as ever). Once per visit to the
+    // doors: walk up closer again and it stays where you put it. Never while a
+    // finger is down, the doors are open (anyone's), the player is in or using
+    // the elevator, a scene is scripted, or a critter is being followed.
+
+    // MARK: Oct 22 -- CALLING THE CAR FROM THE HALL
+    //
+    // The doors are not a button: a tap on them turns and frames the call panel
+    // (the elevator view point) -- no call, no sound. The panel's UP and DOWN are:
+    // a press lights that button and makes the ordinary call (openElevator: the
+    // car here opens its doors now; elsewhere it's called and the arrival
+    // answers it -- chime, doors, all as before). While the call stands, the
+    // button stays lit and further taps on the doors or a lit button do nothing
+    // but frame. The buttons go out as the doors open for the player (or once no
+    // call stands). Only the directions this floor has are shown: no DOWN in the
+    // lobby, no UP on the top floor. (The cab's own panel is untouched.)
+
+    /// The hall buttons lit: +1 up, -1 down.
+    private(set) var hallCallLit: Set<Int> = []
+    private var hallCallLitAt: Date?
+    private var hallCallToken = 0
+    private var hallButtonsConfigured = false
+    /// Each button's own material (lit by its emission), and how it looks unlit.
+    private var hallButtonMaterials: [Int: (material: SCNMaterial, emission: Any?, intensity: CGFloat)] = [:]
+
+    /// The directions a call from this floor can go (pure).
+    static func hallCallDirections(floor: Int, reachable: Set<Int>) -> Set<Int> {
+        let others = reachable.subtracting([floor])
+        guard !others.isEmpty else { return [1, -1] }
+        var ways: Set<Int> = []
+        if others.contains(where: { $0 > floor }) { ways.insert(1) }
+        if others.contains(where: { $0 < floor }) { ways.insert(-1) }
+        return ways
+    }
+    var hallCallDirections: Set<Int> { Self.hallCallDirections(floor: floorNumber, reachable: elevatorReachableFloors) }
+
+    /// Which hall button the tap pressed (+1 up, -1 down), if it landed on the
+    /// call panel (anywhere on it: its nearer button); nil -- the doors, or none.
+    func hallCallButton(for hits: [SCNHitTestResult]) -> Int? {
+        guard let hit = hits.first(where: { isElevatorDoor($0.node) || isElevatorCallPanel($0.node) }) else { return nil }
+        var node: SCNNode? = hit.node
+        while let n = node {
+            if n.name == "elevatorExteriorUpButton" { return 1 }
+            if n.name == "elevatorExteriorDownButton" { return -1 }
+            if n.name == "elevatorExteriorCallPanel" {
+                let local = n.convertPosition(hit.worldCoordinates, from: nil)
+                let ways = hallCallDirections
+                if ways.count == 1, let only = ways.first { return only }   // (one button: the whole panel is it)
+                return local.y >= 0 ? 1 : -1
+            }
+            node = n.parent
+        }
+        return nil
+    }
+
+    /// A tap on the elevator from the hall, at its cell: board an arrived cab,
+    /// join a resident's open doors, press a hall button, or (the doors) frame.
+    func tapElevatorExterior(button: Int?) {
+        if canReenterArrivedElevator { advance(); return }
+        if carDoorsOpenHere { openElevator(); return }                // (in with a resident: every gate as before)
+        if let button { pressHallCall(button) } else { frameHallCallButtons() }
+    }
+
+    /// UP or DOWN pressed: lit, and the ordinary call (once -- a lit call stands).
+    func pressHallCall(_ way: Int) {
+        configureHallButtonsIfNeeded()
+        guard hallCallDirections.contains(way) else {
+            diag("elevator.hallCall.unavailable", ["floor": floorNumber, "way": way])
+            frameHallCallButtons()
+            return
+        }
+        guard hallCallLit.isEmpty else {
+            if !hallCallLit.contains(way) { setHallLamp(way, on: true) }     // (both ways wanted: both lit; the call stands)
+            diag("elevator.hallCall.again", ["floor": floorNumber, "way": way, "lit": hallCallLit.sorted()])
+            return
+        }
+        setHallLamp(way, on: true)
+        diag("elevator.hallCall", ["floor": floorNumber, "way": way > 0 ? "up" : "down"])
+        openElevator()
+    }
+
+    /// The doors tapped: turn and step to where the doors and the call panel are
+    /// all in view (the elevator view point). No call, no sound.
+    @discardableResult
+    func frameHallCallButtons() -> Bool {
+        configureHallButtonsIfNeeded()
+        guard currentCell == endCell, let mount = elevatorMountDirection, canRotate, !elevatorInUse, !playerInCab,
+              let pose = elevatorViewingPose() else {
+            diag("elevator.frame.skipped", ["floor": floorNumber])
+            return false
+        }
+        let here = cameraNode.position
+        let target = makeFreeWalkGeometry().legalEndpoint(from: here, to: pose)
+        let yaw = Double(cameraNode.eulerAngles.y) + shortestDelta(from: Double(cameraNode.eulerAngles.y), to: mount.yaw)
+        diag("elevator.frame", ["floor": floorNumber, "lit": hallCallLit.sorted()])
+        elevatorViewSettled = true                                     // (framed: no second settle this visit)
+        return approachPose(kind: "elevatorFrame", position: target, yaw: yaw) {}
+    }
+
+    /// A call was made some other way (WALK, following, the ceremony): its button lit too.
+    private func lightHallCallIfNone() {
+        guard hallCallLit.isEmpty else { return }
+        configureHallButtonsIfNeeded()
+        let ways = hallCallDirections
+        guard let way = ways.contains(1) ? 1 : ways.first else { return }
+        setHallLamp(way, on: true)
+    }
+
+    /// The buttons go out (after at least a moment lit: it's seen).
+    func clearHallCall(reason: String) {
+        guard !hallCallLit.isEmpty else { return }
+        hallCallToken += 1
+        let token = hallCallToken
+        let shown = hallCallLitAt.map { Date().timeIntervalSince($0) } ?? 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, 0.6 - shown)) { [weak self] in
+            guard let self, self.hallCallToken == token else { return }
+            for way in self.hallCallLit { self.setHallLamp(way, on: false) }
+            diag("elevator.hallCall.cleared", ["floor": self.floorNumber, "reason": reason])
+        }
+    }
+
+    /// Four times a second (ElevatorBoard.present): with no call standing any more
+    /// (the car came and went, the player walked off), the buttons go out.
+    func syncHallCall(callStanding: Bool) {
+        configureHallButtonsIfNeeded()
+        guard !hallCallLit.isEmpty, !callStanding, !playerCallPending, !elevatorInUse else { return }
+        if let at = hallCallLitAt, Date().timeIntervalSince(at) < 1.5 { return }
+        clearHallCall(reason: "no call standing")
+    }
+
+    /// Oct 23 (critters call the car): a resident pressed this hall button -- or a
+    /// resident's call from this floor stands (ElevatorBoard.present) -- so it's lit,
+    /// exactly as the player's press lights it; it goes out as the player's does
+    /// (syncHallCall: once no call stands).
+    func showResidentHallCall(_ way: Int) {
+        configureHallButtonsIfNeeded()
+        guard hallCallDirections.contains(way), !hallCallLit.contains(way) else { return }
+        setHallLamp(way, on: true)
+        diag("elevator.hallCall.resident", ["floor": floorNumber, "way": way > 0 ? "up" : "down"])
+    }
+
+    /// Oct 24 (Tinky calls the car): a story guide pressed the hall button FOR the player
+    /// (his escort, on FOLLOW). The player's own call, as their own press would make it:
+    /// the car is called here (once its doors are open and the player is at them, in they
+    /// go -- ElevatorBoard answers it, or FOLLOW's walk reaching the doors does), and the
+    /// lamp lit. Already standing here: nothing to call -- the player's press at the doors
+    /// (FOLLOW's walk makes it) opens them. Never moves the player itself.
+    func callElevatorForEscort() {
+        configureHallButtonsIfNeeded()
+        if !BuildingLife.shared.car.isHere(floorNumber), let gate = carGate {
+            _ = gate(floorNumber, "player")
+        }
+        lightHallCallIfNone()
+        diag("elevator.called", ["floor": floorNumber, "by": "escort guide"])
+    }
+
+    /// Oct 23 (critters call the car): where this floor's hall button `way` is
+    /// (world), for a resident to walk up to and press; nil -- no such button here.
+    func hallCallButtonPoint(_ way: Int) -> SIMD3<Float>? {
+        configureHallButtonsIfNeeded()
+        guard hallCallDirections.contains(way), let root = scene?.rootNode,
+              let panel = root.childNode(withName: "elevatorExteriorCallPanel", recursively: true) else { return nil }
+        let node = panel.childNode(withName: way > 0 ? "elevatorExteriorUpButton" : "elevatorExteriorDownButton", recursively: false) ?? panel
+        let p = node.worldPosition
+        return SIMD3<Float>(p.x, p.y, p.z)
+    }
+
+    private func setHallLamp(_ way: Int, on: Bool) {
+        configureHallButtonsIfNeeded()
+        if on {
+            hallCallLit.insert(way)
+            hallCallLitAt = Date()
+            hallCallToken += 1                                         // (a pending put-out is off)
+        } else {
+            hallCallLit.remove(way)
+        }
+        guard let m = hallButtonMaterials[way] else { return }
+        if on {
+            m.material.emission.contents = UIColor(red: 1, green: 0.78, blue: 0.4, alpha: 1)
+            m.material.emission.intensity = 1
+        } else {
+            m.material.emission.contents = m.emission
+            m.material.emission.intensity = m.intensity
+        }
+    }
+
+    /// Once per floor: each hall button its own material (so one lights alone),
+    /// and the buttons for directions this floor doesn't have hidden.
+    private func configureHallButtonsIfNeeded() {
+        guard !hallButtonsConfigured, let root = scene?.rootNode,
+              let panel = root.childNode(withName: "elevatorExteriorCallPanel", recursively: true) else { return }
+        hallButtonsConfigured = true
+        let ways = hallCallDirections
+        for (way, name) in [(1, "elevatorExteriorUpButton"), (-1, "elevatorExteriorDownButton")] {
+            guard let button = panel.childNode(withName: name, recursively: false) else { continue }
+            if let geometry = button.geometry?.copy() as? SCNGeometry, let material = geometry.firstMaterial?.copy() as? SCNMaterial {
+                geometry.materials = [material]
+                button.geometry = geometry
+                hallButtonMaterials[way] = (material, material.emission.contents, material.emission.intensity)
+            }
+            if !ways.contains(way) {
+                // This floor has no such direction: the button, its rim and its arrow aren't there.
+                let y = button.position.y
+                for n in panel.childNodes where abs(n.position.y - y) < 0.01 { n.isHidden = true }
+            }
+        }
+        diag("elevator.hallButtons", ["floor": floorNumber, "ways": ways.sorted()])
+    }
+
+    /// Once per visit: settled already (reset on leaving the elevator's cell).
+    private var elevatorViewSettled = false
+    static let elevatorViewSettleSeconds: TimeInterval = 0.45
+    /// Closer than the view point by more than this before a settle (no fuss over a few cm).
+    static let elevatorViewSlack: Float = 0.15
+
+    /// The framing distance (pure): how far from the elevator's front the eye must
+    /// stand so the span across (`halfSpan` either side of where it looks) fits the
+    /// screen's width and `rise` (top of the sign above the eye) fits under its top
+    /// (`topShare` of the upper half usable: the status bar, the HUD).
+    static func elevatorViewDistance(halfSpan: Float, rise: Float, verticalFOV degrees: Float, aspect: Float,
+                                     topShare: Float = 0.8) -> Float {
+        let tanV = tan(degrees * .pi / 360)
+        let across = halfSpan / max(0.05, tanV * aspect)
+        let up = rise / max(0.05, tanV * topShare)
+        return max(across, up)
+    }
+
+    /// Where to stand (world): in front of this floor's elevator, the whole front in view.
+    func elevatorViewingPose() -> SCNVector3? {
+        guard let mount = elevatorMountDirection, let root = scene?.rootNode else { return nil }
+        let centre = worldPosition(for: endCell)
+        let out = SIMD2<Float>(-Float(mount.delta.col), -Float(mount.delta.row))      // from the doors toward the hall
+        let side = SIMD2<Float>(out.y, -out.x)                                          // along the wall
+        let names: Set<String> = ["elevatorExteriorJamb", "elevatorExteriorHeader", "elevatorExteriorDisplay", "elevatorExteriorCallPanel"]
+        let parts = root.childNodes { n, _ in n.name.map { names.contains($0) } ?? false }
+        guard !parts.isEmpty else { return nil }
+        var sMin = Float.infinity, sMax = -Float.infinity, face = -Float.infinity, top = -Float.infinity
+        for n in parts {
+            let (lo, hi) = n.boundingBox
+            for x in [lo.x, hi.x] { for y in [lo.y, hi.y] { for z in [lo.z, hi.z] {
+                let w = n.convertPosition(SCNVector3(x, y, z), to: nil)
+                let p = SIMD2<Float>(w.x - centre.x, w.z - centre.z)
+                sMin = min(sMin, simd_dot(p, side)); sMax = max(sMax, simd_dot(p, side))
+                face = max(face, simd_dot(p, out)); top = max(top, w.y)
+            } } }
+        }
+        let margin: Float = 0.06
+        let halfSpan = (sMax - sMin) / 2 + margin
+        let fov = Float(cameraNode.camera?.fieldOfView ?? 75)
+        let bounds = hudSceneView?.bounds.size ?? CGSize(width: 390, height: 844)
+        let aspect = Float(bounds.width / max(1, bounds.height))
+        let d = Self.elevatorViewDistance(halfSpan: halfSpan, rise: top + 0.05 - eyeHeight, verticalFOV: fov, aspect: aspect)
+        // In the elevator's own cell, inside where free walk may stand.
+        let half = Float(cellSize) / 2
+        let reach = max(0, half - Float(FreeWalkGeometry.playerClearance))
+        let depth = min(face + d, half - 0.1)
+        let across = max(-reach, min(reach, (sMin + sMax) / 2))
+        let p = SIMD2<Float>(centre.x, centre.z) + out * depth + side * across
+        return SCNVector3(p.x, cameraNode.position.y, p.y)
+    }
+
+    /// A walk just ended in the elevator's cell: ease back to the view point if it
+    /// stopped right up at the closed doors, facing them (once per visit).
+    private func settleAtElevatorViewIfNeeded() {
+        guard currentCell == endCell else { elevatorViewSettled = false; return }
+        guard !elevatorViewSettled, let mount = elevatorMountDirection, canRotate, !walkingHeld, !isThresholdScrubbing,
+              !playerInCab, !elevatorInUse, !arrivedElevatorDoorOpen, !characterUsingElevator, elevatorDoorsShut, !carDoorsOpenHere,
+              carDoorsTarget != true, continuousWalkState == .stopped, pendingWallInteraction == nil,
+              activeTouchGesture?() == nil, CritterFollow.targetID == nil, GuidedJourney.trip == nil,
+              CharacterLead.activeGuidedRoute == nil,
+              abs(shortestDelta(from: Double(cameraNode.eulerAngles.y), to: mount.yaw)) < 40 * .pi / 180,
+              let pose = elevatorViewingPose() else { return }
+        let here = cameraNode.position
+        let out = SIMD2<Float>(-Float(mount.delta.col), -Float(mount.delta.row))
+        let centre = worldPosition(for: endCell)
+        let depthHere = simd_dot(SIMD2<Float>(here.x - centre.x, here.z - centre.z), out)
+        let depthPose = simd_dot(SIMD2<Float>(pose.x - centre.x, pose.z - centre.z), out)
+        guard depthHere < depthPose - Self.elevatorViewSlack else { return }          // (already far enough back)
+        elevatorViewSettled = true
+        let target = makeFreeWalkGeometry().legalEndpoint(from: here, to: pose)
+        diag("elevator.viewSettle", ["from": String(format: "%.2f", depthHere), "to": String(format: "%.2f", depthPose),
+                                     "floor": floorNumber])
+        phase = .scriptedWalkOut
+        isAnimating = true
+        let glide = SCNAction.move(to: target, duration: Self.elevatorViewSettleSeconds)
+        glide.timingMode = .easeInEaseOut
+        cameraNode.runAction(glide, forKey: "elevatorViewSettle") { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, self.phase == .scriptedWalkOut else { return }
+                self.isAnimating = false
+                self.phase = .translate
+            }
+        }
+    }
+
+    // MARK: Oct 20 -- IN THROUGH A RESIDENT'S OPEN DOORS
+    //
+    // iPhone: "when a critter is getting into the elevator, I cannot enter." The
+    // car's doors opened for a resident are the BUILDING's doors (runCarDoors),
+    // not the player's: the threshold swipe only knew the player's own open
+    // doors (an arrived cab), and a tap could only board by landing ON a door
+    // panel or the call panel -- slid aside, the panels are no longer under the
+    // finger; the tap went into the cab and became an ordinary walk the cab's
+    // walls stopped. Now both get in: the swipe crosses (boardThroughCarDoors),
+    // and a tap through the open doorway is the same request as a tap on the
+    // doors (openElevator) -- the ordinary boarding, every gate kept.
+
+    /// The car stands here with its doors open (or opening) for someone else.
+    /// (Most of the way open -- never walked through half-open panels.)
+    var carDoorsOpenHere: Bool { carDoorsAvailable && carDoorsTarget == true && elevatorDoorsOpenFraction >= 0.6 }
+
+    /// ...and the player may board through them now: at the doors, this floor's
+    /// mission done, somewhere to go (openElevator's own gates).
+    var mayBoardThroughCarDoors: Bool {
+        carDoorsOpenHere && currentCell == endCell && (isMissionComplete || !Self.missionGatesElevator)
+            && nextFloorNumber != floorNumber
+    }
+
+    /// Holds the car's doors open for the player crossing into it (ElevatorBoard).
+    var holdCarDoorway: ((_ hold: Bool) -> Void)?
+
+    /// A tap at the doors while they stand open for a resident, aimed through
+    /// the doorway (within 50 degrees of straight in): board, as a tap on the
+    /// doors does. True: taken (openElevator ran, with all its own checks).
+    func boardThroughOpenCarDoorsByTap(direction: (x: Double, z: Double)?) -> Bool {
+        guard mayBoardThroughCarDoors, let d = direction, let mount = elevatorMountDirection else { return false }
+        guard Self.aimsThroughDoorway(direction: d, mount: mount) else { return false }
+        diag("elevator.tapThroughCarDoors", ["floor": floorNumber])
+        openElevator()
+        return true
+    }
+
+    /// Pure (tests): a tap's horizontal direction aims in through doors on the `mount` wall.
+    static func aimsThroughDoorway(direction d: (x: Double, z: Double), mount: Direction) -> Bool {
+        let m = (x: Double(mount.delta.col), z: Double(mount.delta.row))
+        return d.x * m.x + d.z * m.z >= cos(50 * Double.pi / 180)
+    }
+
+    /// The swipe has carried the player into the doorway of the car standing open
+    /// for a resident: the doors are the player's now (the car's own gate --
+    /// standing here: taken; gone: called instead, false), open the rest of the
+    /// way, and the cab is the open, boarded cab an ordinary boarding leaves:
+    /// residents still get in and out; a floor button closes them once the
+    /// doorway is clear; a swipe or tap out steps out again.
+    private func boardThroughCarDoors() -> Bool {
+        guard currentCell == endCell, !elevatorInUse, !chuteInUse, !characterUsingElevator,
+              isMissionComplete || !Self.missionGatesElevator,
+              let left = elevatorLeftDoor, let right = elevatorRightDoor, let mount = elevatorMountDirection,
+              let lc = elevatorLeftClosedPosition, let rc = elevatorRightClosedPosition else { return false }
+        if let gate = carGate, !gate(floorNumber, "player") { return false }
+        left.removeAction(forKey: Self.carDoorsActionKey)
+        right.removeAction(forKey: Self.carDoorsActionKey)
+        carDoorsTarget = nil
+        let remaining = 1 - elevatorDoorsOpenFraction
+        if remaining > 0.01 {
+            let along: (x: Float, z: Float) = (mount == .north || mount == .south) ? (1, 0) : (0, 1)
+            let slide: Float = 0.8
+            let seconds = max(0.12, 0.5 * remaining)                         // (the last of it, quickly: the player is stepping in)
+            let openLeft = SCNAction.move(to: SCNVector3(lc.x - slide * along.x, lc.y, lc.z - slide * along.z), duration: seconds)
+            let openRight = SCNAction.move(to: SCNVector3(rc.x + slide * along.x, rc.y, rc.z + slide * along.z), duration: seconds)
+            openLeft.timingMode = .easeInEaseOut
+            openRight.timingMode = .easeInEaseOut
+            left.runAction(openLeft)
+            right.runAction(openRight)
+        }
+        let entry = worldPosition(for: endCell)
+        let depth = Float(HallwayScene.ElevatorGeometry(cellSize: cellSize).entryDistance)
+        elevatorCabCenter = SCNVector3(entry.x + Float(mount.delta.col) * depth, cameraNode.position.y,
+                                       entry.z + Float(mount.delta.row) * depth)
+        arrivedElevatorDoorOpen = true
+        elevatorBoardedDoorsOpen = true
+        controlledArrivalDoorsOpened = true      // already open: no second open
+        playerHasTakenElevatorCameraControl = false
+        refreshElevatorMissionSign()
+        onElevatorBoarding?()                    // (as every boarding: whoever rides along is told)
+        diag("elevator.boardedThroughCarDoors", ["floor": floorNumber])
+        elevatorLog("player stepped into the car through a resident's open doors (swipe)")
+        return true
+    }
+
     /// Reaching the hallway center completes arrival: retire its temporary
     /// connection and close behind the player. Subsequent visits use the normal
     /// mission-gated boarding path, not the arrival-only threshold path.
@@ -8252,8 +10473,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             diag("elevator.refused", ["reason": "arrival doors still closing behind player"]); return
         }
         // Oct 6: someone else (Candy, going home) is using the doors right now.
-        guard !characterUsingElevator else {
-            diag("elevator.refused", ["reason": "a character is using the elevator"]); return
+        // Oct 19 (sharing the car): while a RESIDENT's doors are open (or opening)
+        // the player gets in too -- the cycle hands the open doors over below,
+        // once every other check has passed. Only a cycle already closing (or a
+        // scripted character's) still queues the call.
+        let joining = characterCycleJoinable
+        guard !characterUsingElevator || joining else {
+            // Oct 18 (elevator life): the call is kept -- when this cycle closes,
+            // the doors open for the player (if they're still at them).
+            playerCallPending = true
+            playerCallAt = Date()
+            UISelectionFeedbackGenerator().selectionChanged()
+            diag("elevator.refused", ["reason": "a character is using the elevator", "callQueued": true])
+            elevatorLog("player call queued behind \(characterElevatorCycleInfo?.who ?? "a character")'s door cycle")
+            return
         }
         guard currentCell == endCell, !elevatorInUse, !chuteInUse, elevatorAwaitingEntryDirection == nil,
               let leftDoor = elevatorLeftDoor, let rightDoor = elevatorRightDoor,
@@ -8279,9 +10512,36 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             elevatorRejected = ElevatorRejectionEvent()
             return
         }
+        // Oct 19 (one car): only the actual car, standing here. Elsewhere, this tap
+        // calls it: it runs here, opens its doors, and -- if you're still at them --
+        // this same boarding goes ahead then (ElevatorBoard answers the call).
+        if let gate = carGate, !gate(floorNumber, "player") {
+            // Oct 22 (hall call): the click and the tick for a fresh call only -- a
+            // call already standing (its button lit) is simply still standing.
+            let fresh = hallCallLit.isEmpty
+            if fresh {
+                UISelectionFeedbackGenerator().selectionChanged()
+                ElevatorRideSound.click(on: cameraNode)
+            }
+            lightHallCallIfNone()
+            diag("elevator.called", ["floor": floorNumber, "fresh": fresh])
+            elevatorLog("player called the car to F\(floorNumber): it isn't here yet")
+            return
+        }
+        // Oct 19 (one car): the car's doors already open (or opening) here for
+        // someone else: the player steps in through them -- no second chime.
+        let carDoorsOpen = !joining && (!elevatorDoorsShut || carDoorsTarget == true
+            || leftDoor.action(forKey: Self.carDoorsActionKey) != nil)
+        if carDoorsOpen {
+            leftDoor.removeAction(forKey: Self.carDoorsActionKey)
+            rightDoor.removeAction(forKey: Self.carDoorsActionKey)
+            carDoorsTarget = nil
+        }
         refreshElevatorMissionSign()
+        if joining { yieldCharacterCycleToPlayer() }
         elevatorInUse = true
-        diag("elevator.accepted", ["floor": floorNumber, "next": nextFloorNumber])
+        diag("elevator.accepted", ["floor": floorNumber, "next": nextFloorNumber, "joinedResident": joining])
+        clearHallCall(reason: "doors opening")                       // (Oct 22: the hall's call answered)
         onElevatorBoarding?()
         // Oct 4: from whatever angle the elevator was tapped, one combined
         // turn-and-glide to a square entry pose (this cell's centre, facing
@@ -8330,12 +10590,25 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // elevator taking its time rather than a quick blip.
         let elevatorSlideDuration: TimeInterval = 1.6
         let elevatorDwell: TimeInterval = 2.0
-        let openLeft = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
-        let openRight = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
+        // Oct 19 (sharing the car): to the OPEN positions (absolute), so doors a
+        // resident already opened simply stay open -- the same slide from shut.
+        let openLeft: SCNAction, openRight: SCNAction
+        if let lc = elevatorLeftClosedPosition, let rc = elevatorRightClosedPosition {
+            let leftTarget = SCNVector3(lc.x - Float(slide * alongWallX), lc.y, lc.z - Float(slide * alongWallZ))
+            // (already partly open: only the rest of the slide, at the same pace)
+            let now = leftDoor.presentation.position
+            let remaining = min(1, max(0, Double(hypotf(now.x - leftTarget.x, now.z - leftTarget.z)) / Double(slide)))
+            let slideTime = joining || carDoorsOpen ? elevatorSlideDuration * remaining : elevatorSlideDuration
+            openLeft = SCNAction.move(to: leftTarget, duration: slideTime)
+            openRight = SCNAction.move(to: SCNVector3(rc.x + Float(slide * alongWallX), rc.y, rc.z + Float(slide * alongWallZ)), duration: slideTime)
+        } else {
+            openLeft = SCNAction.moveBy(x: -slide * alongWallX, y: 0, z: -slide * alongWallZ, duration: elevatorSlideDuration)
+            openRight = SCNAction.moveBy(x: slide * alongWallX, y: 0, z: slide * alongWallZ, duration: elevatorSlideDuration)
+        }
         openLeft.timingMode = .easeInEaseOut
         openRight.timingMode = .easeInEaseOut
-        SoundEffects.playElevatorArrival()
-        let arrivalDelay = SoundEffects.elevatorDoorOpeningDelay
+        if !joining && !carDoorsOpen { SoundEffects.playElevatorArrival() }    // (joining open doors: no second chime)
+        let arrivalDelay = joining || carDoorsOpen ? 0 : SoundEffects.elevatorDoorOpeningDelay
         leftDoor.runAction(.sequence([.wait(duration: arrivalDelay), openLeft]))
         diag("elevator.departureDoors.opening")
         rightDoor.runAction(.sequence([.wait(duration: arrivalDelay), openRight])) { [weak self] in
@@ -8820,6 +11093,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // Oct 5 (Admission): on the first trip from the lobby the building
         // presses the button itself, a beat after the panel comes into view.
         if let auto = elevatorCinematicAutoFloor {
+            if admissionAutoFloor == auto || guidedAutoFloor?() == auto {               // Oct 24: prepare it now (short ride)
+                onElevatorDestinationForeseen?(auto)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.elevatorPanelApproachDuration + 0.4) { [weak self] in
                 self?.autoPressElevatorButton(floor: auto)
             }
@@ -8968,14 +11244,17 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     /// The final number must render before capturing the outgoing cab.
     /// Completion drives handoff directly, without a post-destination dwell.
-    private func runElevatorIndicator(to destination: Int, completion: @escaping () -> Void) {
+    private func runElevatorIndicator(to destination: Int, rocket: Bool = false, fixedSeconds: TimeInterval? = nil,
+                                      completion: @escaping () -> Void) {
         let origin = floorNumber
         let direction = destination > origin ? 1 : -1
         setElevatorIndicator(floor: origin, direction: direction)
         let steps = abs(destination - origin)
         guard steps > 0 else { completion(); return }
         for i in 1...steps {
-            let at = Self.elevatorIndicatorStepDelay(step: i, steps: steps)
+            let at = fixedSeconds.map { $0 * Double(i) / Double(steps) }        // (Oct 24: Admission's first ride)
+                ?? (rocket ? RocketElevator.indicatorStepDelay(step: i, steps: steps)
+                           : Self.elevatorIndicatorStepDelay(step: i, steps: steps))
             let shown = origin + direction * i
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
                 guard let self else { return }
@@ -9003,9 +11282,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         let halfHeight = (hi.y - lo.y) / 2
         let eyeY = cameraNode.position.y
         let fov = Float(cameraNode.camera?.fieldOfView ?? 60)
-        let tanHalf = tan(fov / 2 * .pi / 180) * 0.88               // a little margin
+        let tanFull = tan(fov / 2 * .pi / 180)
+        let tanHalf = tanFull * 0.88                                // a little margin
+        // Oct 12 (stability): below eye level, keep the panel's lowest row
+        // (LOBBY) clear of the bottom navigation row -- the camera stands a
+        // little further back instead (no pitch/FOV change; cab only).
+        var tanBelow = tanHalf
+        if Self.continuousWalkExperimentOn, let view = hudSceneView, view.bounds.height > 0 {
+            let halfH = Float(view.bounds.height) / 2
+            let reserve = Float(view.safeAreaInsets.bottom + ContinuousWalkControls.bottomPadding
+                                + ContinuousWalkControls.rowHeight) + 24
+            tanBelow = min(tanHalf, tanFull * max(0.3, (halfH - reserve) / halfH))
+        }
         let below = eyeY - (p.y - halfHeight), above = (p.y + halfHeight) - eyeY
-        var distance = max(Self.elevatorPanelMinViewDistance, below / tanHalf, above / tanHalf)
+        var distance = max(Self.elevatorPanelMinViewDistance, below / tanBelow, above / tanHalf)
         let half = Float(cellSize) / 2 - 0.4                        // stay this far inside the cab walls
         distance = min(distance, Float(cellSize) - 0.45)
         var x = p.x + nx * distance, z = p.z + nz * distance
@@ -9082,6 +11372,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cap.runAction(.sequence([.moveBy(x: 0, y: 0, z: 0.006, duration: 0.06),
                                  .moveBy(x: 0, y: 0, z: -0.006, duration: 0.14)]), forKey: "press")
         ElevatorRideSound.click(on: cameraNode)
+        ToolBelt.elevatorButtonPressed(at: cap.worldPosition)         // Oct 16 (IV/V): a tool reaches for it (visual only)
         // Oct 5: idle, sealed cab + THIS floor's button = "open the doors".
         if best.floor == floorNumber, elevatorSameFloorReopenAllowed {
             reopenElevatorDoorsAtCurrentFloor()
@@ -9147,6 +11438,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cap.runAction(.sequence([.moveBy(x: 0, y: 0, z: 0.006, duration: 0.06),
                                  .moveBy(x: 0, y: 0, z: -0.006, duration: 0.14)]), forKey: "press")
         ElevatorRideSound.click(on: cameraNode)
+        ToolBelt.elevatorButtonPressed(at: cap.worldPosition)         // Oct 16 (IV/V): a tool reaches for it (visual only)
         guard best.floor != floorNumber, elevatorReachableFloors.contains(best.floor) else {
             diag("elevator.button.inert", ["button": best.floor, "floor": floorNumber, "doors": "open"])
             return true
@@ -9162,8 +11454,25 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         cap.geometry?.materials = [lit]
         cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)
         diag("elevator.button.pressed", ["from": floorNumber, "to": best.floor, "doors": "open"])
-        closeArrivalDoorsForContinuedRide(departTo: best.floor)
+        RocketElevator.markDeparture(from: floorNumber, to: best.floor)      // (Oct 15: selection -> control, measured)
+        closeWhenDoorwayClear(departTo: best.floor)
         return true
+    }
+
+    /// Oct 19 (one car): someone (a resident) is walking through the doors right now.
+    var doorwayBusy: (() -> Bool)?
+
+    /// Oct 19 (one car): the doors never close on someone walking through them --
+    /// the departure waits until the doorway is clear (at most 6 s).
+    private func closeWhenDoorwayClear(departTo floor: Int, waited: TimeInterval = 0) {
+        if waited < 6, doorwayBusy?() == true {
+            if waited == 0 { diag("elevator.close.waitingForDoorway", ["floor": floorNumber]) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.closeWhenDoorwayClear(departTo: floor, waited: waited + 0.25)
+            }
+            return
+        }
+        closeArrivalDoorsForContinuedRide(departTo: floor)
     }
 
     /// Oct 5 (open-door cab taps): inside the arrived cab with the doors
@@ -9265,6 +11574,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         elevatorEntryCellCenterPosition = SCNVector3(entry.x, cameraNode.position.y, entry.z)
         refreshElevatorMissionSign()
         controlledArrivalDoorsOpened = false
+        RocketElevator.rideIsRocket = false                         // (Oct 15: no ride -- classic doors)
         diag("elevator.sameFloorReopen", ["floor": floorNumber])
         playControlledArrivalDoorOpen()
     }
@@ -9306,13 +11616,24 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     private func departElevator(to floor: Int, cabCenter: SCNVector3, restoreLighting: @escaping () -> Void) {
         elevatorDestinationFloor = floor
         isElevatorWaitingForFloor = false
-        diag("elevator.staging.requested", ["to": floor])
+        // Oct 15 (Rocket Elevator): a ride the PLAYER chose goes fast; the
+        // building's own scripted rides (Admission, the escort) keep their pace.
+        let rocket = RocketElevator.isOn && elevatorCinematicAutoFloor == nil
+        RocketElevator.rideIsRocket = rocket
+        RocketElevator.markDepartureIfStale(from: floorNumber, to: floor)
+        // Oct 24 (onboarding polish): Admission's first ride is short (~2.5 s).
+        // (read before onElevatorDestinationChosen below: it moves the escort to .riding, and
+        // guidedAutoFloor is nil from then on)
+        let admissionRide: TimeInterval? = !rocket && (admissionAutoFloor == floor || guidedAutoFloor?() == floor)
+            ? Self.admissionRideSeconds : nil
+        diag("elevator.staging.requested", ["to": floor, "rocket": rocket, "admissionRide": admissionRide != nil])
         onElevatorDestinationChosen?(floor)
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.elevatorDepartBeat) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + (rocket ? RocketElevator.departBeat : Self.elevatorDepartBeat)) { [weak self] in
             guard let self else { return }
             diag("elevator.traveling", ["from": self.floorNumber, "to": floor])
+            self.onElevatorTravel?(self.floorNumber, floor)                // (Oct 19: the one car runs now, with the player)
             ElevatorRideSound.startTravel(on: self.cameraNode)
-            self.runElevatorIndicator(to: floor) { [weak self] in
+            self.runElevatorIndicator(to: floor, rocket: rocket, fixedSeconds: admissionRide) { [weak self] in
                 guard let self else { return }
                 ElevatorRideSound.stopTravel(on: self.cameraNode)
                 navLog("elevator: ride done -- requesting floor transition to \(floor)")
@@ -9520,6 +11841,23 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         navLog("message: \(text)")
     }
 
+    /// Oct 16 (Supplies): the same one-line status, for the tool system.
+    func showHint(_ text: String) { showMessage(text) }
+
+    /// Oct 16 (Supplies II): a line that says what just happened and then goes
+    /// by itself after `seconds` (transientMessage otherwise waits for the
+    /// player to leave the cell -- in a big room that can be a long time).
+    func showBrief(_ text: String, seconds: Double = 2.2) {
+        showMessage(text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.transientMessage == text else { return }
+            self.transientMessage = nil
+        }
+    }
+
+    /// Oct 16 (Supplies): a spray is under way (a carried extinguisher can't be sent back mid-spray).
+    var isExtinguishing: Bool { !extinguishingFireCoords.isEmpty }
+
     /// Shortest signed angle (radians, in (-pi, pi]) to get from `from`
     /// to `to` — used so a turn always rotates the short way and never
     /// whips around through a wraparound seam.
@@ -9587,8 +11925,20 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         arrivalFrameLock.unlock()
     }
 
+    deinit {
+        PerfMonitor.gauge("navControllers", -1)                           // Oct 21: live count (measurement)
+        diag("navController.freed", ["controller": String(describing: ObjectIdentifier(self))])   // Oct 22 (stability pass)
+    }
+
+    /// Oct 24 (FrameTiming, measurement only): the start of render.callbackSpan.
+    func renderer(_ renderer: SCNSceneRenderer, willRenderScene scene: SCNScene, atTime time: TimeInterval) {
+        FrameTiming.shared.rendererWillRender()
+    }
+
     func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
+        FrameTiming.shared.rendererDidRender()                            // Oct 24: callback spans (measurement only)
         RenderHealth.shared.frameRendered()                               // Oct 9: measurement only
+        PerfMonitor.shared.frameRendered()                                // Oct 21: frame gaps (measurement only)
         if renderer.currentViewport.width > 0, renderer.currentViewport.height > 0 {
             let door = elevatorRightDoor?.presentation.position
             ElevatorArrivalTrace.shared.rendered(self, scene: scene, doorPosition: door.map { ($0.x, $0.z) })
@@ -9607,7 +11957,22 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        FrameTiming.shared.rendererUpdate()                               // Oct 24: frame stamps (measurement only)
         defer { lastTime = time }
+        // Oct 21 (slowdown hunt, measurement only): this update's cost, and while
+        // walking, how far the camera actually moved for the time step used.
+        let perf = PerfMonitor.begin("render.update")
+        let rawStep = lastTime > 0 ? time - lastTime : 0
+        let walkFrom: SCNVector3? = PerfMonitor.enabled && isAnimating && phase == .freeMove ? cameraNode.position : nil
+        defer {
+            PerfMonitor.end(perf)
+            if let walkFrom, rawStep > 0 {
+                let p = cameraNode.position
+                let kind: PerfMonitor.WalkKind = cruiseActive ? .cruise : (freeMoveHeld ? .held : .tap)
+                PerfMonitor.shared.walkFrame(kind, metres: Double(hypotf(p.x - walkFrom.x, p.z - walkFrom.z)),
+                                             step: min(rawStep, 1.0 / 20.0), raw: rawStep)
+            }
+        }
         applyAspectCompensation(renderer)
 
         // Round 7 (Eddie): the handheld map used to pause the whole
@@ -9631,26 +11996,51 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             guard let geometry = freeWalkGeometry else { finishFreeMove(); return }
             if freeMoveHeld {
                 // Released: stop right here. No completion, no snap.
-                guard walkingHeld else { finishFreeMove(); return }
+                // (Oct 16 WALK LATCH: unless the walk is latched -- then it goes
+                // straight on at its pace with no finger down, until a tap.)
+                guard walkingHeld || walkLatched else { finishFreeMove(); return }
+                let latchedNoFinger = !walkingHeld
+                if latchedNoFinger, let target = latchTurnTarget {
+                    // The rest of a turn the finger asked for (a flick's quarter turn), at the held walk's own rate.
+                    let yaw = Self.rateLimitedYaw(current: Double(cameraNode.eulerAngles.y), target: target,
+                                                  maxStep: heldWalkTurnRateLimit.isFinite ? heldWalkTurnRateLimit * dt : .infinity)
+                    cameraNode.eulerAngles = SCNVector3(0, Float(yaw), 0)
+                    if yaw == target, latchTurnTarget == target { latchTurnTarget = nil }
+                }
                 // Signed Y throttle (see updateHeldNavigation): stopping or
                 // backing up ends a "sustained forward" run, so the
                 // 3-cell -> 1.5x acceleration starts over.
                 let throttle = heldThrottle
                 if throttle <= 0 { heldDistance = 0 }
-                let targetPace = throttle > 0 && heldDistance >= 3 * Double(cellSize) ? 1.5 : 1.0
+                let targetPace = throttle > 0 && heldDistance >= 3 * Double(cellSize) ? Self.fastWalkPace : 1.0
                 movementPace += (targetPace - movementPace) * (1 - exp(-dt / 0.3))
                 SoundEffects.setWalkingPace(Float(movementPace))
                 // Turn toward the finger's target yaw, rate-limited while moving.
                 stepHeldSteering(dt: dt, translating: throttle != 0)
                 // Heading sampled every frame from the camera itself.
                 let forward = FreeWalkGeometry.forward(yaw: Double(cameraNode.eulerAngles.y))
-                let step = travelSpeed * movementPace * throttle * dt
+                // Oct 16 (Bonzo PP, Part 1): the latched walk, no finger down, cruises a
+                // little slower (WALK LATCH pace); a finger on it is the held walk, at full pace.
+                // Eased both ways, so taking or letting go never jolts.
+                // (Oct 20: the latched walk is an automatic walk -- at autoWalkSpeedScale of its old pace)
+                latchPaceScale += ((latchedNoFinger ? Self.walkLatchPace * Self.autoWalkSpeedScale : 1) - latchPaceScale) * (1 - exp(-dt / 0.35))
+                let step = travelSpeed * movementPace * throttle * dt * latchPaceScale
                 let position = cameraNode.position
                 let next = geometry.slideEndpoint(from: SCNVector3(position.x, eyeHeight, position.z),
                                                   dx: forward.x * step, dz: forward.z * step)
                 let moved = Double(hypotf(next.x - position.x, next.z - position.z))
                 cameraNode.position = next
                 if throttle > 0 { heldDistance += moved }
+                // Oct 16 (WALK LATCH): no finger down and walked into a wall (or someone) --
+                // the latched walk ends there, as letting go always did.
+                if latchedNoFinger {
+                    latchStall = step > 0.0005 && moved < step * 0.15 ? latchStall + dt : 0
+                    if latchStall > 0.4 {
+                        latchStall = 0
+                        finishFreeMove()
+                        return
+                    }
+                }
                 // Oct 9: holding into a character on guard -- she reacts.
                 if throttle > 0, !characterKeepOuts.isEmpty, moved < step * 0.5,
                    segmentMeetsCharacter(x: Double(next.x), z: Double(next.z), dx: forward.x * 0.3, dz: forward.z * 0.3) {
@@ -9678,7 +12068,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                 let travelled: Double
                 if freeTapRampTime > 0 {
                     travelled = Self.tapWalkDistance(elapsed: t * freeTapDuration, length: length,
-                                                     speed: travelSpeed, ramp: freeTapRampTime)
+                                                     speed: travelSpeed * Self.autoWalkSpeedScale, ramp: freeTapRampTime)   // (Oct 20: as timed)
                 } else {
                     travelled = t * t * (3 - 2 * t) * length
                 }
@@ -9763,7 +12153,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             // resetting to a standstill at every cell boundary along
             // the way. Eddie: "smooth the whole way," Sept 5.
             let segmentDuration = Double(cellSize) * Double(animationSteps.count) / travelSpeed * translateDurationScale
-            let targetPace = walkingHeld && heldDistance >= 2 * Double(cellSize) ? 1.6 : 1.0
+            let targetPace = walkingHeld && heldDistance >= 2 * Double(cellSize) ? Self.fastWalkPaceClassic : 1.0
             movementPace += (targetPace - movementPace) * (1 - exp(-dt / 0.3))
             SoundEffects.setWalkingPace(Float(movementPace))
             let previousProgress = min(1.0, segmentProgress)
@@ -9872,6 +12262,105 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
             guard t >= 1.0 else { return }
             cameraNode.position = segmentTarget
+        }
+    }
+}
+
+// MARK: - Oct 18 (inter-floor life): the elevator, as diagnostics see it
+
+/// What a character's door cycle is for (the panel and the hall indicator).
+enum CharacterElevatorPurpose: Equatable {
+    /// It is leaving this floor, for `to` (nil: unknown).
+    case departure(to: Int?)
+    /// It is stepping out here, having come from `from` (nil: unknown).
+    case arrival(from: Int?)
+    /// Anything else (an escort, someone going home).
+    case other
+
+    var isArrival: Bool { if case .arrival = self { return true } else { return false } }
+    var text: String {
+        switch self {
+        case .departure(let to): return "departure" + (to.map { " for F\($0)" } ?? "")
+        case .arrival(let from): return "arrival" + (from.map { " from F\($0)" } ?? "")
+        case .other: return "door cycle"
+        }
+    }
+}
+
+extension TapNavigationController {
+    /// The floor this controller's scene is (its elevator's floor).
+    var elevatorFloor: Int { floorNumber }
+
+    /// What the PLAYER's elevator machinery is doing right now, from its own
+    /// flags (nil: the player isn't using it). Words only -- no new state.
+    var playerElevatorState: String? {
+        if elevatorAwaitingEntryDirection != nil {
+            return arrivedElevatorDoorOpen ? "player arrived: in the cab, doors open" : "player arrived: in the cab"
+        }
+        if isElevatorWaitingForFloor { return "player in the cab, doors shut, choosing a floor" }
+        if elevatorInUse {
+            return elevatorDestinationFloor.map { "player's ride under way (to F\($0))" } ?? "player boarding / riding"
+        }
+        if arrivedElevatorDoorOpen { return "player's cab standing open" }
+        if elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") != nil || elevatorRightDoor?.action(forKey: "arrivalCloseBehind") != nil {
+            return "doors closing behind the player"
+        }
+        return nil
+    }
+
+    /// Why a tap on the doors (openElevator) would be refused right now -- the
+    /// same checks, in the same order (nil: it would be accepted).
+    var playerElevatorRefusal: String? {
+        if elevatorLeftDoor?.action(forKey: "arrivalCloseBehind") != nil || elevatorRightDoor?.action(forKey: "arrivalCloseBehind") != nil {
+            return "the doors are still closing behind you"
+        }
+        if !characterCycleJoinable {                     // (Oct 19: a resident's open doors: the player gets in too)
+            if let c = characterElevatorCycleInfo { return "\(c.who) is using it (\(c.phase))" }
+            if characterUsingElevator { return "a character is using it" }
+        }
+        if elevatorInUse { return "your ride is under way" }
+        if chuteInUse { return "the chute is in use" }
+        if elevatorAwaitingEntryDirection != nil { return "you're in the cab: step out (or press a floor)" }
+        if elevatorLeftDoor == nil || elevatorRightDoor == nil || elevatorMountDirection == nil { return "no elevator on this floor" }
+        if let next = nextFloorNumber, next == floorNumber { return "no other floor to go to" }
+        if !(isMissionComplete || !Self.missionGatesElevator) { return "this floor's mission isn't done" }
+        if currentCell != endCell { return "walk up to the doors" }
+        return nil
+    }
+
+    /// Oct 18: the hall's floor indicator (the display over the doors, outside):
+    /// `floor` with the arrow for `direction` (1 up, -1 down) lit and the other
+    /// dimmed; nil puts it back exactly as built (this floor, both arrows lit).
+    func showHallIndicator(floor: Int?, direction: Int) {
+        let wanted: (floor: Int, direction: Int)? = floor.map { ($0, direction) }
+        if wanted?.floor == hallIndicatorShown?.floor, wanted?.direction == hallIndicatorShown?.direction { return }
+        guard let root = scene?.rootNode,
+              let readout = root.childNode(withName: "elevatorExteriorFloorNumber", recursively: true),
+              let text = readout.geometry as? SCNText else { return }
+        let up = root.childNode(withName: "elevatorExteriorUpArrow", recursively: true)
+        let down = root.childNode(withName: "elevatorExteriorDownArrow", recursively: true)
+        if hallIndicatorLitMaterial == nil { hallIndicatorLitMaterial = up?.geometry?.firstMaterial }
+        hallIndicatorShown = wanted
+        let shown = "\(wanted?.floor ?? floorNumber)"
+        if (text.string as? String) != shown {
+            text.string = shown
+            let (lo, hi) = text.boundingBox
+            let k = readout.scale.x
+            readout.position = SCNVector3(-(lo.x + hi.x) * k / 2, -(lo.y + hi.y) * k / 2, 0.001)
+        }
+        let dim = SCNMaterial()
+        dim.diffuse.contents = UIColor(red: 0.22, green: 0.12, blue: 0.03, alpha: 1)
+        dim.lightingModel = .constant
+        if let lit = hallIndicatorLitMaterial {
+            // Oct 18 (elevator life): only the way the car is going is lit; a car
+            // standing still lights neither. (nil -- nothing known -- is as built.)
+            guard let d = wanted?.direction else {
+                up?.geometry?.materials = [lit]
+                down?.geometry?.materials = [lit]
+                return
+            }
+            up?.geometry?.materials = [d > 0 ? lit : dim]
+            down?.geometry?.materials = [d < 0 ? lit : dim]
         }
     }
 }
@@ -10100,5 +12589,222 @@ struct FreeWalkGeometry {
             last = SCNVector3(Float(x), end.y, Float(z))
         }
         return end
+    }
+}
+
+// MARK: - Oct 11 -- RESUME (see ResumeState)
+
+extension TapNavigationController {
+    /// Saves where the player is: this floor, the camera's exact free-walk
+    /// x/z and yaw. Not a place to come back to is never saved as such:
+    ///   seated at (or sitting down at / getting up from) the office
+    ///   computer -> the spot getting up leads to, standing, facing the door;
+    ///   still in an arrived elevator cab -> just outside its doors, facing out;
+    ///   riding / the doors cycling / Decorate -> nothing (the last point stands).
+    func saveResumePoint(reason: String) {
+        guard ResumeState.isRecording, !decorateModeEnabled, !evictionLocked, !BonzoEviction.isActive else { return }   // (Oct 16: never mid-eviction)
+        // Oct 11 (the staff meeting): seated at the conference table -> saved
+        // standing beside it (the same safe spot getting up ends on); a
+        // relaunch never resumes inside the chair.
+        if isSeatedInMeeting {
+            guard floorNumber == ConferenceRoom.floor, let spot = ConferenceMeeting.standUpSpot else { return }
+            ResumeState.save(.init(floor: floorNumber, x: spot.position.x, z: spot.position.y, yaw: Float(spot.yaw)),
+                             reason: reason + ".meetingSeat")
+            return
+        }
+        if OfficeComputer.shared.isActive {
+            guard floorNumber == PlayerOffice.floor else { return }
+            let spot = PlayerOffice.standUpSpot
+            ResumeState.save(.init(floor: floorNumber, x: spot.position.x, z: spot.position.y, yaw: Float(spot.yaw)),
+                             reason: reason + ".seated")
+            return
+        }
+        if let out = elevatorAwaitingEntryDirection {
+            let p = worldPosition(for: endCell)
+            ResumeState.save(.init(floor: floorNumber, x: p.x, z: p.z, yaw: Float(out.yaw)), reason: reason + ".cab")
+            return
+        }
+        guard !elevatorInUse, !isElevatorWaitingForFloor else { return }
+        let p = cameraNode.position
+        ResumeState.save(.init(floor: floorNumber, x: p.x, z: p.z, yaw: cameraNode.eulerAngles.y), reason: reason)
+    }
+
+    /// Places the player at a saved point on this just-built floor: the exact
+    /// spot while it is still legal walking floor (layouts and characters may
+    /// have changed since); else the centre of its cell; else the elevator
+    /// landing. Exact yaw either way (free look). Nothing is triggered --
+    /// no arrival pickups, no landings, no story beats. Returns the cell.
+    @discardableResult
+    func resume(at point: ResumeState.Point) -> GridCoordinate {
+        let geometry = makeFreeWalkGeometry()
+        var position = SCNVector3(point.x, cameraNode.position.y, point.z)
+        var cell = geometry.containingCell(x: Double(point.x), z: Double(point.z), previous: nil)
+        var how = "exact"
+        if !cells.contains(cell) || !geometry.isLegal(x: Double(point.x), z: Double(point.z)) {
+            if !cells.contains(cell) { cell = endCell; how = "elevatorLanding" } else { how = "cellCentre" }
+            let c = worldPosition(for: cell)
+            position = SCNVector3(c.x, position.y, c.z)
+        }
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        cameraNode.position = position
+        cameraNode.eulerAngles = SCNVector3(0, point.yaw, 0)
+        SCNTransaction.commit()
+        currentCell = cell
+        facing = nearestCardinal(toYaw: Double(point.yaw))
+        diag("resume.placed", ["floor": floorNumber, "cell": cell, "how": how,
+                               "pos": String(format: "%.2f,%.2f", position.x, position.z)])
+        return cell
+    }
+}
+
+// MARK: - Oct 11 -- a held landing pitch (the ID terminal's card reveal)
+
+extension TapNavigationController {
+    static let landingPitchActionKey = "landingPitch"
+
+    /// Tilts the view to `pitch` (radians, negative = down) while the player
+    /// stays in landing `kind`'s pose; the moment they leave it (any walk,
+    /// turn or drag), the view eases back to level. Only the pitch moves --
+    /// never position or yaw -- and nothing else in the game uses pitch on
+    /// this floor (the office computer's seated pitch is Floor 3's own).
+    func holdLandingPitch(_ pitch: Float, whileIn kind: String) {
+        landingPitchGeneration += 1
+        let generation = landingPitchGeneration
+        landingPitchKind = kind
+        animatePitch(to: pitch, duration: 0.5)
+        watchLandingPitch(generation)
+    }
+
+    private func watchLandingPitch(_ generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self, generation == self.landingPitchGeneration, let kind = self.landingPitchKind else { return }
+            if self.isInLandingPose(kind) { self.watchLandingPitch(generation); return }
+            self.landingPitchKind = nil
+            self.animatePitch(to: 0, duration: 0.25)
+        }
+    }
+
+    /// Eases ONLY the pitch (other code may set yaw meanwhile -- untouched).
+    private func animatePitch(to target: Float, duration: Double) {
+        let start = cameraNode.eulerAngles.x
+        cameraNode.removeAction(forKey: Self.landingPitchActionKey)
+        guard abs(target - start) > 0.0005 else { return }
+        let ease = SCNAction.customAction(duration: duration) { node, elapsed in
+            let u = Float(min(1, Double(elapsed) / duration))
+            node.eulerAngles.x = start + (target - start) * (u * u * (3 - 2 * u))
+        }
+        cameraNode.runAction(ease, forKey: Self.landingPitchActionKey)
+    }
+}
+
+
+/// Oct 12 (developer diagnostics, temporary): what the continuous walk's last
+/// corner did -- WIDE curve (radius), TIGHT turn (and why), a junction stop,
+/// or a curve interrupted/blocked. Shown for a few seconds above the HUD row
+/// in developer builds (ContinuousWalkControls) and logged as
+/// `cruise.cornerNote`. Written on the render thread, read on main.
+nonisolated final class CruiseCornerNote: @unchecked Sendable {
+    static let shared = CruiseCornerNote()
+    private let lock = NSLock()
+    private var text = ""
+    private var at: CFTimeInterval = 0
+
+    func post(_ note: String) {
+        lock.withLock { text = note; at = CACurrentMediaTime() }
+        diag("cruise.cornerNote", ["note": note])
+        #if DEBUG
+        print("[Nav] \(note)")                                     // (Oct 19: the console, not the screen)
+        #endif
+    }
+
+    /// Oct 19: the notes show on screen only when asked for -- launch argument
+    /// `-HallwaysNavNotes YES` (DEBUG builds). Normal play never shows them.
+    static var showsOnScreen: Bool { UserDefaults.standard.bool(forKey: "HallwaysNavNotes") }
+
+    /// The last note, if it is recent.
+    func recent(within seconds: Double = 4) -> String? {
+        lock.withLock { CACurrentMediaTime() - at < seconds ? text : nil }
+    }
+}
+
+
+// MARK: - Oct 15 -- the Smart Tap + Rocket Elevator experiment (switches, tuning, logging)
+
+/// SMART TAP: the GO / STOP / LEFT / RIGHT buttons are hidden (their code is
+/// untouched); taps do the navigating. The HUD's centre button still appears
+/// when it offers an interaction (OPEN, USE, PHOTO, STAND, SKIP...).
+/// Contextual taps (ContentView.handleTap): Juanita mid-directions, the area
+/// round the ID kiosk, Tinky while he escorts, Tinky's desk from reception.
+/// Revert: launch with `-HallwaysClassicControls YES`.
+enum SmartTap {
+    static var isOn: Bool { !UserDefaults.standard.bool(forKey: "HallwaysClassicControls") }
+    /// Oct 15: HUD actions that are taps on the thing itself under Smart Tap
+    /// (doors, the elevator, the office computer, the meeting chair).
+    static let hiddenActionLabels: Set<String> = ["OPEN", "USE", "ENTER"]
+    /// A tap whose floor/wall point lands within this of the ID kiosk's
+    /// standing spot is a tap on the kiosk (while the ID is still to do).
+    static let kioskReach: Float = 1.9
+    /// A tap landing within this of the escorting character is a tap on him.
+    static let guideReach: Float = 1.0
+
+    /// DEBUG builds only: one line per Smart Tap decision.
+    static func log(_ decision: String, _ fields: KeyValuePairs<String, Any?> = [:]) {
+        #if DEBUG
+        var text = "smartTap " + decision
+        for (k, v) in fields { text += " \(k)=\(v.map { "\($0)" } ?? "nil")" }
+        diag("smartTap", ["decision": text])
+        #endif
+    }
+}
+
+/// ROCKET ELEVATOR: rides the player chooses run on these timings; the
+/// building's scripted rides (the first trip from the lobby, the escort to
+/// Floor 3) keep the classic ones. Revert: `-HallwaysClassicElevator YES`.
+/// Classic, from a floor chosen with the doors open: doors close 1.6 s,
+/// beat 0.1 s, floor counter 0.5 + 4.5 s, [floor rebuild], doors open 1.6 s
+/// = 8.3 s + rebuild. Rocket: 0.35 + 0.05 + 0.05 + 0.45 + [rebuild] + 0.45
+/// = 1.35 s + rebuild.
+enum RocketElevator {
+    static var isOn: Bool { !UserDefaults.standard.bool(forKey: "HallwaysClassicElevator") }
+    static let classicDoorSlide: TimeInterval = 1.6
+    static let doorClose: TimeInterval = 0.35
+    static let departBeat: TimeInterval = 0.05
+    static let indicatorLeadIn: TimeInterval = 0.05
+    static let indicatorCountingSpan: TimeInterval = 0.45
+    static let doorOpen: TimeInterval = 0.45
+    static let faceDoors: TimeInterval = 0.45
+
+    /// Oct 16 (Bonzo PP, Part 2): every floor passed shows for this long (readable:
+    /// 3, 4, 5 ...), so a long trip takes longer -- the doors stay shut until the
+    /// last number is up (the indicator's own completion hands the ride off).
+    static let indicatorSecondsPerFloor: TimeInterval = 0.3
+
+    static func indicatorStepDelay(step: Int, steps: Int) -> TimeInterval {
+        // (was: the whole count squeezed into indicatorCountingSpan, however many floors)
+        indicatorLeadIn + indicatorSecondsPerFloor * Double(step)
+    }
+
+    /// Set at each departure; read (once) by the DESTINATION floor's new
+    /// controller when its doors open.
+    static var rideIsRocket = false
+    static func consumeArrival() -> Bool {
+        defer { rideIsRocket = false }
+        return rideIsRocket
+    }
+
+    // (diagnostics: selection -> control, measured)
+    private static var departedAt: CFTimeInterval = 0
+    private static var trip = ""
+    static func markDeparture(from: Int, to: Int) {
+        departedAt = CACurrentMediaTime()
+        trip = "\(from)->\(to)"
+    }
+    static func markDepartureIfStale(from: Int, to: Int) {
+        if CACurrentMediaTime() - departedAt > 3 { markDeparture(from: from, to: to) }
+    }
+    static func markControlReturned(floor: Int) {
+        let seconds = CACurrentMediaTime() - departedAt
+        diag("elevator.rocket.controlReturned", ["trip": trip, "seconds": (seconds * 100).rounded() / 100])
     }
 }

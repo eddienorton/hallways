@@ -43,6 +43,7 @@ enum SoundEffects {
     /// crash) if that file isn't in the app bundle yet -- lets every
     /// sound below be declared before its asset necessarily exists.
     private static func loadPlayer(_ filename: String) -> AVAudioPlayer? {
+        if AudioDiagnostics.audioOff { return nil }                          // (Oct 24: audio-off -- none loaded)
         let name = filename as NSString
         let ext = name.pathExtension
         let base = name.deletingPathExtension
@@ -147,6 +148,7 @@ enum SoundEffects {
     private(set) static var walkingReverse = false
 
     private static func makeWalkingPlayer(_ feet: PlayerFeet, reverse: Bool) -> AVAudioPlayer? {
+        if AudioDiagnostics.audioOff { return nil }                          // (Oct 24: audio-off -- no footsteps)
         // Oct 6: synthesised footsteps (FootstepSynth), replacing the recorded
         // walk-*.mp3 loops -- same loop/rate/start/stop handling as before.
         let style: FootstepSynth.Style = feet == .highHeels ? .heel : .shoe
@@ -206,6 +208,7 @@ enum SoundEffects {
     /// chime heard from elsewhere in the building (a character's call; see
     /// CritterAudio.buildingGain). Set through HallwaysAudio so Mute still wins.
     static func playElevatorArrival(gain: Float = 1) {
+        StickyProbe.note(gain < 1 ? "elevator chime (elsewhere)" : "elevator chime")   // Oct 22 (evening): measurement only
         guard let player = elevatorArrivalPlayer else { return }
         HallwaysAudio.shared.setVolume(player, min(1, max(0, gain)))
         player.currentTime = 0
@@ -255,19 +258,50 @@ enum SoundEffects {
 
     static func startStreetAudio() {
         guard let player = streetAudioPlayer else { return }
+        // Oct 11: a cold launch calls this twice (onAppear + onChange);
+        // rewinding a loop that is already playing clicks. Leave it playing.
+        guard !player.isPlaying else { return }
         // Explicit game-audio activation, same as the chute/mail
         // helpers -- the intro screen is exactly when the OS may
         // still have the session unconfigured.
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            print("SoundEffects: could not activate street audio: \(error)")
-        }
+        configureAudioSession(reason: "street")   // Oct 11: once-only (no engine reconfiguration)
         HallwaysAudio.shared.setVolume(player, 1)   // Oct 8: via the mute switch
         player.currentTime = 0
         player.play()
+    }
+
+    // MARK: Oct 11 -- the audio session, configured once
+
+    private static var audioSessionConfigured = false
+    private static var audioSessionNeedsReactivation = false
+    private static var audioInterruptionObserver: NSObjectProtocol?
+
+    /// The app's audio session: playback, mixing with other apps. Set ONCE
+    /// (HallwaysApp.init, before SceneKit's audio engine exists). Every later
+    /// call is a no-op unless the category was lost or an interruption (a
+    /// call, Siri) ended -- then the session is only re-activated. Before
+    /// Oct 11 every street/chute/mail/knock sound re-set the category, and the
+    /// first one did it under SceneKit's already-running engine (restart =
+    /// launch crackle; see AudioHealth's audio.event lines).
+    static func configureAudioSession(reason: String) {
+        let session = AVAudioSession.sharedInstance()
+        let categoryOK = session.category == .playback && session.categoryOptions.contains(.mixWithOthers)
+        if audioSessionConfigured, categoryOK, !audioSessionNeedsReactivation { return }
+        do {
+            if !categoryOK { try session.setCategory(.playback, mode: .default, options: [.mixWithOthers]) }
+            try session.setActive(true)
+            audioSessionConfigured = true
+            audioSessionNeedsReactivation = false
+            diag("audio.sessionConfigured", ["reason": reason, "categorySet": !categoryOK])
+        } catch {
+            diag("audio.sessionConfigureFailed", ["reason": reason, "error": "\(error)"])
+        }
+        if audioInterruptionObserver == nil {
+            audioInterruptionObserver = NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { audioSessionNeedsReactivation = true }
+            }
+        }
     }
 
     static func stopStreetAudio() {
@@ -318,13 +352,7 @@ enum SoundEffects {
         guard let player else { return false }
         // Explicit game audio avoids the default session silently following
         // the device's Ring/Silent switch. Keep other background audio mixing.
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            print("SoundEffects: could not activate chute audio: \(error)")
-        }
+        configureAudioSession(reason: "chute")   // Oct 11: once-only (no engine reconfiguration)
         player.currentTime = 0
         let started = player.play()
         if !started {
@@ -401,13 +429,7 @@ enum SoundEffects {
 
     private static func playMailSound(_ player: AVAudioPlayer?) -> Bool {
         guard let player else { return false }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            print("SoundEffects: could not activate mail audio: \(error)")
-        }
+        configureAudioSession(reason: "mail")   // Oct 11: once-only (no engine reconfiguration)
         player.currentTime = 0
         return player.play()
     }
@@ -515,13 +537,7 @@ enum SoundEffects {
     /// didn't start), which is exactly what the no-substitution rule
     /// needs -- a hard-knock failure is reported, not muffled.
     private static func playKnockSound(_ player: AVAudioPlayer) -> Bool {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-        } catch {
-            print("SoundEffects: could not activate knock audio: \(error)")
-        }
+        configureAudioSession(reason: "knock")   // Oct 11: once-only (no engine reconfiguration)
         player.currentTime = 0
         let started = player.play()
         if !started {

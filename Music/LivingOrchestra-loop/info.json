@@ -1,0 +1,32 @@
+{
+ "sampleRate": 44100,
+ "loopSamples": 3832138,
+ "bpm": 116,
+ "bars": 42,
+ "scale": 6.503268274702718e-05,
+ "stems": {
+  "foundation": {
+   "rms_dB": -22.7,
+   "peak_dB": -3.5
+  },
+  "clarinet": {
+   "rms_dB": -28.5,
+   "peak_dB": -11.1
+  },
+  "bassoon": {
+   "rms_dB": -30.1,
+   "peak_dB": -11.2
+  },
+  "flute": {
+   "rms_dB": -28.4,
+   "peak_dB": -12.6
+  },
+  "ensemble": {
+   "rms_dB": -32.5,
+   "peak_dB": -16.2
+  }
+ },
+ "allAtFull": {
+  "rms_dB": -20.1
+ }
+}

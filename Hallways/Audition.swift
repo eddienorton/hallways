@@ -79,7 +79,7 @@ nonisolated final class Frog: Critter {
     private var crouchTime: Float = 0.2, airTime: Float = 0.4, landTime: Float = 0.16
     private var hopDistance: Float = 0.6, hopHeight: Float = 0.18
     private var nextHopIn: Double = 1.5
-    private var lift: Float = 0
+    private var hopLift: Float = 0
 
     // Pose (all blended).
     private var fold: Float = 1, crouchDepth: Float = 0, pitch: Float = 0.28, reach: Float = 0, squash: Float = 0
@@ -259,7 +259,7 @@ nonisolated final class Frog: Critter {
     override func sense(now: CFTimeInterval) {
         tongueCooldown = max(0, tongueCooldown - senseInterval)
         // Anything big closing in fast: one enormous leap away.
-        let big: Set<Habitat.Kind> = [.noodle, .player, .dog, .cat, .ladder, .chair, .stalk]
+        let big: Set<Habitat.Kind> = [.noodle, .player, .ladder, .chair, .stalk]
         if mode != .startled, stage == .none || stage == .settle,
            case let (s, d)? = nearest(big, within: 1.7), closingSpeed(s) > 0.8 || d < 0.6 {
             threat = s.pos
@@ -285,7 +285,7 @@ nonisolated final class Frog: Critter {
             }
         }
         // Anything at all moving within view while sitting: turn to watch it.
-        if mode == .sit, case let (s, d)? = nearest([.noodle, .bobbin, .clacker, .slinky, .cat, .dog, .pottle], within: 4),
+        if mode == .sit, case let (s, d)? = nearest([.noodle, .bobbin, .slinky, .pottle], within: 4),
            d > 0.6, simd_length(s.velocity) > 0.2, Float.random(in: 0...1) < 0.3 {
             lookAt = s.pos
         }
@@ -368,7 +368,7 @@ nonisolated final class Frog: Critter {
         // Hop sequence -- the body only travels while airborne.
         var wantFold: Float = 1, wantCrouch: Float = 0, wantPitch: Float = 0.28, wantReach: Float = 0, wantSquash: Float = 0
         wantSpeed = 0
-        lift = 0
+        hopLift = 0
         switch stage {
         case .none:
             break
@@ -381,7 +381,7 @@ nonisolated final class Frog: Critter {
         case .air:
             let s = min(1, stageTime / airTime)
             wantSpeed = hopDistance / airTime
-            lift = 4 * hopHeight * s * (1 - s)
+            hopLift = 4 * hopHeight * s * (1 - s)
             // Explosive extension, then reach for the ground with the hands
             // while the hind legs gather back up.
             wantFold = s < 0.35 ? 0 : (s - 0.35) / 0.65
@@ -412,7 +412,7 @@ nonisolated final class Frog: Critter {
         reach += (wantReach - reach) * min(1, dt * rate)
         squash += (wantSquash - squash) * min(1, dt * 25)
 
-        body.position.y = 0.13 - 0.045 * crouchDepth + lift
+        body.position.y = 0.13 - 0.045 * crouchDepth + hopLift
         body.eulerAngles = SCNVector3(pitch, 0, 0)
         let breathe = 1 + 0.015 * sin(t * 2.2)
         bodyNode.scale = SCNVector3(1 + 0.12 * squash, (1 - 0.18 * squash) * breathe, 1 + 0.05 * squash)
@@ -601,7 +601,7 @@ nonisolated final class Slinky: Critter {
         case .wander:
             // The first thing it sees going somewhere becomes the one to follow.
             var best: (Habitat.Sighting, Float)?
-            for s in habitat.sightings where s.id != id && s.kind != .player && snubbed[s.id] == nil {
+            for s in habitat.sightings where s.id != id && s.kind != .player && s.kind != .bigShot && snubbed[s.id] == nil {
                 let d = simd_length(s.pos - stackAt)
                 guard d < 4.5, simd_length(s.velocity) > 0.25 else { continue }
                 if best == nil || d < best!.1 { best = (s, d) }

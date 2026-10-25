@@ -48,8 +48,10 @@ nonisolated enum HallwaysFace {
             switch self {
             case .ok: return ("", "")
             case .noFace: return ("NO FACE DETECTED", "LOOK INTO THE CAMERA")
-            case .tooLow: return ("FACE TOO LOW", "RAISE THE CAMERA A LITTLE")
-            case .tooHigh: return ("FACE TOO HIGH", "LOWER THE CAMERA A LITTLE")
+            // Oct 12 (stability): these two were swapped. A face low in the
+            // picture means the camera is above it: lower it (and vice versa).
+            case .tooLow: return ("FACE TOO LOW", "LOWER THE CAMERA A LITTLE")
+            case .tooHigh: return ("FACE TOO HIGH", "RAISE THE CAMERA A LITTLE")
             case .tooFar: return ("TOO FAR AWAY", "MOVE A LITTLE CLOSER")
             case .offCenter: return ("FACE OFF CENTER", "CENTER YOUR FACE")
             }
@@ -180,6 +182,18 @@ nonisolated enum HallwaysFace {
 
     static func transform(_ input: UIImage) -> UIImage { render(input).image }
 
+    /// Oct 11 -- HALLWAYS HEAD (one knob). The rule already reshapes the head
+    /// (domed crown + softer, narrower jaw on every variant; long / squashed /
+    /// widened heads on some). This scales those two existing head warps for
+    /// every variant: > 1 = a more Hallways-shaped head, 1.0 = exactly the
+    /// Oct 10 faces. Eyes, mouth, framing and crop are untouched; the warps
+    /// still run AFTER the eyes are painted, so eyes and glasses move together.
+    static let headShapeStrength: CGFloat = 1.3
+    /// Each boosted warp stays inside the range the presets already use.
+    private static func headWarp(_ scale: CGFloat) -> CGFloat {
+        max(-0.75, min(0.8, scale * headShapeStrength))
+    }
+
     /// `variant` nil = Hallways decides (random, no immediate repeat).
     static func render(_ input: UIImage, variant chosen: Variant? = nil) -> Output {
         let started = CFAbsoluteTimeGetCurrent()
@@ -187,7 +201,8 @@ nonisolated enum HallwaysFace {
         let p = preset(variant)
         diag("hallwaysFace.begin", ["w": Double(input.size.width), "h": Double(input.size.height),
                                     "orientation": input.imageOrientation.rawValue, "hasCG": input.cgImage != nil])
-        diag("hallwaysFace.variant", ["variant": variant.rawValue, "note": p.note.isEmpty ? "none" : p.note])
+        diag("hallwaysFace.variant", ["variant": variant.rawValue, "note": p.note.isEmpty ? "none" : p.note,
+                                      "headShape": Double(headShapeStrength)])
 
         // Upright pixels, at most 1280 on the long side.
         let maxSide: CGFloat = 1280
@@ -314,8 +329,8 @@ nonisolated enum HallwaysFace {
         func bumpIf(_ at: CGPoint, radius: CGFloat, scale: CGFloat) { if scale != 0 { bump(at, radius: radius, scale: scale) } }
         bumpIf(mouth, radius: max(mouthWidth * p.mouthRadius, eyeSpan * 0.38), scale: p.mouthScale)
         let eyeLine = (leftEye.y + rightEye.y) / 2
-        bumpIf(CGPoint(x: faceBox.midX, y: faceBox.minY + faceBox.height * 0.08), radius: faceBox.width * p.jawRadius, scale: p.jawScale)
-        bumpIf(CGPoint(x: faceBox.midX, y: eyeLine + faceBox.height * p.crownLift), radius: faceBox.width * p.crownRadius, scale: p.crownScale)
+        bumpIf(CGPoint(x: faceBox.midX, y: faceBox.minY + faceBox.height * 0.08), radius: faceBox.width * p.jawRadius, scale: headWarp(p.jawScale))
+        bumpIf(CGPoint(x: faceBox.midX, y: eyeLine + faceBox.height * p.crownLift), radius: faceBox.width * p.crownRadius, scale: headWarp(p.crownScale))
 
         // 3b. Variant-only proportions (all zero for the original face).
         if p.cheeks != 0 {

@@ -1,0 +1,84 @@
+{
+ "parts": {
+  "night-porter": {
+   "soprano": {
+    "melody": {
+     "shift": 0,
+     "frames": 2540160
+    },
+    "answer1": {
+     "shift": 0,
+     "frames": 2540160
+    },
+    "answer2": {
+     "shift": 0,
+     "frames": 2540160
+    },
+    "answer3": {
+     "shift": 12,
+     "frames": 2540160
+    }
+   },
+   "alto": {
+    "melody": {
+     "shift": -12,
+     "frames": 2540160
+    },
+    "answer1": {
+     "shift": -12,
+     "frames": 2540160
+    },
+    "answer2": {
+     "shift": -12,
+     "frames": 2540160
+    },
+    "answer3": {
+     "shift": 0,
+     "frames": 2540160
+    }
+   },
+   "tenor": {
+    "melody": {
+     "shift": -12,
+     "frames": 2540160
+    },
+    "answer1": {
+     "shift": -12,
+     "frames": 2540160
+    },
+    "answer2": {
+     "shift": -12,
+     "frames": 2540160
+    },
+    "answer3": {
+     "shift": 0,
+     "frames": 2540160
+    }
+   },
+   "bass": {
+    "melody": {
+     "shift": -24,
+     "frames": 2540160
+    },
+    "answer1": {
+     "shift": -24,
+     "frames": 2540160
+    },
+    "answer2": {
+     "shift": -24,
+     "frames": 2540160
+    },
+    "answer3": {
+     "shift": 0,
+     "frames": 2540160
+    }
+   }
+  }
+ },
+ "levels": {
+  "soprano": -16.8,
+  "alto": -17.2,
+  "tenor": -16.2,
+  "bass_voice": -20.9
+ }
+}

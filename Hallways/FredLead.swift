@@ -43,7 +43,10 @@ enum FredLead {
 
     /// The "follow me" invitation, then the lead to the elevator nook.
     /// Returns nil (and does nothing) if the floor isn't wired for it.
-    static func startFollowMe(fred: SCNNode, onDone: @escaping () -> Void) -> CharacterLead? {
+    /// Oct 24 (`onFollow`): the escort on the game's FOLLOW -- FOLLOW walks the player
+    /// (no guidedRoute steering WALK), and at the nook his last stop waits for the
+    /// player (GuidedJourney then has him call the car).
+    static func startFollowMe(fred: SCNNode, onFollow: Bool = false, onDone: @escaping () -> Void) -> CharacterLead? {
         guard let context else { diag("fred.lead.unavailable", ["reason": "no context"]); return nil }
         let s = context.cellSize
         let performer = FredLeadPerformer(node: fred)
@@ -58,11 +61,15 @@ enum FredLead {
         // He ends to one side of the nook, facing the elevator doors (west wall).
         let finalPoint = SIMD2<Float>(Float(endCell.col) * s, Float(endCell.row) * s - 0.9)
         let doors = SIMD2<Float>((Float(endCell.col) - 0.5) * s, Float(endCell.row) * s)
-        let steps = CharacterLead.plan(route: route, context: context, finalPoint: finalPoint,
+        var steps = CharacterLead.plan(route: route, context: context, finalPoint: finalPoint,
                                        finalHeading: FredLeadPerformer.heading(doors - finalPoint))
+        if onFollow, case .some(.stop(var last)) = steps.last, last.isFinal {
+            last.waitsForPlayer = true
+            steps[steps.count - 1] = .stop(last)
+        }
         let lead = CharacterLead(performer: performer, context: context, steps: steps)
         lead.name = "followMe"
-        lead.guidedRoute = route                     // Oct 10: WALK follows him
+        if !onFollow { lead.guidedRoute = route }   // Oct 10: WALK follows him (Oct 24: unless FOLLOW does)
         lead.onFinish = onDone
         // The first place he heads for = the direction of "this way".
         var firstTarget = finalPoint
@@ -87,6 +94,14 @@ enum FredDoorGuard {
     /// Out of the office (refusing, leading, going home).
     private static var busy = false
     private static var retireWhenHome = false
+
+    /// Oct 24 (Start Over without relaunch): any refusal / lead still under way stops.
+    static func resetForNewPlayer() {
+        lead?.cancel()
+        lead = nil
+        busy = false
+        retireWhenHome = false
+    }
 
     /// Just inside the door, 1.4 m back (clear of the leaf), facing it.
     private static func home(_ s: Float) -> SIMD2<Float> { SIMD2<Float>(9 * s, 11.5 * s + 1.4) }
@@ -213,7 +228,11 @@ final class FredLeadPerformer: LeadPerformer {
     private var legs: [SCNNode] = []
     private let steps = TinCanRatSound.stepSources()
 
-    static let speed: Float = 2.5                    // m/s -- brisker than a walk
+    /// Oct 11 (playtest: "just a little slow"): 2.5 -> 2.8 m/s (+12%). The
+    /// trot cadence quickens ~6% with it (below), so the steps stay short and
+    /// busy -- his walk, a touch more purposeful. Pauses, turns and gestures
+    /// are untouched; WALK still trails him at its 1.7 m gap.
+    static let speed: Float = 2.8                    // m/s -- brisker than a walk
     static let flagX: CGFloat = -0.75                 // tail up: "I'm leading"
     private static let gestureKey = "leadGesture", travelKey = "leadTravel", faceKey = "leadFace"
 
@@ -674,7 +693,7 @@ final class FredLeadPerformer: LeadPerformer {
     private func trot(_ duration: Double) -> SCNAction {
         let legs = self.legs, steps = self.steps
         return .run { node in
-            let half = 0.09
+            let half = 0.085                         // Oct 11: was 0.09 (see `speed`)
             let cycles = max(1, Int((duration / (2 * half)).rounded()))
             for (i, leg) in legs.enumerated() {
                 let sign: CGFloat = (i == 0 || i == 3) ? 1 : -1

@@ -292,7 +292,8 @@ struct ContentView: View {
     // one-time tutorial hint.
     // Oct 5: not when relaunching mid-prologue -- that resumes in
     // Administration (Admission.resumesInAdministration / MazeStore init).
-    @State private var showIntroScreen = !Admission.resumesInAdministration
+    // Oct 11 (resume): nor when reopening at the player's saved spot (ResumeState).
+    @State private var showIntroScreen = !(Admission.resumesInAdministration || ResumeState.resumesAtSavedPoint)
 
     // A one-time "tap to walk, swipe to turn" hint, gone the moment
     // it's shown once and never seen again after that -- the tradeoff
@@ -604,9 +605,14 @@ struct ContentView: View {
                     if !shown { BuildingDispatch.evaluate(reason: "enteredBuilding") }
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    // Oct 11 (resume): leaving the app -- remember exactly where.
+                    // (Oct 16: outside -- the street screen -- is not a place to resume inside the building.)
+                    if phase != .active, !showIntroScreen { navBridge.controller?.saveResumePoint(reason: "background") }
                     // Oct 8 (Phase 1): back in the app, inside the building.
                     // Only what is due NOW; app-closed time means nothing yet.
                     if phase == .active && !showIntroScreen { BuildingDispatch.evaluate(reason: "appActive") }
+                    // Oct 18 (building life): residents catch up on the time away (and are saved on leaving).
+                    if phase == .active { BuildingLife.shared.appBecameActive() } else { BuildingLife.shared.appResigned() }
                 }
                 // Cold launch: showIntroScreen already starts true, so
                 // the onChange above can't fire -- start the street
@@ -628,6 +634,12 @@ struct ContentView: View {
                 if TapNavigationController.continuousWalkExperimentOn && !showIntroScreen {
                     ContinuousWalkControls(controller: navController)
                         .zIndex(12)
+                }
+                // Oct 16 (V): the tool tray (audition; ToolBelt.Presentation). Only its own
+                // strip takes touches; it steps aside while seated and at the elevator panel.
+                if !showIntroScreen && !decorator.enabled {
+                    ToolTrayView(controller: navController)
+                        .zIndex(13)
                 }
                 MirrorCommentOverlay(controller: navController, state: mirrorComments, mirrors: mazeStore.mirrors,
                     gameplayActive: scenePhase == .active && !showGridEditor && !showIntroScreen)
@@ -729,14 +741,19 @@ struct ContentView: View {
             // controller. See NavigationBridge.floorTransitionRequested.
             ElevatorCurtainOverlay(navBridge: navBridge)
 
-            // Oct 8 -- the player's phone (Stage 1: the physical phone only;
-            // see HallPhone.swift). Outside the controller-dependent overlays
-            // so it survives floor/controller replacement; above the gameplay
-            // overlays, but it only ever covers the phone itself -- every
-            // other touch still reaches Hallways.
-            if !showIntroScreen {
-                HallPhoneOverlayHost(decorator: decorator, navBridge: navBridge, mazeStore: mazeStore)
+            // Oct 21 -- the phone is retired: Building Life's bottom tray (see
+            // BuildingLifeTray.swift) in the place the phone's host had --
+            // outside the controller-dependent overlays so it survives
+            // floor/controller replacement; above the gameplay overlays, but it
+            // only ever covers its tab or the tray itself -- every other touch
+            // still reaches Hallways. Put away while decorating, as the phone was.
+            if !showIntroScreen && !decorator.enabled {
+                BuildingLifeTray(navBridge: navBridge, mazeStore: mazeStore)
                     .zIndex(45)
+                // Oct 23 -- a tapped critter's menu (CritterMenu.swift): only its card
+                // takes touches; under the tray, so an opened tray is never covered.
+                CritterMenuOverlay()
+                    .zIndex(44)
             }
 
             if showNavGestureHint {
@@ -789,6 +806,14 @@ struct ContentView: View {
                         // and it now drives the mid-prologue launch resume.
                         navBridge.controller?.advance(source: "CEREMONIAL")
                     }
+                }
+                // Oct 24: the speaker button on the street screen too (the
+                // street traffic plays here). The same button as the HUD's,
+                // top right inside the safe area; an overlay above the
+                // screen, so its tap never reaches "tap anywhere to enter".
+                .overlay(alignment: .topTrailing) {
+                    HallwaysMuteButton()
+                        .padding()
                 }
                 .transition(.opacity)
                 .zIndex(10)
@@ -873,6 +898,12 @@ struct ContentView: View {
                 Spacer()
             }
             .padding()
+            // Oct 18 (DEBUG): the residents' live readout in the controlled test
+            // (-HallwaysLifeTest N) or with -HallwaysLifePanel YES. Never in Release.
+            if LifePanel.enabled && !showIntroScreen {
+                LifeTestOverlay()
+                    .zIndex(9000)
+            }
         }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
@@ -906,6 +937,9 @@ struct ContentView: View {
             mazeStore.save()
         }) {
             GridEditorView(mazeStore: mazeStore, themeStore: themeStore, youAreHere: navBridge.controller?.currentCell, youAreHereFacing: navBridge.controller?.facing, youAreHereMazeID: navBridge.controller != nil ? mazeStore.currentMazeID : nil,
+                           youAreHereSpot: navBridge.controller.map { CGPoint(x: CGFloat($0.cameraNode.position.x) / mazeStore.cellSize,
+                                                                              y: CGFloat($0.cameraNode.position.z) / mazeStore.cellSize) },
+                           youAreHereYaw: navBridge.controller.map { Double($0.cameraNode.eulerAngles.y) },
                            devNewEmployeeAtAdministration: {
                                #if DEBUG
                                jumpToAdministrationAsNewEmployee()
@@ -1029,6 +1063,7 @@ struct ContentView: View {
 /// otherwise trigger a re-render on its own.
 private struct NavigationOverlay: View {
     @ObservedObject var controller: TapNavigationController
+    @ObservedObject private var toolTray = ToolTray.shared             // Oct 16 (V): the status line sits above the tray
 
     var body: some View {
         VStack {
@@ -1053,6 +1088,9 @@ private struct NavigationOverlay: View {
             // the status message clear of the WALK/LEFT/RIGHT row below it.
             if TapNavigationController.continuousWalkExperimentOn {
                 Color.clear.frame(height: ContinuousWalkControls.rowHeight + ContinuousWalkControls.bottomPadding + 10)
+            }
+            if toolTray.isShowing {                                             // (Oct 19: no gap for an empty, hidden tray)
+                Color.clear.frame(height: ToolTrayView.slot + 12 + 8)      // (the tray's own strip)
             }
         }
         // Sept 24 pass per Eddie (accepted on device): this pill has
@@ -1305,7 +1343,7 @@ private struct ElevatorCurtainOverlay: View {
             diag("curtain.arrivalDing")
             SoundEffects.playElevatorArrival()
             SoundEffects.stopElevatorMusic()
-            navBridge.controller?.playArrivalLightWash(openingDuration: 1.6)
+            navBridge.controller?.playArrivalLightWash(openingDuration: RocketElevator.rideIsRocket ? RocketElevator.doorOpen : 1.6)
             navBridge.deliverControlledArrivalDoorOpen()
             visible = false
         }
@@ -1659,6 +1697,8 @@ final class StagedElevatorDestination {
     var prepareFinished = false
     var prepareSucceeded = false
     var cancelled = false
+    /// Oct 24 (onboarding polish): started before the press (Admission's first ride).
+    var foreseen = false
     /// Picture-identity reports from the staged scene (some arrive later,
     /// from Photos). Its own object so the scene's closures never retain
     /// this staging (or, through it, the scene itself).
@@ -1971,6 +2011,12 @@ struct HallwaySceneView: UIViewRepresentable {
             if floor == ConferenceRoom.floor {                             // Oct 8: the conference room
                 ConferenceRoom.install(into: result.scene.rootNode, cellSize: cellSize, cells: c.cells)
             }
+            if floor == SuppliesShowroom.floor {                           // Oct 16: Floor 4, SUPPLIES
+                SuppliesShowroom.install(into: result.scene.rootNode, cellSize: cellSize, cells: c.cells)
+            }
+            if floor == FloorFiveBlackout.floor {                          // Oct 16 (VIII): Floor 5, LIGHTS OUT
+                FloorFiveBlackout.install(into: result.scene.rootNode, cellSize: cellSize, cells: c.cells)
+            }
             staged.build = result
             diag("elevator.staging.sceneBuilt", ["to": floor, "chunkMs": staged.ms(since: buildStarted), "sincePressMs": staged.ms(since: staged.pressedAt)])
             // Chunk 2: the LivingWorld population (Menagerie + Bobbins) into
@@ -2001,7 +2047,11 @@ struct HallwaySceneView: UIViewRepresentable {
                               c.woidleTerminals] {
                     dweezilBusy.formUnion(games.keys)
                 }
-                let livingCells = c.cells
+                // Oct 11 (the staff meeting): the conference room is a directed
+                // scene -- the floor's free-roaming population stays out of it.
+                // Oct 12: ...and the player's own office is theirs (Harold's) -- no roaming population in it.
+                let livingCells = floor == ConferenceRoom.floor
+                    ? c.cells.subtracting(ConferenceRoom.roomCells).subtracting(PlayerOffice.officeCells) : c.cells
                 let livingCellSize = cellSize
                 // Oct 5 (Admission): no Bobbin in Administration during admission.
                 let holdBobbins = Admission.isPending && floor == Admission.administrationFloor
@@ -2011,7 +2061,7 @@ struct HallwaySceneView: UIViewRepresentable {
                     guard let view, let scene, let cameraNode, !quietDestination else { return }
                     let dweezilCage = Menagerie.install(in: view, scene: scene, playerCamera: cameraNode, cells: livingCells,
                                                         cellSize: livingCellSize, doors: bobbinDoors, litCells: dweezilLit,
-                                                        busyCells: dweezilBusy)
+                                                        busyCells: dweezilBusy, floor: floor)          // Oct 16: (the Big Shot's floor)
                     var bobbinCells = livingCells
                     if let dweezilCage { bobbinCells.remove(dweezilCage) }
                     if !holdBobbins {
@@ -2046,6 +2096,21 @@ struct HallwaySceneView: UIViewRepresentable {
         defer { ElevatorArrivalTrace.shared.endPhase("scene.install", tracePhase) }
         let controlledArrival = navBridge.pendingElevatorArrival && navBridge.pendingArrivalYaw != nil
         let arrivalEvent = navBridge.floorTransitionRequested
+        // Oct 17 (Decorate teleport fix): a Decorate edit that changes the floor's
+        // data (adding a Picture, a light, a surface...) bumps mazeStore.version,
+        // which rebuilds this floor -- and a rebuild starts the player at the
+        // floor's spawn (on Floors 2+, the elevator). For a same-floor rebuild
+        // while decorating, keep the player's exact spot and yaw, put back below
+        // through the SAME resume(at:) a relaunch uses. Never for an elevator
+        // arrival, a floor switch, or the forced (dev reset) rebuild.
+        let keptDecoratePose: ResumeState.Point? = {
+            guard decorator.enabled, !navBridge.pendingElevatorArrival, !context.coordinator.forcedRebuild,
+                  let old = context.coordinator.navigationController,
+                  old.currentFloorNumber == mazeStore.currentMazeID else { return nil }
+            let p = old.cameraNode.position
+            return ResumeState.Point(floor: mazeStore.currentMazeID, x: p.x, z: p.z, yaw: old.cameraNode.eulerAngles.y)
+        }()
+        context.coordinator.forcedRebuild = false
         // Oct 2: flight recorder (logging only).
         DiagnosticRecorder.shared.floor = mazeStore.currentMazeID
         let diagBuildStarted = Date()
@@ -2093,6 +2158,11 @@ struct HallwaySceneView: UIViewRepresentable {
             // no hold-and-steer at all.
             let start = mazeStore.startCoordinate ?? GridCoordinate(row: 0, col: 0)
             let end = mazeStore.endCoordinate ?? start
+            // Oct 11 (resume): what the player already collected / put out on
+            // this floor stays gone (ResumeState). The authored floor data in
+            // MazeStore -- and mazes.json -- is never touched.
+            let liveObjects = ResumeState.unconsumed(objects: mazeStore.objects, floor: mazeStore.currentMazeID)
+            let liveFires = ResumeState.unconsumed(fires: mazeStore.fires, floor: mazeStore.currentMazeID)
             // Oct 4: player-facing mission plaques are retired from the playable
             // world (data kept; TapNavigationController.missionPlaquesInWorld).
             let worldMissionSigns = TapNavigationController.missionPlaquesInWorld ? mazeStore.missionSigns : [:]
@@ -2120,7 +2190,7 @@ struct HallwaySceneView: UIViewRepresentable {
                 stagedArrival.activate()
                 ElevatorArrivalTrace.shared.event("HallwayScene.build.staged", "sincePressMs=\(stagedArrival.ms(since: stagedArrival.pressedAt))")
             } else {
-                hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: mazeStore.objects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: worldMissionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: mazeStore.fires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, tables: mazeStore.tables, desks: mazeStore.desks, waterCoolers: mazeStore.waterCoolers, officeChairs: mazeStore.officeChairs, floorLamps: mazeStore.floorLamps, aquariums: mazeStore.aquariums, filingCabinets: mazeStore.filingCabinets, cellSurfaces: mazeStore.cellSurfaces, clocks: mazeStore.clocks, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
+                hallwaySceneBuildResult = HallwayScene.build(fromMaze: mazeStore.cells, cellSize: mazeStore.cellSize, wallHeight: mazeStore.wallHeight, objects: liveObjects, destinations: mazeStore.destinations, exitSigns: mazeStore.exitSigns, floorMaps: mazeStore.floorMaps, spotlights: mazeStore.spotlights, missionSigns: worldMissionSigns, pictures: mazeStore.pictures, mirrors: mazeStore.mirrors, wallLights: mazeStore.wallLights, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors, fires: liveFires, extinguishers: mazeStore.extinguishers, photoBooths: mazeStore.photoBooths, ticTacToeTerminals: mazeStore.ticTacToeTerminals, shellGameStations: mazeStore.shellGameStations, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, higherLowerTerminals: mazeStore.higherLowerTerminals, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, simonTerminals: mazeStore.simonTerminals, hangmanTerminals: mazeStore.hangmanTerminals, connectFourTerminals: mazeStore.connectFourTerminals, checkersTerminals: mazeStore.checkersTerminals, woidleTerminals: mazeStore.woidleTerminals, picturesUseCameraRoll: mazeStore.picturesUseCameraRoll, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, missionHeading: mazeStore.missionHeading, missionBody: mazeStore.missionBody, missionObjectKind: mazeStore.missionObjectKind, floorNumber: mazeStore.currentMazeID, totalFloors: mazeStore.floorCount, playerStart: start, playerEnd: end, theme: themeStore.current, wallTexture: mazeStore.wallTexture, floorTexture: mazeStore.floorTexture, ceilingTexture: mazeStore.ceilingTexture, elevatorArtwork: navBridge.pendingElevatorArrival ? navBridge.pendingElevatorArtwork : [:], fluorescentLights: mazeStore.fluorescentLights, ceilingVisibleFixture: mazeStore.ceilingVisibleFixture, pictureLights: mazeStore.pictureLights, lightBrightness: mazeStore.lightBrightness, pictureImageSelections: mazeStore.pictureImageSelections, elevatorCabDecoration: mazeStore.elevatorCabDecoration, floorObjectPlacements: mazeStore.floorObjectPlacements, tables: mazeStore.tables, desks: mazeStore.desks, waterCoolers: mazeStore.waterCoolers, officeChairs: mazeStore.officeChairs, floorLamps: mazeStore.floorLamps, aquariums: mazeStore.aquariums, filingCabinets: mazeStore.filingCabinets, cellSurfaces: mazeStore.cellSurfaces, clocks: mazeStore.clocks, reportPictureIdentity: { [weak mazeStore] face, selection in mazeStore?.reportCurrentPictureIdentity(selection, at: face) }, reportElevatorBackIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorBackIdentity(selection) }, reportElevatorSideIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideIdentity(selection) }, reportElevatorSideRightIdentity: { [weak mazeStore] selection in mazeStore?.reportCurrentElevatorSideRightIdentity(selection) })
             }
             ElevatorArrivalTrace.shared.event("HallwayScene.build.end")
             navBridge.pendingElevatorArtwork = [:]
@@ -2143,6 +2213,19 @@ struct HallwaySceneView: UIViewRepresentable {
                 cameraNode.eulerAngles = SCNVector3(0, Float(playerFacing.yaw), 0)
                 SCNTransaction.commit()
                 diag("arrival.spawnAtElevator", ["floor": mazeStore.currentMazeID, "spawn": playerStart, "floorStart": start])
+            }
+            // Oct 17 (Decorate camera-jump fix): a Decorate edit's rebuild -- the new
+            // camera takes the kept pose NOW, before the scene is handed to the view
+            // just below. (SceneKit draws on its own loop: with the pose applied only
+            // at resume(at:), much later in this install, a frame or two showed the
+            // floor's spawn view first.) resume(at:) still runs later, as before, for
+            // the controller's cell/facing and its legality fallback.
+            if let kept = keptDecoratePose {
+                SCNTransaction.begin()
+                SCNTransaction.disableActions = true
+                cameraNode.position = SCNVector3(kept.x, cameraNode.position.y, kept.z)
+                cameraNode.eulerAngles = SCNVector3(0, kept.yaw, 0)
+                SCNTransaction.commit()
             }
             if controlledArrival { ElevatorArrivalTrace.shared.registerScene(scene) }
             ElevatorArrivalTrace.shared.event("SCNView.sceneAssign.begin")
@@ -2168,6 +2251,12 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
                 if mazeStore.currentMazeID == ConferenceRoom.floor {        // Oct 8: the conference room
                     ConferenceRoom.install(into: scene.rootNode, cellSize: mazeStore.cellSize, cells: mazeStore.cells)
+                }
+                if mazeStore.currentMazeID == SuppliesShowroom.floor {      // Oct 16: Floor 4, SUPPLIES
+                    SuppliesShowroom.install(into: scene.rootNode, cellSize: mazeStore.cellSize, cells: mazeStore.cells)
+                }
+                if mazeStore.currentMazeID == FloorFiveBlackout.floor {     // Oct 16 (VIII): Floor 5, LIGHTS OUT
+                    FloorFiveBlackout.install(into: scene.rootNode, cellSize: mazeStore.cellSize, cells: mazeStore.cells)
                 }
             }
             ElevatorArrivalTrace.shared.endPhase("install.pointOfViewAndFloorGlow", traceFloorGlow)
@@ -2244,7 +2333,11 @@ struct HallwaySceneView: UIViewRepresentable {
             // Oct 4 DIAGNOSTIC (LivingWorldDiagnostic.swift): the same two installs,
             // handed to the in-app population control, which runs them now and
             // again whenever the population is changed on this floor.
-            let livingCells = mazeStore.cells
+            // Oct 11 (the staff meeting): the conference room is a directed
+            // scene -- the floor's free-roaming population stays out of it.
+            // Oct 12: ...and the player's own office is theirs (Harold's) -- no roaming population in it.
+            let livingCells = mazeStore.currentMazeID == ConferenceRoom.floor
+                ? mazeStore.cells.subtracting(ConferenceRoom.roomCells).subtracting(PlayerOffice.officeCells) : mazeStore.cells
             let livingCellSize = mazeStore.cellSize
             ElevatorArrivalTrace.shared.endPhase("install.populationInputs", tracePopulationInputs)
             let traceLivingWorld = ElevatorArrivalTrace.shared.beginPhase("install.LivingWorld")
@@ -2255,7 +2348,7 @@ struct HallwaySceneView: UIViewRepresentable {
             guard let view, let scene, let cameraNode, !critterFree else { return }
             let dweezilCage = Menagerie.install(in: view, scene: scene, playerCamera: cameraNode, cells: livingCells,
                                                 cellSize: livingCellSize, doors: bobbinDoors, litCells: dweezilLit,
-                                                busyCells: dweezilBusy)
+                                                busyCells: dweezilBusy, floor: mazeStore.currentMazeID)   // Oct 16
             var bobbinCells = livingCells
             if let dweezilCage { bobbinCells.remove(dweezilCage) }
             let traceBobbin = ElevatorArrivalTrace.shared.beginPhase("install.Bobbin")
@@ -2368,7 +2461,8 @@ struct HallwaySceneView: UIViewRepresentable {
             // Oct 7 (F): a new controller/scene replaces the one the office
             // computer was seated in -- close the computer without a camera move.
             OfficeComputer.shared.forceClose(reason: "sceneRebuilt")
-            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: navigationCells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: mazeStore.objects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: worldMissionSigns, exitSigns: mazeStore.exitSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: mazeStore.fires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors.mapValues { $0.direction }, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
+            ConferenceMeeting.forceStand(reason: "sceneRebuilt")          // Oct 11: same for the meeting chair
+            let navController = TapNavigationController(cameraNode: cameraNode, scene: scene, cells: navigationCells, cellSize: mazeStore.cellSize, startCell: start, startFacing: facing, endCell: end, objects: liveObjects, objectNodes: objectNodes, destinations: mazeStore.destinations, destinationNodes: destinationNodes, elevatorLeftDoor: elevatorDoors?.left, elevatorRightDoor: elevatorDoors?.right, elevatorMountDirection: elevatorDoors?.direction, elevatorButtonNodes: elevatorDoors?.buttonNodes ?? [:], floorNumber: mazeStore.currentMazeID, nextFloorNumber: mazeStore.nextMazeID, floorMaps: mazeStore.floorMaps, floorMapPlaneNodes: floorMapPlaneNodes, missionSigns: worldMissionSigns, exitSigns: mazeStore.exitSigns, pictures: Set(mazeStore.pictures.keys), mirrors: mazeStore.mirrors, fires: liveFires, fireNodes: fireNodes, extinguishers: mazeStore.extinguishers, extinguisherNodes: extinguisherNodes, photoBooths: mazeStore.photoBooths, photoBoothNodes: photoBoothNodes, ticTacToeTerminals: mazeStore.ticTacToeTerminals, ticTacToeTerminalNodes: ticTacToeTerminalNodes, shellGameStations: mazeStore.shellGameStations, shellGameStationNodes: shellGameStationNodes, rockPaperScissorsTerminals: mazeStore.rockPaperScissorsTerminals, rockPaperScissorsTerminalNodes: rockPaperScissorsTerminalNodes, higherLowerTerminals: mazeStore.higherLowerTerminals, higherLowerTerminalNodes: higherLowerTerminalNodes, fiveCardDrawTerminals: mazeStore.fiveCardDrawTerminals, fiveCardDrawTerminalNodes: fiveCardDrawTerminalNodes, simonTerminals: mazeStore.simonTerminals, simonTerminalNodes: simonTerminalNodes, hangmanTerminals: mazeStore.hangmanTerminals, hangmanTerminalNodes: hangmanTerminalNodes, connectFourTerminals: mazeStore.connectFourTerminals, connectFourTerminalNodes: connectFourTerminalNodes, checkersTerminals: mazeStore.checkersTerminals, checkersTerminalNodes: checkersTerminalNodes, woidleTerminals: mazeStore.woidleTerminals, woidleTerminalNodes: woidleTerminalNodes, roomDoors: mazeStore.roomDoors, itemRooms: mazeStore.itemRooms, bathroomDoors: mazeStore.bathroomDoors, windowRooms: mazeStore.windowRooms, roomEntranceDoors: mazeStore.roomEntranceDoors.mapValues { $0.direction }, missionObjectKind: mazeStore.missionObjectKind, hasCompletedInitialEntrance: hasCompletedInitialEntrance)
             ElevatorArrivalTrace.shared.endPhase("install.navigationController", traceNavCreate)
             // Oct 9: this floor's shut doors into the critter/building sound model.
             navController.publishAcousticDoors()
@@ -2430,19 +2524,70 @@ struct HallwaySceneView: UIViewRepresentable {
                 navBridge.arrivalSceneReady = !controlledArrival
             }
             ElevatorArrivalTrace.shared.endPhase("install.arrivalPositioning", traceArrivalPose)
+            // Oct 11 (resume): the first build of the floor the app reopened on
+            // puts the player back where they left off (exact spot and yaw, or
+            // the nearest sensible place). Followers start around that spot.
+            var posseStart = playerStart
+            if let point = ResumeState.takePlacement(forFloor: mazeStore.currentMazeID) {
+                posseStart = navController.resume(at: point)
+            } else if let point = keptDecoratePose {             // Oct 17: a Decorate edit's rebuild -- stay put
+                posseStart = navController.resume(at: point)
+                diag("decorator.rebuildKeptPose", ["floor": point.floor])
+            }
+            navController.saveResumePoint(reason: "floorBuilt")
+            // Oct 16 (Supplies): the tools carried come along -- in hand on this floor's
+            // camera, or at heel from where the player now stands (after the arrival
+            // pose and any resume placement above).
+            ToolBelt.attach(camera: cameraNode, view: view, controller: navController,
+                            cells: mazeStore.cells, cellSize: mazeStore.cellSize,
+                            doorCells: Set(mazeStore.roomEntranceDoors.keys).union(mazeStore.bathroomDoors.keys).union(mazeStore.windowRooms.keys))
+            LightCensus.schedule(scene: scene, floor: mazeStore.currentMazeID)   // Oct 12 (stability): diagnostics only
             // Oct 4 FREDDY SLICE (Posse.swift / Freddy.swift): followers and the
             // critters you can recruit, placed now that the arrival pose (inside
             // the elevator cab after a ride) is final. A follower's skill can put
             // out this floor's fires through the controller's own fire state.
             let tracePosse = ElevatorArrivalTrace.shared.beginPhase("install.Posse")
             Posse.installFloor(view: view, scene: scene, playerCamera: cameraNode, floor: mazeStore.currentMazeID,
-                               cells: mazeStore.cells, cellSize: mazeStore.cellSize, start: playerStart, end: end,
+                               cells: mazeStore.cells, cellSize: mazeStore.cellSize, start: posseStart, end: end,
                                fires: fireNodes, allowFirstMeetings: !admissionAtAdministration
                                    && mazeStore.currentMazeID != Admission.administrationFloor,
                                allowMembers: !onboardingQuiet) { [weak navController] coord in
                 navController?.creatureExtinguishFire(at: coord) ?? false
             }
             ElevatorArrivalTrace.shared.endPhase("install.Posse", tracePosse)
+            // Oct 16 (III): the immortal extinguisher -- no unclaimed extinguisher may ride
+            // on the camera; and (TEMPORARY) a census of every extinguisher-like node,
+            // now and once the followers have placed themselves.
+            ExtinguisherCensus.sweepCameraOrphans(camera: cameraNode)
+            ExtinguisherCensus.run("built", root: scene.rootNode, camera: cameraNode, controller: navController, floor: mazeStore.currentMazeID)
+            let censusFloor = mazeStore.currentMazeID
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak scene, weak cameraNode, weak navController] in
+                guard let scene, let cameraNode else { return }
+                ExtinguisherCensus.sweepCameraOrphans(camera: cameraNode)
+                ExtinguisherCensus.run("built+3s", root: scene.rootNode, camera: cameraNode, controller: navController, floor: censusFloor)
+            }
+            // Oct 11 (Episode 3): the staff-meeting procession and the
+            // conference room's life (Floor 3 only; see MeetingProcession).
+            BlackBox.attach(camera: cameraNode)                                 // Oct 12: the Black Box watches the player
+            if mazeStore.currentMazeID == MeetingProcession.floor {
+                ConferenceMeeting.attach(controller: navController)          // Oct 11: the staff meeting
+                MeetingProcession.installFloor(
+                    scene: scene, playerCamera: cameraNode, cells: mazeStore.cells, cellSize: Float(mazeStore.cellSize),
+                    doors: mazeStore.roomEntranceDoors.mapValues { $0.direction },
+                    hooks: .init(openDoor: { [weak navController] c in navController?.openRoomEntranceDoorForCharacter(at: c) },
+                                 closeDoor: { [weak navController] c in navController?.closeRoomEntranceDoorForCharacter(at: c) },
+                                 isDoorOpen: { [weak navController] c in navController?.openRoomEntranceDoors.contains(c) ?? false },
+                                 playerCell: { [weak navController] in navController?.currentCell }))
+                let priorCellChanged = navController.onCellChanged
+                navController.onCellChanged = { cell in
+                    priorCellChanged?(cell)
+                    MeetingProcession.playerCellChanged(cell)
+                    ConferenceMeeting.playerCellChanged(cell)
+                }
+                navController.onRoomEntranceDoorOpened = { coord in MeetingProcession.roomDoorOpened(coord) }
+            } else {
+                MeetingProcession.leaveFloor()
+            }
             let traceWiring = ElevatorArrivalTrace.shared.beginPhase("install.controllerAndGestureWiring")
             navController.onCollectCash = { [mazeStore] amount in
                 mazeStore.addMoney(amount)
@@ -2493,7 +2638,26 @@ struct HallwaySceneView: UIViewRepresentable {
                     if cell != AdministrationReception.deskLanding.coord {
                         AdministrationReception.cancelPatienceTimer()
                     }
+                    // Oct 24 (onboarding polish): walking away from the kiosk with
+                    // the finished card still out takes it (as a tap would).
+                    if cell != AdministrationReception.photoStationCell,
+                       AdministrationIDTerminal.current?.isCardWaiting == true {
+                        AdministrationIDTerminal.current?.takeWaitingCard(via: "walkedAway")
+                    }
                     AdministrationExitGuard.playerCellChanged(cell)          // Oct 9: Juanita keeps the exit
+                }
+                // Oct 24 (onboarding polish): turning away from the kiosk (a quarter
+                // turn or more, once it settles) with the card out takes it too.
+                navController.onFacingChanged = { [weak navController] facing in
+                    guard let navController,
+                          navController.currentCell == AdministrationReception.photoStationCell,
+                          facing != AdministrationReception.terminalLanding.direction,
+                          AdministrationIDTerminal.current?.isCardWaiting == true else { return }
+                    AdministrationIDTerminal.current?.takeWaitingCard(via: "turnedAway")
+                }
+                // Oct 21: the card taken -- 1.5 s later, round and on toward Tinky's office.
+                AdministrationIDTerminal.onCardTaken = { [weak navController] in
+                    navController?.scheduleWalkTowardTinky(after: 1.5)
                 }
                 navController.landingSpots = [
                     // After the desk landing, the Administrator acknowledges you
@@ -2512,7 +2676,16 @@ struct HallwaySceneView: UIViewRepresentable {
                     // The ID-photo terminal's own landing: squarely in front of the screen.
                     .init(kind: AdministrationIDTerminal.landingKind, face: AdministrationReception.terminalLanding,
                           standOff: AdministrationReception.terminalStandOff,
-                          onLanded: { diag("idTerminal.landed", [:]) }),
+                          onLanded: { [weak navController] in
+                              diag("idTerminal.landed", [:])
+                              // Oct 11: a gentle look down at the kiosk (card reveal).
+                              navController?.holdLandingPitch(AdministrationReception.terminalPitch,
+                                                              whileIn: AdministrationIDTerminal.landingKind)
+                          },
+                          // Oct 24 (GO toward the kiosk wall): once the ID is issued the
+                          // kiosk no longer pulls a walk that ends near it onto its spot
+                          // (leaving Tinky's office faces the player straight at it).
+                          isAvailable: { !Admission.isCompleted || AdministrationIDTerminal.current?.isCardWaiting == true }),
                     // Oct 5 (Fred encounter): in front of Fred's desk, facing it --
                     // only while he is there and hasn't performed yet this visit.
                     .init(kind: FredOfficeEncounter.landingKind, face: FredOfficeEncounter.landing,
@@ -2532,8 +2705,11 @@ struct HallwaySceneView: UIViewRepresentable {
                     cellSize: Float(mazeStore.cellSize),
                     playerPose: { [weak cameraNode] in
                         guard let cameraNode else { return nil }
+                        let scnT = FrameTiming.start()                        // Oct 24: SceneKit wait (measurement only)
                         let p = cameraNode.presentation.worldPosition
-                        return (position: SIMD2<Float>(p.x, p.z), yaw: cameraNode.presentation.eulerAngles.y)
+                        let yaw = cameraNode.presentation.eulerAngles.y
+                        FrameTiming.shared.record(.scnPose, since: scnT)
+                        return (position: SIMD2<Float>(p.x, p.z), yaw: yaw)
                     },
                     isDoorOpen: { [weak navController] coord in navController?.openRoomEntranceDoors.contains(coord) ?? false },
                     openDoor: { [weak navController] coord in navController?.openRoomEntranceDoorForCharacter(at: coord) })
@@ -2578,15 +2754,18 @@ struct HallwaySceneView: UIViewRepresentable {
                     cellSize: Float(mazeStore.cellSize),
                     playerPose: { [weak cameraNode] in
                         guard let cameraNode else { return nil }
+                        let scnT = FrameTiming.start()                        // Oct 24: SceneKit wait (measurement only)
                         let p = cameraNode.presentation.worldPosition
-                        return (position: SIMD2<Float>(p.x, p.z), yaw: cameraNode.presentation.eulerAngles.y)
+                        let yaw = cameraNode.presentation.eulerAngles.y
+                        FrameTiming.shared.record(.scnPose, since: scnT)
+                        return (position: SIMD2<Float>(p.x, p.z), yaw: yaw)
                     },
                     isDoorOpen: { [weak navController] coord in navController?.openRoomEntranceDoors.contains(coord) ?? false },
                     openDoor: { [weak navController] coord in navController?.openRoomEntranceDoorForCharacter(at: coord) })
                 GuidedJourney.doorwayFrame = { [weak navController] in navController?.elevatorDoorwayFrame() }
                 // Oct 6: Candy's ride home -- the doors cycle for him alone.
                 GuidedJourney.characterElevatorDeparture = { [weak navController] boarding, completion in
-                    navController?.runCharacterElevatorDeparture(boarding: boarding, completion: completion) ?? false
+                    navController?.runCharacterElevatorDeparture(who: "tinky (escort)", boarding: boarding, completion: completion) ?? false
                 }
                 // Oct 6 (Cast stage 3): the pet's handoff on ANY floor -- the
                 // companion driver takes over the body Jeff is already in
@@ -2602,10 +2781,30 @@ struct HallwaySceneView: UIViewRepresentable {
                     TinCanRat.observeTapWalk(rat: body) { [weak navController] in navController?.tapWalkDestination }
                     return true
                 }
+                // (Oct 22: the Big Shot's eviction ride no longer wired in -- he is retired.)
                 navController.guidedAutoFloor = { GuidedJourney.autoFloor(from: floor) }
-                navController.onElevatorBoarding = { GuidedJourney.playerBoarding(floor: floor) }
-                navController.onArrivalDoorsOpening = { GuidedJourney.arrivalDoorsOpening(floor: floor) }
+                navController.onElevatorBoarding = {
+                    GuidedJourney.playerBoarding(floor: floor)
+                    FloorPresenter.playerBoarding()                              // Oct 17: an informant boards with them (Oct 18: any resident)
+                }
+                navController.onArrivalDoorsOpening = { [weak navController] in
+                    GuidedJourney.arrivalDoorsOpening(floor: floor)
+                    FloorPresenter.arrivalDoorsOpening()                         // Oct 17: out of the cab first (Oct 18: any resident)
+                    // Oct 12 (stability): the arrival is committed at once (just outside the doors).
+                    if GuidedJourney.trip?.stage == .guiding { navController?.saveResumePoint(reason: "orientationArrived") }
+                }
                 GuidedJourney.installGuideIfArriving(in: scene.rootNode, floor: floor)
+                // (Oct 22: BonzoEviction's floor hooks removed -- the Big Shot is retired and can
+                // no longer be placed anywhere; see Menagerie.install.)
+                // Oct 12 (escort resume): quit mid-escort -> he's put back with the player.
+                GuidedJourney.resumeEscortIfSaved(in: scene.rootNode, floor: floor)
+                // Oct 17 (informants): the butterfly's life on this floor, if she's here
+                // (or on her way -- by the elevator -- to a player on a dark Floor 5).
+                // Oct 18 (building life): every resident's presentation on this floor --
+                // the butterfly and the roaming chair -- their records kept by BuildingLife.
+                FloorPresenter.floorBuilt(floor: floor, root: scene.rootNode, camera: cameraNode, controller: navController,
+                                          context: GuidedJourney.context,
+                                          plans: { [weak store = mazeStore] in store?.floorPlan(for: $0) })
                 // Oct 6 (Cast): exactly one Jeff (or none) in this scene; one summary line.
                 Cast.floorBuilt(floor, root: scene.rootNode)
             }
@@ -2616,7 +2815,19 @@ struct HallwaySceneView: UIViewRepresentable {
             navController.onElevatorDestinationChosen = { [weak view, weak coordinator = context.coordinator] floor in
                 GuidedJourney.destinationChosen(floor)                     // Oct 6: before the destination is staged
                 guard let view, let coordinator else { return }
+                // Oct 24 (onboarding polish): Admission's floor already being prepared
+                // since the panel came into view -- keep it (its ride is short).
+                if let early = coordinator.stagedElevatorDestination, early.foreseen, early.floor == floor, !early.cancelled {
+                    diag("elevator.staging.keptForeseen", ["to": floor, "complete": early.isComplete])
+                    return
+                }
                 stageElevatorDestination(floor: floor, view: view, coordinator: coordinator)
+            }
+            navController.onElevatorDestinationForeseen = { [weak view, weak coordinator = context.coordinator] floor in
+                guard let view, let coordinator else { return }
+                stageElevatorDestination(floor: floor, view: view, coordinator: coordinator)
+                coordinator.stagedElevatorDestination?.foreseen = true
+                diag("elevator.staging.foreseen", ["to": floor])
             }
             navController.onReachedEnd = { [weak view, weak navController, mazeStore, navBridge] in
                 // Oct 4: a floor chosen on the cab's panel wins over the old linked "next".
@@ -2710,6 +2921,9 @@ struct HallwaySceneView: UIViewRepresentable {
             if controlledArrival { ElevatorArrivalTrace.shared.registerDestination(navController) }
             view.delegate = navController
             let traceReplaceController = ElevatorArrivalTrace.shared.beginPhase("install.replaceCoordinatorController")
+            // Oct 22 (stability pass): the floor being replaced stops its periodic work now
+            // (its door-sound timer), whatever may still hold it -- see TapNavigationController.retire.
+            if let old = context.coordinator.navigationController, old !== navController { old.retire() }
             context.coordinator.navigationController = navController
             navController.hudSceneView = view   // Oct 10: the HUD's USE (office computer) needs the view
             ElevatorArrivalTrace.shared.endPhase("install.replaceCoordinatorController", traceReplaceController)
@@ -2727,6 +2941,8 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
                 let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
                 view.addGestureRecognizer(tap)
+                // Oct 22 (evening, sticky controls): measurement only -- how late each touch reaches the app.
+                if PerfMonitor.enabled { view.addGestureRecognizer(InputLagProbe()) }
 
                 // 2-finger tap = turn around (180), mirroring the D-pad's
                 // back button — still just a turn, needs a forward tap after
@@ -2881,7 +3097,14 @@ struct HallwaySceneView: UIViewRepresentable {
             view.preferredFramesPerSecond = fps
             diag("render.fpsSetting", ["preferredFramesPerSecond": fps])
         }
+        // Oct 24 (FrameTiming, measurement only): the run's conditions for the report.
+        FrameTiming.shared.noteConditions(
+            preferredFPS: view.preferredFramesPerSecond,
+            fpsArgument: RenderHealth.testFramesPerSecond,
+            screenMaxFPS: view.window?.windowScene?.screen.maximumFramesPerSecond
+                ?? UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.maximumFramesPerSecond }.first)
         HallwaysAudio.shared.attach(engine: view.audioEngine)   // Oct 8: the mute switch covers SceneKit audio
+        StickyProbe.watch(engine: view.audioEngine)             // Oct 22 (evening): measurement only -- is it running?
 
         ElevatorArrivalTrace.shared.endPhase("install.viewConfiguration", traceViewConfig)
         let traceMirrors = ElevatorArrivalTrace.shared.beginPhase("install.mirrors")
@@ -3201,6 +3424,7 @@ struct HallwaySceneView: UIViewRepresentable {
         if context.coordinator.lastRebuildToken != runtime.rebuildToken {
             context.coordinator.lastRebuildToken = runtime.rebuildToken
             context.coordinator.lastBuiltMazeVersion = Int.min
+            context.coordinator.forcedRebuild = true           // (Oct 17: a fresh start, never a kept Decorate pose)
         }
         if context.coordinator.lastBuiltMazeVersion != mazeStore.version,
            !context.coordinator.sceneInstallScheduled {
@@ -3402,6 +3626,8 @@ struct HallwaySceneView: UIViewRepresentable {
     final class Coordinator: NSObject {
         // Persistent-SCNView floor-swap bookkeeping.
         var lastBuiltMazeVersion: Int = -1
+        /// Oct 17: the next install is the forced (dev reset) rebuild.
+        var forcedRebuild = false
         var sceneInstallScheduled = false
         var didInstallPersistentGestures = false
         /// Oct 5 (elevator staging): the destination floor being prepared
@@ -3529,6 +3755,43 @@ struct HallwaySceneView: UIViewRepresentable {
         private let dragAxisLockDistance: CGFloat = 10
         private enum PanDragAxis { case horizontal, vertical }
         private var lockedPanAxis: PanDragAxis?
+        // Oct 19 (elevator threshold by swipe): the axis an in-cab pan locked
+        // to (vertical = a swipe out through the doors); outside, a pan near an
+        // open cab waits for the axis before it starts; and a pan claimed as a
+        // threshold swipe. See TapNavigationController.elevatorThresholdCrossing.
+        private var elevatorPanAxis: PanDragAxis?
+        private var thresholdPanPending = false
+        private var thresholdPanClaimed = false
+        /// A threshold swipe commits past this fraction of dragMoveDistance, or this flick speed (fractions/s).
+        static let thresholdSwipeCommit: Double = 0.12
+        static let thresholdSwipeFlick: Double = 0.6
+
+        /// The direction a claimed threshold swipe was claimed in (true: finger down).
+        private var thresholdSwipeForward = true
+
+        /// Claims the pan as a threshold swipe: the camera follows the finger from now on.
+        private func claimThresholdSwipe(_ controller: TapNavigationController, translation: CGPoint) -> Bool {
+            let forward = translation.y > 0
+            guard controller.beginThresholdScrub(forward: forward) else { return false }
+            thresholdSwipeForward = forward
+            controller.updateThresholdScrub(cells: thresholdSwipeCells(translation))
+            return true
+        }
+
+        /// How far (cells) the finger has walked the player toward the crossing -- a hallway drag's own scale.
+        private func thresholdSwipeCells(_ translation: CGPoint) -> Double {
+            let f = Double(translation.y / dragMoveDistance)
+            return max(0, thresholdSwipeForward ? f : -f)
+        }
+
+        /// Released: on through the doorway if it went far or fast enough (and wasn't reversed), else back.
+        private func finishThresholdSwipe(_ controller: TapNavigationController, translation: CGPoint, velocity: CGPoint) {
+            let f = thresholdSwipeCells(translation)
+            let v = Double(velocity.y / dragMoveDistance) * (thresholdSwipeForward ? 1 : -1)
+            let committed = v > -Self.thresholdSwipeFlick && (f >= Self.thresholdSwipeCommit || v >= Self.thresholdSwipeFlick)
+            navLog("threshold swipe ended forward=\(thresholdSwipeForward) cells=\(String(format: "%.2f", f)) velocity=\(String(format: "%.2f", v)) committed=\(committed)")
+            controller.endThresholdScrub(commit: committed)
+        }
 
         // Pinch counterpart of dragMoveDistance: how much UIPinchGesture
         // Recognizer's `scale` has to move away from 1.0 (its neutral,
@@ -3574,6 +3837,7 @@ struct HallwaySceneView: UIViewRepresentable {
         }
 
         func cancelHeldWalkForMap() {
+            navigationController?.stopWalkLatch(reason: "cancelHeld")     // Oct 16 (walk latch)
             navigationController?.setWalkingHeld(false)
             forwardHoldTimer?.invalidate()
             forwardHoldTimer = nil
@@ -3588,25 +3852,125 @@ struct HallwaySceneView: UIViewRepresentable {
         // right in front of you, in which case it's the door asking to
         // be opened instead. Eddie, Sept 5: "i think it should wait for
         // you to tap the steel door before it slides up."
+        /// Oct 12: seated look -- this drag turns the head (not the zoomed lens's pan).
+        private var seatedLookPan = false
+
+        /// Oct 12: the tap landed on the player's office workstation (computer,
+        /// desk or chair), on the office floor, outside Decorate -- the same
+        /// test the sit-down tap below uses.
+        func officeWorkstationTapped(_ gesture: UITapGestureRecognizer, controller: TapNavigationController) -> Bool {
+            guard decorator?.enabled != true, controller.currentFloorNumber == PlayerOffice.floor,
+                  let view = gesture.view as? SCNView,
+                  let hit = Posse.navigationHits(view.hitTest(gesture.location(in: view),
+                                                              options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                        .ignoreHiddenNodes: true])).first else { return false }
+            return PlayerOffice.isWorkstation(hit.node)
+        }
+
+        /// Oct 15: the office filing cabinet -- at it (in its pose): toggle the
+        /// top drawer; elsewhere in the office: glide over, then open it.
+        func useOfficeCabinet(controller: TapNavigationController) {
+            guard let pose = PlayerOffice.cabinetStandPose(eyeY: controller.cameraNode.position.y) else { return }
+            let here = controller.cameraNode.position
+            if hypotf(here.x - pose.position.x, here.z - pose.position.z) < 0.6 {
+                PlayerOffice.toggleCabinetDrawer()
+                SmartTap.log("interaction", ["target": "cabinet", "via": "here"])
+                return
+            }
+            let approached = controller.approachPose(kind: "officeCabinet", position: pose.position, yaw: pose.yaw) {
+                if !PlayerOffice.cabinetDrawerOpen { PlayerOffice.toggleCabinetDrawer() }
+            }
+            SmartTap.log(approached ? "direct" : "directRefused", ["target": "cabinet", "via": "approach"])
+        }
+
+        /// Oct 15: after getting up from the desk -- once the stand-up glide is
+        /// over and movement is free (up to 4 s) -- the cabinet.
+        func useOfficeCabinetWhenStanding(controller: TapNavigationController, waited: Double) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak controller] in
+                guard let self, let controller, controller.currentFloorNumber == PlayerOffice.floor else { return }
+                if OfficeComputer.shared.phase == .off, controller.canRotate {
+                    self.useOfficeCabinet(controller: controller)
+                } else if waited < 4 {
+                    self.useOfficeCabinetWhenStanding(controller: controller, waited: waited + 0.1)
+                } else {
+                    diag("office.cabinet.gaveUp", ["blockers": controller.diagCanRotateBlockers])
+                }
+            }
+        }
+
+        /// Oct 25: does a tap at `point` land on a resident (CritterTapTarget's own rule)?
+        static func tapIsOnResident(_ point: CGPoint, in view: SCNView, controller: TapNavigationController) -> Bool {
+            if case .resident = CritterTapTarget.resolve(at: point, in: view, controller: controller) { return true }
+            return false
+        }
+
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            MudProbe.shared.handled("tap", mayWalk: true)                    // Oct 24 (mud probe): measurement only
             guard let controller = navigationController else {
                 diag("tap.ignored", ["reason": "no navigation controller"])
+                return
+            }
+            // Oct 16 (Bonzo's eviction): in his grip, the player has no say.
+            if controller.evictionLocked {
+                diag("tap.ignored", ["reason": "bonzo eviction"])
                 return
             }
             // Oct 2 flight recorder: one compact line per tap (human-rate).
             diag("tap.received", ["cell": controller.currentCell, "rideInProgress": controller.isElevatorRideInProgress,
                                   "freeTapWalking": controller.isFreeTapWalking])
+            // Oct 20 (follow a critter): a tap on a roaming resident follows it (again:
+            // stops; another: switches) -- ahead of the walk's brake below, so the
+            // second tap on it works while walking after it. Any other tap while
+            // following ends the following and goes on as an ordinary tap.
+            // Oct 25 (elevator tap fix): standing in the stopped cab with its doors fully open, a tap that lands
+            // on a critter seen through the doorway opens its menu too (it used to fall through to the walk out:
+            // this whole test was skipped for any "ride in progress", which the arrival dwell still is). Only a
+            // tap that resolves to a resident is taken here (CritterTapTarget: solid things -- the cab's walls,
+            // shut doors -- hide what's behind them); any other tap in the cab goes on exactly as before.
+            let cabDoorsOpen = controller.isElevatorRideInProgress && controller.elevatorDoorsOpenIdle
+            if decorator?.enabled != true, !controller.isElevatorRideInProgress || cabDoorsOpen, let view = gesture.view as? SCNView,
+               !cabDoorsOpen || Self.tapIsOnResident(gesture.location(in: view), in: view, controller: controller),
+               CritterFollow.handleTap(at: gesture.location(in: view), in: view, controller: controller) {
+                diag("tap.consumed", ["by": "follow a critter", "following": CritterFollow.targetID ?? "nobody"])
+                return
+            }
             // TAP AGAIN -> STOP (Sept 30): while a navigation-tap walk is under
             // way the whole screen is a brake -- ahead of every interaction
             // below, and it never starts a new walk in the same tap.
             if controller.isFreeTapWalking {
+                // Oct 12: a tap on the office computer from inside the office
+                // still means "sit down" -- the walk stops, then the seat.
+                if officeWorkstationTapped(gesture, controller: controller), let view = gesture.view as? SCNView,
+                   OfficeComputer.shared.sitDownWhenSettled(controller: controller, view: view) {
+                    diag("tap.consumed", ["by": "office computer (while walking)"])
+                    return
+                }
                 controller.stopFreeTapWalk()
                 diag("tap.stoppedFreeTapWalk")
+                SmartTap.log("interrupt", ["walk": "tap", "moving": true])          // Oct 15
+                return
+            }
+            // Oct 16 (WALK LATCH): same brake for the latched walk -- the tap only stops it.
+            if controller.isWalkLatched {
+                controller.stopWalkLatch(reason: "tap")
+                controller.stopContinuousWalk(reason: "tap")                // (nothing of GO left waiting either)
+                if officeWorkstationTapped(gesture, controller: controller), let view = gesture.view as? SCNView,
+                   OfficeComputer.shared.sitDownWhenSettled(controller: controller, view: view) {
+                    diag("tap.consumed", ["by": "office computer (while walking)"])
+                    return
+                }
+                SmartTap.log("interrupt", ["walk": "latch", "moving": true])
                 return
             }
             // Oct 10 (continuous walk): same brake for the WALK-button walk.
             if controller.continuousWalkState != .stopped {
+                if officeWorkstationTapped(gesture, controller: controller), let view = gesture.view as? SCNView,
+                   OfficeComputer.shared.sitDownWhenSettled(controller: controller, view: view) {      // Oct 12
+                    diag("tap.consumed", ["by": "office computer (while walking)"])
+                    return
+                }
                 controller.stopContinuousWalk(reason: "tap")
+                SmartTap.log("interrupt", ["walk": "auto", "moving": true])         // Oct 15
                 return
             }
             // Oct 7 (F, physical monitor): seated at the office computer, the
@@ -3620,14 +3984,32 @@ struct HallwaySceneView: UIViewRepresentable {
                 if OfficeComputer.shared.phase == .on, let view = gesture.view as? SCNView {
                     let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue,
                                                                               .ignoreHiddenNodes: true]).first
-                    if let hit, PlayerOffice.isComputerHardware(hit.node) {
-                        diag("tap.consumed", ["by": "office computer hardware"])
+                    if let hit, BlackBox.owns(hit.node) {
+                        // Oct 12: the Black Box on the desk -- play (or stop); the player stays seated.
+                        BlackBox.tapped(playerCell: controller.currentCell)
+                        diag("tap.consumed", ["by": "black box (seated)"])
                     } else if let hit, PlayerOffice.isDeskPhoto(hit.node) {
                         // Oct 7: seated only -- the desk photo gets a new random
                         // camera-roll photo; the player stays put, the computer
                         // is untouched.
                         PlayerOffice.changeDeskPhoto()
                         diag("tap.consumed", ["by": "desk photo (new photo)"])
+                    } else if SmartTap.isOn, let hit, PlayerOffice.isCabinet(hit.node) {
+                        // Oct 15: the filing cabinet -- up from the desk, over to it, the drawer.
+                        OfficeComputer.shared.getUp()
+                        useOfficeCabinetWhenStanding(controller: controller, waited: 0)
+                        diag("tap.consumed", ["by": "filing cabinet (from the desk)"])
+                    } else if !OfficeComputer.shared.isFacingComputer,
+                              !SmartTap.isOn || (hit.map { PlayerOffice.isComputerHardware($0.node) } ?? false) {
+                        // Oct 12 (seated look): looking away, a tap on the room
+                        // turns back to the monitor; facing it, the room means get up.
+                        // Oct 12: on one of the desktop's buttons? Turn back, then press it.
+                        // (Oct 15, Smart Tap: only a tap ON the computer turns back to it --
+                        // a tap on the room, looking away, is getting up, as facing it.)
+                        OfficeComputer.shared.tapWhileTurned(windowPoint: view.convert(gesture.location(in: view), to: nil))
+                        diag("tap.consumed", ["by": "face the computer", "hit": hit?.node.name ?? "nothing"])
+                    } else if OfficeComputer.shared.isFacingComputer, let hit, PlayerOffice.isComputerHardware(hit.node) {
+                        diag("tap.consumed", ["by": "office computer hardware"])
                     } else {
                         OfficeComputer.shared.getUp()
                         diag("tap.consumed", ["by": "get up from desk", "hit": hit?.node.name ?? "nothing"])
@@ -3636,6 +4018,109 @@ struct HallwaySceneView: UIViewRepresentable {
                     diag("tap.ignored", ["reason": "office computer transition"])
                 }
                 return
+            }
+            // Oct 11 (the staff meeting): seated at the conference table, a tap
+            // in the world is getting up -- as at the office desk. During the
+            // sit/stand glides taps are ignored.
+            if ConferenceMeeting.isActive {
+                // Oct 12 (the room remembers): seated, a tap that lands on a cast
+                // member is theirs (MeetingConversation) -- never STAND; while
+                // THE BOX is on, a tap on the screen is Harold's.
+                if ConferenceMeeting.phase == .seated, ConferenceAudition.isInstalled, let view = gesture.view as? SCNView,
+                   let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                             .ignoreHiddenNodes: true])
+                    .first(where: { $0.node.name != "meetingProjectorBeam" }) {
+                    if let member = ConferenceAudition.member(for: hit.node) {
+                        MeetingConversation.tapped(member)
+                        diag("tap.consumed", ["by": "meeting character", "who": member.name])
+                        return
+                    }
+                    if BoxReveal.isRunning, BoxReveal.isProjectionScreen(hit.node) {
+                        BoxReveal.haroldTapped()
+                        diag("tap.consumed", ["by": "Harold (on the screen)"])
+                        return
+                    }
+                }
+                // Oct 12: seated, a tap on the screen or the projector REPLAYS THE BOX (once it has been shown).
+                // (Resume-state fix: or starts a meeting that is ready; and it NEVER
+                // stands the player up -- it used to whenever there was nothing to replay.)
+                if ConferenceMeeting.phase == .seated, let view = gesture.view as? SCNView,
+                   let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                             .ignoreHiddenNodes: true])
+                    .first(where: { $0.node.name != "meetingProjectorBeam" }),        // (looked through, never hit)
+                   BoxReveal.isScreen(hit.node), BoxReveal.equipmentTapped(seated: true) {
+                    diag("tap.consumed", ["by": "presentation equipment (seated)"])
+                    return
+                }
+                if ConferenceMeeting.phase == .seated {
+                    ConferenceMeeting.standUp(reason: "tap")
+                    diag("tap.consumed", ["by": "get up from the meeting"])
+                } else {
+                    diag("tap.ignored", ["reason": "meeting seat transition"])
+                }
+                return
+            }
+            // Oct 16 (Supplies): a tap on something carried (in a hand, or a
+            // follower in view) is about that thing -- a little lift or hop, no
+            // words -- never a walk. On Floor 4 a tap whose nearest surface is a
+            // tool (or its marked place) takes it (or, if it's out, sends it
+            // back). Both ahead of everything below.
+            if decorator?.enabled != true, let view = gesture.view as? SCNView {
+                let point = gesture.location(in: view)
+                // (a tap: the drawn shape only -- the hand corners stay open for taps on the room)
+                // Oct 16 (VI): at the elevator panel every tap is the panel's, never a carried tool's.
+                let atPanel = controller.isElevatorWaitingForFloor || controller.isElevatorRideInProgress || controller.elevatorDoorsOpenIdle
+                if !atPanel, let tool = ToolBelt.tool(at: point, in: view, generous: false) {
+                    Supplies.carriedTapped(tool)
+                    diag("tap.consumed", ["by": "carried tool", "tool": tool.rawValue])
+                    return
+                }
+                if !atPanel, controller.carryingExtinguisher, let rect = ToolBelt.hallwayExtinguisherRect(in: view, generous: false), rect.contains(point) {
+                    diag("tap.consumed", ["by": "held wall extinguisher"])
+                    return
+                }
+                // Oct 16 (VIII): Floor 5's breaker panel -- a tap on it opens it,
+                // resets the tripped breaker, or (out of reach) walks up to it.
+                if !atPanel, controller.currentFloorNumber == FloorFiveBlackout.floor {
+                    let hits = Posse.navigationHits(view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                                  .ignoreHiddenNodes: true]))
+                        .filter { !ToolBelt.owns($0.node) }
+                    if FloorFiveBlackout.handleTap(hits: hits, controller: controller) {
+                        diag("tap.consumed", ["by": "floor 5 breaker panel"])
+                        return
+                    }
+                }
+                // Oct 16 (IV): Supplies is a dense room -- a tap there is about what it
+                // touches. A tool (or its marked place) is interacted with; anything
+                // else that isn't floor (shelf, pegboard, bench, wall, a box) is NOT a
+                // walk into it: the player walks toward it only as far as a
+                // comfortable 1.7 m short of it, or, already that close, stays put.
+                // Bare floor taps fall through to ordinary tap-to-walk below.
+                if controller.currentFloorNumber == SuppliesShowroom.floor, !controller.isElevatorRideInProgress,
+                   !controller.isElevatorWaitingForFloor {
+                    let hits = Posse.navigationHits(view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                                  .ignoreHiddenNodes: true]))
+                        .filter { !ToolBelt.owns($0.node) }
+                    let eye = controller.cameraNode.worldPosition
+                    if let tool = SuppliesShowroom.toolTarget(hits: hits, point: point, view: view, eye: eye) {
+                        Supplies.toolTapped(tool, controller: controller)
+                        diag("tap.consumed", ["by": "supply tool", "tool": tool.rawValue])
+                        return
+                    }
+                    if let first = hits.first, SuppliesShowroom.containsXZ(first.worldCoordinates, margin: 0.3),
+                       !(first.worldNormal.y > 0.6 && first.worldCoordinates.y < 0.12) {
+                        let dx = Double(first.worldCoordinates.x - eye.x), dz = Double(first.worldCoordinates.z - eye.z)
+                        let d = (dx * dx + dz * dz).squareRoot()
+                        let walk = d - 1.7
+                        if walk > 0.35, d > 1e-6 {
+                            controller.advance(travelDirection: (dx / d, dz / d), travelDistance: walk)
+                            diag("tap.consumed", ["by": "supplies surface (approach, stops short)", "walk": walk])
+                        } else {
+                            diag("tap.consumed", ["by": "supplies surface (already close: stay)"])
+                        }
+                        return
+                    }
+                }
             }
             // Oct 4 interactive elevator: while the car WAITS, a tap on the
             // control panel presses the nearest floor button (a following
@@ -3689,6 +4174,26 @@ struct HallwaySceneView: UIViewRepresentable {
                     diag("tap.consumed", ["by": "administrator (in the exit)"])
                     return
                 }
+                // Oct 15 (Smart Tap): tapped WHILE she is giving directions (her
+                // greeting/point -- taps used to be ignored then) = "OK, going":
+                // to the kiosk before the ID, to Tinky's desk after it.
+                if SmartTap.isOn, AdministrationReception.isGivingDirections,
+                   let target = AdministrationReception.directionsTarget {
+                    var accepted = false
+                    switch target {
+                    case .kiosk:
+                        accepted = !Admission.isCompleted && AdministrationIDTerminal.current != nil
+                            && controller.beginLanding(kind: AdministrationIDTerminal.landingKind)
+                    case .office:
+                        accepted = controller.smartTapWalkToTinky()
+                    }
+                    SmartTap.log(accepted ? "contextual" : "contextualRefused",
+                                 ["trigger": "juanitaPointing", "to": target.rawValue, "moving": false])
+                    if accepted {
+                        diag("tap.consumed", ["by": "administrator's directions (accepted)"])
+                        return
+                    }
+                }
                 AdministrationReception.directionsRequested = true
                 if controller.isInLandingPose("receptionDesk"), let root = view.scene?.rootNode {
                     diag("juanita.tapped", ["atCounter": true])
@@ -3702,6 +4207,31 @@ struct HallwaySceneView: UIViewRepresentable {
                 diag("tap.consumed", ["by": "administrator"])
                 return
             }
+            // Oct 12 (the Black Box): a tap on the little black cube on the
+            // office desk, from inside the office, is for it -- it plays (or
+            // stops) -- never a sit-down or a walk. From outside: ordinary tap.
+            if decorator?.enabled != true, controller.currentFloorNumber == PlayerOffice.floor,
+               let view = gesture.view as? SCNView,
+               let hit = Posse.navigationHits(view.hitTest(gesture.location(in: view),
+                                                           options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                     .ignoreHiddenNodes: true])).first,
+               BlackBox.owns(hit.node), BlackBox.tapped(playerCell: controller.currentCell) {
+                diag("tap.consumed", ["by": "black box"])
+                return
+            }
+            // Oct 15 (direct interactions): the office filing cabinet, from inside
+            // the office -- over to it (unless already there), and the top drawer
+            // opens; tapped again, it shuts.
+            if SmartTap.isOn, decorator?.enabled != true, controller.currentFloorNumber == PlayerOffice.floor,
+               PlayerOffice.officeCells.contains(controller.currentCell), let view = gesture.view as? SCNView,
+               let hit = Posse.navigationHits(view.hitTest(gesture.location(in: view),
+                                                           options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                     .ignoreHiddenNodes: true])).first,
+               PlayerOffice.isCabinet(hit.node) {
+                useOfficeCabinet(controller: controller)
+                diag("tap.consumed", ["by": "filing cabinet"])
+                return
+            }
             // Oct 7 (F): the player's office computer. A tap on the computer,
             // its desk or its chair from inside the office sits the player
             // down (OfficeComputer). From anywhere else it is an ordinary tap.
@@ -3711,8 +4241,52 @@ struct HallwaySceneView: UIViewRepresentable {
                                                            options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
                                                                      .ignoreHiddenNodes: true])).first,
                PlayerOffice.isWorkstation(hit.node),
-               OfficeComputer.shared.sitDown(controller: controller, view: view) {
+               OfficeComputer.shared.sitDownWhenSettled(controller: controller, view: view) {      // Oct 12: once settled
                 diag("tap.consumed", ["by": "office computer"])
+                return
+            }
+            // Oct 11 (the staff meeting): a tap on the empty chair at the foot
+            // of the conference table, from the player's side of the room,
+            // sits the player down (same as USE). Anywhere else: ordinary tap.
+            if decorator?.enabled != true, controller.currentFloorNumber == ConferenceRoom.floor,
+               let view = gesture.view as? SCNView,
+               let hit = Posse.navigationHits(view.hitTest(gesture.location(in: view),
+                                                           options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                     .ignoreHiddenNodes: true])).first,
+               ConferenceMeeting.isEmptyChair(hit.node),
+               ConferenceMeeting.sit(controller: controller, source: "tap") {
+                diag("tap.consumed", ["by": "meeting chair"])
+                return
+            }
+            // Oct 12 (the room remembers): standing in the conference room, a tap
+            // that lands on a cast member (nearest thing under the finger) is
+            // theirs -- never a walk. Empty space still walks.
+            if decorator?.enabled != true, controller.currentFloorNumber == ConferenceRoom.floor,
+               ConferenceRoom.roomCells.contains(controller.currentCell), ConferenceAudition.isInstalled,
+               let view = gesture.view as? SCNView,
+               let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                         .ignoreHiddenNodes: true])
+                .first(where: { $0.node.name != "meetingProjectorBeam" }) {
+                if let member = ConferenceAudition.member(for: hit.node) {
+                    MeetingConversation.tapped(member)
+                    diag("tap.consumed", ["by": "meeting character", "who": member.name])
+                    return
+                }
+                if BoxReveal.isRunning, BoxReveal.isProjectionScreen(hit.node) {
+                    BoxReveal.haroldTapped()
+                    diag("tap.consumed", ["by": "Harold (on the screen)"])
+                    return
+                }
+            }
+            // Oct 12: standing in the conference room, a tap on the screen or projector REPLAYS THE BOX.
+            if decorator?.enabled != true, controller.currentFloorNumber == ConferenceRoom.floor,
+               ConferenceRoom.roomCells.contains(controller.currentCell),
+               let view = gesture.view as? SCNView,
+               let hit = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                         .ignoreHiddenNodes: true])
+                .first(where: { $0.node.name != "meetingProjectorBeam" }),            // (looked through, never hit)
+               BoxReveal.isScreen(hit.node), BoxReveal.equipmentTapped(seated: false) {   // (resume-state fix: or starts a ready meeting)
+                diag("tap.consumed", ["by": "presentation equipment (standing)"])
                 return
             }
             // Oct 5 (Administration ID terminal): a tap on the terminal from
@@ -3722,7 +4296,10 @@ struct HallwaySceneView: UIViewRepresentable {
                let hit = Posse.navigationHits(view.hitTest(gesture.location(in: view),
                                                            options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
                                                                      .ignoreHiddenNodes: true])).first,
-               AdministrationIDTerminal.owns(hit.node) {
+               AdministrationIDTerminal.owns(hit.node),
+               // Oct 24: after the ID is issued, a tap toward the kiosk is an ordinary
+               // tap walk (it used to land the player at the kiosk from anywhere).
+               !Admission.isCompleted || controller.isInLandingPose(AdministrationIDTerminal.landingKind) {
                 if controller.isInLandingPose(AdministrationIDTerminal.landingKind) {
                     AdministrationIDTerminal.current?.handleTap(on: hit)
                 } else {
@@ -3765,10 +4342,28 @@ struct HallwaySceneView: UIViewRepresentable {
                FredOfficeEncounter.owns(hit.node) {
                 if controller.isInLandingPose(FredOfficeEncounter.landingKind) {
                     FredOfficeEncounter.begin()
+                } else if SmartTap.isOn, !AdministrationReception.officeCells.contains(controller.currentCell),
+                          controller.smartTapWalkToTinky() {
+                    // Oct 15 (Smart Tap): from reception, his route (through his door).
+                    SmartTap.log("direct", ["target": "tinkyDesk", "via": "route", "moving": false])
                 } else {
                     controller.beginLanding(kind: FredOfficeEncounter.landingKind)
                 }
                 diag("tap.consumed", ["by": "fred"])
+                return
+            }
+            // Oct 21 (one tap, one walk): the Administration glass doors tapped from the
+            // elevator side, before the ID -- out of the cab if need be, through the doors
+            // as they open, all the way to Juanita's counter. (Used to be: the cab's step
+            // out and nothing more, then the doors, then her -- three taps.)
+            if decorator?.enabled != true, controller.currentFloorNumber == AdministrationReception.floor, !Admission.isCompleted,
+               let view = gesture.view as? SCNView,
+               Posse.navigationHits(view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                                        .ignoreHiddenNodes: true]))
+                   .prefix(3).contains(where: { controller.roomEntranceDoorCoordinate(for: $0.node) == AdministrationReception.entranceDoorCell }),
+               controller.startAdminWalk(.toJuanita) {
+                SmartTap.log("direct", ["target": "juanita", "via": "glassDoors", "moving": false])
+                diag("tap.consumed", ["by": "administration doors: the walk to Juanita"])
                 return
             }
             if controller.canStartElevatorExit, let view = gesture.view as? SCNView {
@@ -3782,6 +4377,25 @@ struct HallwaySceneView: UIViewRepresentable {
                 }
                 if !controller.elevatorTapGoesThroughDoorway(hits: hits) {
                     diag("tap.consumed", ["by": "elevator cab interior (doors open)"])
+                    return
+                }
+            }
+            // Oct 15 (Smart Tap): while a character escorts the player, a tap ON
+            // him (on him, or within a step of where he stands) = follow him --
+            // the escort walk the WALK button used to start: his route, his
+            // pace, never overtaking him. Any other tap is an ordinary one.
+            if SmartTap.isOn, decorator?.enabled != true, let guide = CharacterLead.activeGuidePosition,
+               let view = gesture.view as? SCNView,
+               let hit = Posse.navigationHits(view.hitTest(gesture.location(in: view),
+                                                           options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                     .ignoreHiddenNodes: true])).first,
+               // on him (his body, within half a metre), or on the floor right at him --
+               // never a door, panel or wall that happens to be beside him
+               hypotf(hit.worldCoordinates.x - guide.x, hit.worldCoordinates.z - guide.y) < (hit.worldNormal.y > 0.7 ? SmartTap.guideReach : 0.5) {
+                let following = controller.smartTapFollowGuide()
+                SmartTap.log(following ? "contextual" : "contextualRefused", ["trigger": "tapOnGuide", "moving": false])
+                if following {
+                    diag("tap.consumed", ["by": "escort (follow)"])
                     return
                 }
             }
@@ -4070,17 +4684,35 @@ struct HallwaySceneView: UIViewRepresentable {
                     controller.openElevator()
                     return
                 }
-                // Oct 7 (I): the call panel beside the doors is the same request
-                // as the doors themselves -- one shared exterior-door path.
+                // Oct 22 (hall call): the doors frame the call panel (no call, no
+                // sound); the panel's UP / DOWN make the call and light up. An
+                // arrived cab and a resident's open doors: in, as before.
+                // (Oct 7: the doors and the panel were one shared request.)
                 if hits.contains(where: { controller.isElevatorDoor($0.node) || controller.isElevatorCallPanel($0.node) }),
                    controller.elevatorAtCurrentCell {
-                    navLog("tap hit elevator door / call panel")
-                    diag("tap.elevatorExterior", ["callPanel": hits.contains(where: { controller.isElevatorCallPanel($0.node) })])
-                    if controller.canReenterArrivedElevator {
-                        controller.advance()
-                    } else {
-                        controller.openElevator()
+                    let button = controller.hallCallButton(for: hits)
+                    navLog("tap hit elevator door / call panel (button \(button.map { "\($0)" } ?? "none"))")
+                    diag("tap.elevatorExterior", ["callPanel": button != nil, "button": button])
+                    controller.tapElevatorExterior(button: button)
+                    return
+                }
+                // Oct 20 (sharing the car): its doors stand open here for a resident --
+                // slid aside, they aren't under the finger: a tap in through the open
+                // doorway is the same request as a tap on them (openElevator, every gate).
+                if decorator?.enabled != true, controller.mayBoardThroughCarDoors {
+                    let near = view.unprojectPoint(SCNVector3(Float(location.x), Float(location.y), 0))
+                    let far = view.unprojectPoint(SCNVector3(Float(location.x), Float(location.y), 1))
+                    if controller.boardThroughOpenCarDoorsByTap(direction: TapNavigationController.horizontalDirection(near: near, far: far)) {
+                        diag("tap.consumed", ["by": "elevator (through a resident's open doors)"])
+                        return
                     }
+                }
+                // Oct 15 (direct interactions -- no OPEN button): the elevator's
+                // doors or call panel tapped from down the hall: go to it, and open.
+                if SmartTap.isOn, decorator?.enabled != true, !controller.elevatorAtCurrentCell,
+                   hits.contains(where: { controller.isElevatorDoor($0.node) || controller.isElevatorCallPanel($0.node) }),
+                   controller.approachElevatorAndOpen(button: controller.hallCallButton(for: hits)) {
+                    SmartTap.log("direct", ["target": "elevator", "via": "approach", "moving": false])
                     return
                 }
                 if hits.contains(where: { controller.isEntranceDoor($0.node) }), controller.entranceDoorAtCurrentCell {
@@ -4145,6 +4777,22 @@ struct HallwaySceneView: UIViewRepresentable {
                     navLog("assisted tap on \(assisted.kind) at \(assisted.face.coord) -- composing interaction pose")
                     return
                 }
+                // Oct 15 (Smart Tap): the ID still to do, a tap that lands on the
+                // floor or wall right round the kiosk (within kioskReach of where
+                // one stands to use it) is a tap on the kiosk: the same landing.
+                if SmartTap.isOn, decorator?.enabled != true, controller.currentFloorNumber == AdministrationReception.floor,
+                   !Admission.isCompleted, AdministrationIDTerminal.current != nil,
+                   !controller.isInLandingPose(AdministrationIDTerminal.landingKind),
+                   let stand = controller.landingSpotPosition(AdministrationIDTerminal.landingKind),
+                   let hit = Posse.navigationHits(view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
+                                                                                .ignoreHiddenNodes: true])).first,
+                   hypotf(hit.worldCoordinates.x - stand.x, hit.worldCoordinates.z - stand.z) < SmartTap.kioskReach,
+                   // (only approaching from outside that area -- never a step away from the kiosk)
+                   hypotf(controller.cameraNode.position.x - stand.x, controller.cameraNode.position.z - stand.z) > SmartTap.kioskReach,
+                   controller.beginLanding(kind: AdministrationIDTerminal.landingKind) {
+                    SmartTap.log("direct", ["target": "idKiosk", "via": "nearKiosk", "moving": false])
+                    return
+                }
                 if let hit = Posse.navigationHits(view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.all.rawValue,
                                                                                 .ignoreHiddenNodes: true])).first {
                     let eye = controller.cameraNode.worldPosition, spot = hit.worldCoordinates
@@ -4154,7 +4802,25 @@ struct HallwaySceneView: UIViewRepresentable {
                     if d > 1e-6 { direction = (dx / d, dz / d) }
                 }
             }
+            // Oct 16 (WALK LATCH): a tap on nothing in particular starts the
+            // ordinary held walk, latched -- it keeps going with no finger down.
+            // Where it can't start (Decorate, the cab, a glide finishing...): as before.
+            // Oct 20 (night, "leaving Tinky's office, a tap sends me across the room"):
+            // the latch walks the way the VIEW faces -- it never knew where the tap
+            // was. A tap well off to the side (the office doors, beside the view)
+            // started a walk straight ahead that slid along the walls until it met
+            // one head on. Only a tap roughly ahead latches now; one off to the side
+            // is the tap-a-place walk below: turn toward the tapped spot, go there.
+            // Oct 21: and never when a capped pose (Juanita's counter) lies along the tap: the
+            // tap-a-place walk below stops ON it -- the latch ran on to the counter's wall
+            // clearance and the landing then glided the player back (the "too close, then back").
+            if decorator?.enabled != true, controller.tapAimsAhead(direction),
+               !controller.cappedLandingAhead(direction: direction, distance: distance), controller.startWalkLatch() {
+                SmartTap.log("walk", ["target": "latch", "moving": false])
+                return
+            }
             navLog("tap, travel direction=\(String(describing: direction)) distance=\(String(describing: distance))")
+            SmartTap.log("direct", ["target": "point", "distance": distance.map { (($0 * 10).rounded() / 10) }, "moving": false])   // Oct 15
             controller.advance(travelDirection: direction, travelDistance: distance)
         }
 
@@ -4178,7 +4844,25 @@ struct HallwaySceneView: UIViewRepresentable {
         // to it without tapping the door. pinchForward() itself is left
         // in place, just unused, in case that shortcut should come back.
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-            if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
+            if gesture.state == .began { pinchBlockedByEviction = navigationController?.evictionLocked == true }  // Oct 16
+            if pinchBlockedByEviction || (navigationController?.evictionLocked == true && gesture.state == .changed) { return }
+            // Oct 11: seated at the conference table a pinch is the lens
+            // (the window-level pinch, CameraMagnifierGestures) -- never a walk.
+            if ConferenceMeeting.isActive { return }
+            if OfficeComputer.shared.isActive {
+                // Oct 7: seated at the office computer -- a pinch never walks.
+                // Oct 11: a pinch on the room around the monitor looks closer
+                // (CameraMagnifier, same as a pinch on the monitor itself).
+                guard CameraMagnifier.applies, let view = gesture.view else { return }
+                let computer = OfficeComputer.shared
+                switch gesture.state {
+                case .began: computer.pinchBegan(windowPoint: view.convert(gesture.location(in: view), to: nil), source: "room")
+                case .changed: computer.pinchChanged(scale: Double(gesture.scale), source: "room")
+                case .ended, .cancelled, .failed: computer.pinchEnded(scale: Double(gesture.scale), source: "room")
+                default: break
+                }
+                return
+            }
             diagGesture("pinch", gesture)
             guard let controller = navigationController else { return }
             if gesture.state == .began { controller.stopContinuousWalk(reason: "pinch") }   // Oct 10: gestures take over
@@ -4223,6 +4907,7 @@ struct HallwaySceneView: UIViewRepresentable {
         }
 
         @objc func handleTwoFingerTap() {
+            if navigationController?.evictionLocked == true { return }   // Oct 16
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             navLog("two-finger tap (turn around)")
             diag("gesture.twoFingerTap", ["cell": navigationController?.currentCell, "facing": navigationController?.facing])
@@ -4232,9 +4917,109 @@ struct HallwaySceneView: UIViewRepresentable {
         }
 
         @objc func handlePanRotate(_ gesture: UIPanGestureRecognizer) {
-            if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
+            // Oct 16 (Bonzo's eviction): no new drag while he has the player (one already
+            // under way when he grabbed still gets its ending, so nothing is left half-done).
+            if gesture.state == .began { MudProbe.shared.handled("swipe", mayWalk: false) }   // Oct 24 (mud probe): measurement only
+            if gesture.state == .began { panBlockedByEviction = navigationController?.evictionLocked == true }
+            if panBlockedByEviction || (navigationController?.evictionLocked == true && gesture.state == .changed) { return }
+            if OfficeComputer.shared.isActive {
+                // Oct 7: seated at the office computer -- a drag never turns or walks.
+                // Oct 11: while zoomed in, one finger dragging the room around
+                // the monitor pans the magnified view (CameraMagnifier).
+                // Oct 12 (seated look): not zoomed, a drag turns the head instead.
+                guard let view = gesture.view else { return }
+                let computer = OfficeComputer.shared
+                if gesture.state == .began { seatedLookPan = !CameraMagnifier.shared.isZoomed }
+                if seatedLookPan {
+                    switch gesture.state {
+                    case .began: computer.lookBegan()
+                    case .changed: computer.lookChanged(translation: gesture.translation(in: view))
+                    case .ended, .cancelled, .failed: computer.lookEnded()
+                    default: break
+                    }
+                    return
+                }
+                switch gesture.state {
+                case .began: computer.roomPanBegan()
+                case .changed: computer.roomPanChanged(translation: gesture.translation(in: view))
+                case .ended, .cancelled, .failed: computer.roomPanEnded()
+                default: break
+                }
+                return
+            }
+            // Oct 11 (the staff meeting): seated at the conference table, a drag
+            // only turns the head (within limits) -- never a walk or a turn of
+            // the body. During the sit/stand glides it does nothing.
+            if ConferenceMeeting.isActive {
+                guard let view = gesture.view else { return }
+                switch gesture.state {
+                case .began: ConferenceMeeting.lookBegan()
+                case .changed: ConferenceMeeting.lookChanged(translation: gesture.translation(in: view))
+                case .ended, .cancelled, .failed: ConferenceMeeting.lookEnded()   // Oct 11: or the zoomed lens's pan
+                default: break
+                }
+                return
+            }
             diagGesture("pan", gesture)
             guard let controller = navigationController, let view = gesture.view else { return }
+            // Oct 16 (Supplies): SWIPE A TOOL UP to send it back. Only a drag that
+            // BEGINS on a carried tool (or the held wall extinguisher) AND sets off
+            // upward is claimed -- a sideways drag from the same spot still turns,
+            // and every other drag turns and walks exactly as before.
+            if gesture.state == .began { toolSwipe = nil; memberSwipe = nil }   // (never a stale claim from a drag whose end went elsewhere)
+            let setsOffUp: Bool = {
+                let t = gesture.translation(in: view)
+                if t.x == 0 && t.y == 0 { let v = gesture.velocity(in: view); return v.y < 0 && -v.y > abs(v.x) * 0.8 }
+                return t.y < 0 && -t.y > abs(t.x) * 0.8
+            }()
+            if gesture.state == .began, setsOffUp, let scn = view as? SCNView, !controller.isElevatorRideInProgress {
+                let start = CGPoint(x: gesture.location(in: view).x - gesture.translation(in: view).x,
+                                    y: gesture.location(in: view).y - gesture.translation(in: view).y)
+                if let tool = ToolBelt.tool(at: start, in: scn) {
+                    toolSwipe = (tool, start)
+                } else if controller.carryingExtinguisher, let rect = controller.heldExtinguisherScreenRect(in: scn), rect.contains(start) {
+                    toolSwipe = (nil, start)
+                }
+                if let claimed = toolSwipe {
+                    diag("supplies.swipeBegan", ["tool": claimed.tool?.rawValue ?? "wallExtinguisher"])
+                    return
+                }
+                if let member = Posse.followingMember(at: start, in: scn) {
+                    memberSwipe = member
+                    diag("posse.swipeBegan", ["member": member.memberID])
+                    return
+                }
+            }
+            if let member = memberSwipe {
+                switch gesture.state {
+                case .ended:
+                    memberSwipe = nil
+                    let t = gesture.translation(in: view), v = gesture.velocity(in: view)
+                    if (t.y < -Self.toolSwipeMinimumRise || v.y < -500) && abs(t.y) > abs(t.x) { Posse.dismiss(member) }
+                case .cancelled, .failed:
+                    memberSwipe = nil
+                default: break
+                }
+                return
+            }
+            if let claimed = toolSwipe {
+                switch gesture.state {
+                case .ended:
+                    toolSwipe = nil
+                    let t = gesture.translation(in: view), v = gesture.velocity(in: view)
+                    let upward = (t.y < -Self.toolSwipeMinimumRise || v.y < -500) && abs(t.y) > abs(t.x)
+                    guard upward else { diag("supplies.swipeNotUp", ["dx": Double(t.x), "dy": Double(t.y)]); return }
+                    if let tool = claimed.tool {
+                        if !Supplies.release(tool, controller: controller) { diag("supplies.swipeDeclined", ["tool": tool.rawValue]) }
+                    } else if !controller.putAwayExtinguisher() {
+                        diag("extinguisher.swipeDeclined", [:])
+                    }
+                case .cancelled, .failed:
+                    toolSwipe = nil
+                default: break
+                }
+                return                                                    // never a turn or a walk
+            }
             if gesture.state == .began { controller.stopContinuousWalk(reason: "pan") }   // Oct 10: gestures take over
             let tracePan = ElevatorArrivalTrace.shared.samplePan(changed: gesture.state == .changed)
             let before = controller.cameraNode.eulerAngles
@@ -4255,7 +5040,16 @@ struct HallwaySceneView: UIViewRepresentable {
             if panIsHoldTakeover {
                 switch gesture.state {
                 case .changed: updateHold(at: gesture.location(in: view))
-                case .ended, .cancelled, .failed: panEndedHoldTakeover(at: gesture.location(in: view))
+                case .ended, .cancelled, .failed:
+                    let latched = controller.isWalkLatched
+                    panEndedHoldTakeover(at: gesture.location(in: view))
+                    // Oct 16 (WALK LATCH): a fast horizontal swipe keeps the standing
+                    // swipe's quarter-turn snap (same 30-degree / prompt-release rule).
+                    let t = gesture.translation(in: view), v = gesture.velocity(in: view)
+                    if latched, gesture.state == .ended, abs(t.x) > abs(t.y) * 1.2,
+                       Double(abs(t.x) / dragRotateDistance) * 90 >= 30, abs(v.x) >= Self.latchFlickSpeed {
+                        controller.latchFlickTurn(left: t.x > 0)
+                    }
                 default: break
                 }
                 return
@@ -4293,19 +5087,82 @@ struct HallwaySceneView: UIViewRepresentable {
             // the grid, so there's no forward/backward cell to move
             // between.
             if controller.isElevatorRideInProgress {
+                // Oct 19 (elevator swipe): in the open cab, a VERTICAL pan is a
+                // swipe through the doors (down = forward, up = backward) when
+                // the way the player looks allows one; otherwise, and always
+                // sideways, it's the cab look as before.
                 switch gesture.state {
                 case .began:
+                    elevatorPanAxis = nil
                     navLog("pan rotate began (elevator camera)")
                     controller.beginElevatorCameraDrag()
                 case .changed:
-                    controller.updateElevatorCameraDrag(fraction: fraction)
+                    if elevatorPanAxis == nil, max(abs(translation.x), abs(translation.y)) >= dragAxisLockDistance {
+                        if abs(translation.y) > abs(translation.x),
+                           controller.elevatorThresholdCrossing(forward: translation.y > 0) != nil {
+                            controller.releasePanForElevatorThreshold()
+                            if claimThresholdSwipe(controller, translation: translation) {
+                                elevatorPanAxis = .vertical
+                                navLog("pan in the cab committed to a threshold swipe")
+                            } else {
+                                elevatorPanAxis = .horizontal
+                                controller.beginElevatorCameraDrag()
+                            }
+                        } else {
+                            elevatorPanAxis = .horizontal
+                        }
+                    }
+                    if elevatorPanAxis == .vertical {
+                        controller.updateThresholdScrub(cells: thresholdSwipeCells(translation))
+                    } else {
+                        controller.updateElevatorCameraDrag(fraction: fraction)
+                    }
                 case .ended, .cancelled, .failed:
-                    navLog("pan rotate ended (elevator camera)")
-                    controller.endElevatorCameraDrag()
+                    if elevatorPanAxis == .vertical {
+                        if gesture.state == .ended { finishThresholdSwipe(controller, translation: translation, velocity: velocity) }
+                        else { controller.endThresholdScrub(commit: false) }
+                    } else {
+                        navLog("pan rotate ended (elevator camera)")
+                        controller.endElevatorCameraDrag()
+                    }
+                    elevatorPanAxis = nil
                 default:
                     break
                 }
                 return
+            }
+            // Oct 19 (elevator swipe): just outside a cab whose doors are open
+            // (or closing behind the player), a pan waits until it has a
+            // direction: a vertical one toward the cab is a swipe back through
+            // the doors; anything else starts the ordinary pan right then.
+            if gesture.state == .began {
+                thresholdPanClaimed = false
+                thresholdPanPending = controller.elevatorThresholdNearby
+                if thresholdPanPending { return }
+            }
+            if thresholdPanClaimed {
+                switch gesture.state {
+                case .changed: controller.updateThresholdScrub(cells: thresholdSwipeCells(translation))
+                case .ended: finishThresholdSwipe(controller, translation: translation, velocity: velocity); thresholdPanClaimed = false
+                case .cancelled, .failed: controller.endThresholdScrub(commit: false); thresholdPanClaimed = false
+                default: break
+                }
+                return
+            }
+            if thresholdPanPending {
+                guard gesture.state == .changed else { thresholdPanPending = false; return }    // (a touch that never moved)
+                guard max(abs(translation.x), abs(translation.y)) >= dragAxisLockDistance else { return }
+                thresholdPanPending = false
+                if abs(translation.y) > abs(translation.x), claimThresholdSwipe(controller, translation: translation) {
+                    thresholdPanClaimed = true
+                    navLog("pan at the open cab committed to a threshold swipe")
+                    return
+                }
+                // Not a crossing: the ordinary pan, from here (the code below sees .changed).
+                if !controller.beginFreePan() {
+                    lockedPanAxis = nil
+                    controller.beginDragRotate()
+                }
             }
             // Axis disambiguation: every pan starts out treated as the
             // existing horizontal turn-drag, exactly as before this
@@ -4387,6 +5244,7 @@ struct HallwaySceneView: UIViewRepresentable {
         }
 
         @objc func handleSwipeDown() {
+            if navigationController?.evictionLocked == true { return }   // Oct 16
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
             navLog("swipe down (turn around)")
             diag("gesture.swipeDown", ["cell": navigationController?.currentCell, "facing": navigationController?.facing])
@@ -4398,8 +5256,91 @@ struct HallwaySceneView: UIViewRepresentable {
         // Poll only while held. The controller advances straight or pivots
         // around an unambiguous L; a blocked T still waits for a choice.
         // Release stops polling, including during a corner's pivot.
+        /// Oct 14: this press began on the held extinguisher (hold to put it away).
+        private var extinguisherPress: (start: CGPoint, token: Int)?
+        private var extinguisherPressToken = 0
+        private var extinguisherPressClaimed = false            // this whole gesture belongs to the extinguisher
+        static let extinguisherPutAwayHold: Double = 0.5        // seconds from touch-down
+        static let extinguisherPressSlop: CGFloat = 14          // points the finger may drift
+        // Oct 16 (Supplies): a drag that BEGAN on a carried tool (or on the held
+        // wall extinguisher) belongs to it: released going up, it is sent back.
+        private var toolSwipe: (tool: SupplyTool?, start: CGPoint)?
+        /// Oct 16 (III): a drag that began on a FOLLOWING posse member (Freddy).
+        private var memberSwipe: PosseMember?
+        static let toolSwipeMinimumRise: CGFloat = 40
+
         @objc func handleLongPressForward(_ gesture: UILongPressGestureRecognizer) {
+            if gesture.state == .began { MudProbe.shared.handled("hold", mayWalk: true) }   // Oct 24 (mud probe): measurement only
+            if gesture.state == .began { holdBlockedByEviction = navigationController?.evictionLocked == true }   // Oct 16
+            if holdBlockedByEviction || (navigationController?.evictionLocked == true && gesture.state == .changed) { return }
             if OfficeComputer.shared.isActive { return }   // Oct 7: seated at the office computer -- only taps (get up) reach the world
+            // Oct 14: a press-and-hold that BEGINS on the held fire extinguisher
+            // is for it: still held ~0.5 s after touch-down (this recognizer
+            // fires at 0.35 s), it goes back to its bracket. Never a held walk.
+            // A tap, or a long-press anywhere else, is untouched.
+            if gesture.state == .began, let controller = navigationController, !ConferenceMeeting.isActive,
+               let view = gesture.view as? SCNView, let tool = ToolBelt.tool(at: gesture.location(in: view), in: view) {
+                extinguisherPressToken += 1
+                let token = extinguisherPressToken
+                extinguisherPress = (gesture.location(in: view), token)
+                extinguisherPressClaimed = true
+                diag("supplies.pressBegan", ["tool": tool.rawValue])
+                let wait = max(0, Self.extinguisherPutAwayHold - gesture.minimumPressDuration)
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self, weak controller] in
+                    guard let self, let controller, self.extinguisherPress?.token == token else { return }
+                    self.extinguisherPress = nil
+                    if !Supplies.release(tool, controller: controller) { diag("supplies.pressDeclined", ["tool": tool.rawValue]) }
+                }
+                return
+            }
+            if gesture.state == .began, let controller = navigationController, controller.carryingExtinguisher,
+               !ConferenceMeeting.isActive, !controller.isElevatorRideInProgress, let view = gesture.view as? SCNView,
+               let rect = controller.heldExtinguisherScreenRect(in: view), rect.contains(gesture.location(in: view)) {
+                extinguisherPressToken += 1
+                let token = extinguisherPressToken
+                extinguisherPress = (gesture.location(in: view), token)
+                extinguisherPressClaimed = true
+                diag("extinguisher.pressBegan", [:])
+                let wait = max(0, Self.extinguisherPutAwayHold - gesture.minimumPressDuration)
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self, weak controller] in
+                    guard let self, let controller, self.extinguisherPress?.token == token else { return }
+                    self.extinguisherPress = nil
+                    if !controller.putAwayExtinguisher() { diag("extinguisher.pressDeclined", [:]) }
+                }
+                return
+            }
+            // Oct 16 (III): press and hold a FOLLOWING posse member (Freddy) -- he stays here.
+            if gesture.state == .began, navigationController?.evictionLocked != true, !ConferenceMeeting.isActive,
+               navigationController?.isElevatorRideInProgress != true,
+               let view = gesture.view as? SCNView, let member = Posse.followingMember(at: gesture.location(in: view), in: view) {
+                extinguisherPressToken += 1
+                let token = extinguisherPressToken
+                extinguisherPress = (gesture.location(in: view), token)
+                extinguisherPressClaimed = true
+                diag("posse.pressBegan", ["member": member.memberID])
+                let wait = max(0, Self.extinguisherPutAwayHold - gesture.minimumPressDuration)
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                    guard let self, self.extinguisherPress?.token == token else { return }
+                    self.extinguisherPress = nil
+                    Posse.dismiss(member)
+                }
+                return
+            }
+            if extinguisherPressClaimed {
+                switch gesture.state {
+                case .changed:
+                    let p = gesture.location(in: gesture.view)
+                    if let press = extinguisherPress, hypot(p.x - press.start.x, p.y - press.start.y) > Self.extinguisherPressSlop {
+                        extinguisherPress = nil                           // moved off: not a hold
+                        diag("extinguisher.pressMoved", [:])
+                    }
+                case .ended, .cancelled, .failed:
+                    extinguisherPress = nil                               // (let go too soon: nothing)
+                    extinguisherPressClaimed = false
+                default: break
+                }
+                return                                                    // never a held walk
+            }
             diagGesture("hold", gesture)
             switch gesture.state {
             case .began:
@@ -4468,6 +5409,12 @@ struct HallwaySceneView: UIViewRepresentable {
         /// True while the current one-finger pan is acting as the hold that
         /// took over a tap-to-point walk (decided once, at the pan's .began).
         private(set) var panIsHoldTakeover = false
+        /// Oct 16 (Bonzo's eviction): this gesture began while he had the player -- ignored whole.
+        private var panBlockedByEviction = false
+        private var holdBlockedByEviction = false
+        private var pinchBlockedByEviction = false
+        /// ...and how fast (pt/s) a swipe must still be moving when it lifts to snap a quarter turn.
+        static let latchFlickSpeed: CGFloat = 250
         /// Oct 6: our own continuous touch recognizers (look/drag and hold),
         /// read LIVE at an elevator arrival: is a finger mid-gesture now?
         weak var lookPanRecognizer: UIPanGestureRecognizer?
@@ -4587,7 +5534,8 @@ struct HallwaySceneView: UIViewRepresentable {
 
         func panBeganShouldTakeOverAutoWalk() -> Bool {
             guard let controller = navigationController else { return false }
-            panIsHoldTakeover = controller.tapWalkCanBeTakenOverByHold
+            // (Oct 16: a drag on the latched walk is the hold too -- at once, no long-press wait.)
+            panIsHoldTakeover = controller.tapWalkCanBeTakenOverByHold || controller.isWalkLatched
             return panIsHoldTakeover
         }
 
@@ -4604,6 +5552,7 @@ struct HallwaySceneView: UIViewRepresentable {
         /// true once endpoint look has begun.
         @discardableResult
         private func heldWalkTick(at location: CGPoint) -> Bool {
+            let perf = PerfMonitor.begin("input.heldWalkTick"); defer { PerfMonitor.end(perf) }   // Oct 21: measurement only (PerfMonitor)
             let fingerX = Double(location.x)
             guard let controller = navigationController else { return false }
             guard controller.advanceWhileHeld(),
@@ -4765,9 +5714,20 @@ struct HallwaySceneView: UIViewRepresentable {
         /// of clobbering it with the generic 2x2 every other wall uses.
         private func repeatTransform(for material: SCNMaterial) -> SCNMatrix4 {
             if let name = material.name, name.hasPrefix("wallRepeat:") {
-                let parts = name.dropFirst("wallRepeat:".count).split(separator: "x")
+                // Oct 18: "SxT", optionally "@UxV" -- the pattern phase that lines a
+                // strip up with the wall around it (HallwayScene.wallRepeatName).
+                let spec = name.dropFirst("wallRepeat:".count).split(separator: "@")
+                let parts = spec.first.map { $0.split(separator: "x") } ?? []
                 if parts.count == 2, let s = Float(parts[0]), let t = Float(parts[1]) {
-                    return SCNMatrix4MakeScale(s, t, 1)
+                    var m = SCNMatrix4MakeScale(s, t, 1)
+                    if spec.count == 2 {
+                        let offset = spec[1].split(separator: "x")
+                        if offset.count == 2, let u = Float(offset[0]), let v = Float(offset[1]) {
+                            m.m41 = u
+                            m.m42 = v
+                        }
+                    }
+                    return m
                 }
             }
             return SCNMatrix4MakeScale(2, 2, 1)

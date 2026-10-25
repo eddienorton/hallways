@@ -305,6 +305,58 @@ final class DecoratorState: ObservableObject {
         for surface in changing { store.setCellSurfaceTexture(name, for: surface, at: coord) }
         store.saveCurrentFloorAsOverride()
     }
+    /// Oct 18 (Connected-Area fill): the area the Surfaces editor's "Connected
+    /// Area" scope fills -- everything reachable from the player's cell without
+    /// crossing a wall or doorway. nil where "This Cell" isn't available either.
+    func connectedAreaForSurfaceEditing() -> Set<GridCoordinate>? {
+        guard let cell = cellForSurfaceEditing(), let store else { return nil }
+        let area = store.connectedArea(from: cell)
+        return area.isEmpty ? nil : area
+    }
+
+    /// Oct 18 (Connected-Area fill): several surfaces of a whole area in ONE
+    /// edit -- one undo step (restores every cell's previous overrides), one
+    /// store change (one scene rebuild), one save. nil = Use Floor Default.
+    @discardableResult
+    func setAreaSurfaces(_ name: String?, for surfaces: [CellSurfaceKind], cells area: Set<GridCoordinate>) -> Bool {
+        guard enabled, let store, store.currentMazeID == floor, !area.isEmpty else { return false }
+        let coords = area.filter { store.cells.contains($0) }.sorted { ($0.row, $0.col) < ($1.row, $1.col) }
+        guard coords.contains(where: { c in surfaces.contains { store.cellSurfaceTexture($0, at: c) != name } }) else { return false }
+        store.snapshotForUndo()
+        let changed = store.setCellSurfaceTextures(name, for: surfaces, at: coords)
+        store.saveCurrentFloorAsOverride()
+        diag("decorator.areaSurfaces", ["cells": coords.count, "changed": changed, "surfaces": surfaces.map(\.rawValue).joined(separator: ","),
+                                         "texture": name ?? "default"])
+        return true
+    }
+
+    /// Oct 17 (the decorating kit): would applying the remembered surface
+    /// choices change `coord`?
+    func surfaceKitWouldChange(_ coord: GridCoordinate) -> Bool {
+        guard let store else { return false }
+        return SurfaceKitStore.shared.kit.applicable.contains { store.cellSurfaceTexture($0.0, at: coord) != $0.1 }
+    }
+    /// Oct 17: the remembered surface choices (only those included) applied to
+    /// `coord` -- one undo step, one save, the normal override path. False if
+    /// nothing changed.
+    @discardableResult
+    func applySurfaceKit(at coord: GridCoordinate) -> Bool {
+        guard enabled, let store, store.currentMazeID == floor, store.cells.contains(coord) else { return false }
+        let changing = SurfaceKitStore.shared.kit.applicable.filter { store.cellSurfaceTexture($0.0, at: coord) != $0.1 }
+        guard !changing.isEmpty else { return false }
+        store.snapshotForUndo()
+        for (surface, name) in changing { store.setCellSurfaceTexture(name, for: surface, at: coord) }
+        store.saveCurrentFloorAsOverride()
+        diag("decorator.surfaceKitApplied", ["row": coord.row, "col": coord.col, "surfaces": changing.count])
+        return true
+    }
+    func applySurfaceKitAtCurrentCell() {
+        if let coord = cellForSurfaceEditing() { applySurfaceKit(at: coord) }
+    }
+    func canApplySurfaceKitAtCurrentCell() -> Bool {
+        guard let coord = cellForSurfaceEditing() else { return false }
+        return surfaceKitWouldChange(coord)
+    }
     /// Sept 21 (3D Decorator wall authoring): after addPicture() below
     /// builds a live Picture, this registers it into the OTHER live
     /// state that already exists for every build-time Picture --
@@ -433,12 +485,20 @@ final class DecoratorState: ObservableObject {
     var presentPictureChangeMenu: (_ face: WallFace) -> Void = { _ in }
 
     func attach(scene: SCNScene?, store: MazeStore) {
+        let previousFloor = floor
         self.scene = scene
         self.store = store
         floor = store.currentMazeID
         // makeUIView runs during a SwiftUI update. Clear old selection afterward.
+        // Oct 17 (dialog-closes fix): EXCEPT on a same-floor rebuild -- which is
+        // what every Decorate edit that saves floor data causes (Add Picture,
+        // Delete, size, lights...). The selection is a value (floor, cell, kind,
+        // wall), not a node: every action re-finds its live nodes by that tag in
+        // the new scene. So it stays if the floor's data still has that thing;
+        // anything gone (or a different floor) clears as before.
         DispatchQueue.main.async { [weak self, weak scene] in
             guard let self, self.scene === scene else { return }
+            if let kept = self.selection, previousFloor == self.floor, kept.floor == self.floor, self.exists(kept) { return }
             self.selection = nil
         }
     }
@@ -1089,13 +1149,23 @@ final class DecoratorState: ObservableObject {
         syncCeilingFixtureVisibility(at: coord)
     }
 
+    /// Oct 23: the brightness a fluorescent placed here starts at (of 12). Only new
+    /// ones: lights already placed keep their saved level; Auto Lights keep theirs.
+    static let newFluorescentLevel = 9
+
+    /// Oct 23: the size a picture placed here starts at. Only new ones: pictures
+    /// already placed keep their saved size.
+    static let newPictureSize: PictureSize = .poster
+
     func add(_ kind: DecoratorTarget.Kind) {
         guard enabled, let target = selection, target.kind == .ceilingSurface,
               kind == .ceiling || kind == .fluorescent, canAdd(target, kind: kind),
               let store, let scene else { return }
         if target.isCab {
             guard let mount = cabMount else { return }
-            let fixture = ElevatorCabDecoration.Fixture(kind: kind == .fluorescent ? .fluorescent : .ceiling)
+            // Oct 23: a new fluorescent starts at 9 of 12 (was the default 3); the ceiling light is unchanged.
+            let fixture = ElevatorCabDecoration.Fixture(kind: kind == .fluorescent ? .fluorescent : .ceiling,
+                                                        brightness: kind == .fluorescent ? Self.newFluorescentLevel : 3)
             let node = HallwayScene.makeElevatorCabFixture(fixture, cellSize: store.cellSize, floorNumber: floor)
             store.snapshotForUndo()
             var decoration = store.elevatorCabDecoration
@@ -1112,14 +1182,16 @@ final class DecoratorState: ObservableObject {
         // corners/junctions/dead ends (no single axis) keep the default.
         let addedOrientation = store.autoFluorescentOrientation(at: coord) ?? .northSouth
         let added = DecoratorTarget(floor: floor, coord: coord, kind: kind)
+        // Oct 23: a newly placed fluorescent starts at 9 of 12 (was 3); the ceiling light keeps 3.
+        let addedLevel = kind == .fluorescent ? Self.newFluorescentLevel : 3
         let node = kind == .fluorescent
-            ? HallwayScene.makeFluorescentLight(orientation: addedOrientation, level: 3, cellSize: store.cellSize)
-            : HallwayScene.makeAuthoredCeilingFixture(cellSize: store.cellSize, level: 3)
+            ? HallwayScene.makeFluorescentLight(orientation: addedOrientation, level: addedLevel, cellSize: store.cellSize)
+            : HallwayScene.makeAuthoredCeilingFixture(cellSize: store.cellSize, level: addedLevel)
         node.position = SCNVector3(Float(coord.col) * Float(store.cellSize), Float(store.wallHeight),
                                   Float(coord.row) * Float(store.cellSize))
         added.tag(node)
         store.snapshotForUndo()
-        place(added, level: 3, orientation: addedOrientation)
+        place(added, level: addedLevel, orientation: addedOrientation)
         scene.rootNode.addChildNode(node)
         // Sept 23 (ceiling light coexistence): if the OTHER ceiling
         // light kind was already at this coord, place(...) above just
@@ -1306,11 +1378,13 @@ final class DecoratorState: ObservableObject {
         }
 
         store.snapshotForUndo()
-        store.placePicture(direction, at: coord, size: .standard)
+        // Oct 23: a new picture is a POSTER by default (was Standard); every size is still a choice.
+        let newSize = Self.newPictureSize
+        store.placePicture(direction, at: coord, size: newSize)
         for node in wallNodes { node.removeFromParentNode() }
 
         var newWallMaterials: [SCNMaterial] = []
-        let (material, frameNode) = HallwayScene.buildPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, backfillWall: true, scale: PictureSize.standard.scale, pictureLightLevel: nil, coord: coord, floorNumber: floor, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: wallImageName(for: coord), root: hallwayRoot, wallMaterials: &newWallMaterials)
+        let (material, frameNode) = HallwayScene.buildPictureNode(direction: direction, wallCenterX: wx, wallCenterZ: wz, texture: texture, backfillWall: true, scale: newSize.scale, pictureLightLevel: nil, coord: coord, floorNumber: floor, cellSize: store.cellSize, wallHeight: store.wallHeight, effectiveWallImageName: wallImageName(for: coord), root: hallwayRoot, wallMaterials: &newWallMaterials)
         DecoratorTarget(floor: floor, coord: coord, kind: .picture, direction: direction).tag(frameNode)
         registerAddedPicture(coord, direction, material, newWallMaterials)
 
@@ -3030,7 +3104,23 @@ struct DecoratorOverlay: View {
     private static let gearLeading: CGFloat = 20, gearSize: CGFloat = 56, gearBottom: CGFloat = 28
     private static let addMenuSize: CGFloat = 34
     static var addMenuLeading: CGFloat { gearLeading + gearSize + 10 - 12 }      // minus this overlay's 12 pt leading padding
-    static var addMenuLift: CGFloat { gearBottom + (gearSize - addMenuSize) / 2 - overlayBottomPadding }
+    // Oct 22: centred on the gear where it really is now (ContinuousWalkControls.bottomPadding --
+    // the gear's own bottom inset, above the Building Life tray), not the old 28.
+    static var addMenuLift: CGFloat { ContinuousWalkControls.bottomPadding + (gearSize - addMenuSize) / 2 - overlayBottomPadding }
+    /// Oct 22: room between DECORATE and what it sits above (the gear / the tray's edge).
+    private static let decorateClearance: CGFloat = 10
+    /// Oct 22 (URGENT, Floor 6: the collapsed Building Life tray covered DECORATE --
+    /// it sat on the old FLOOR-pill line, 30 pt down, inside the tray's band): its
+    /// bottom now sits above both the collapsed tray's measured top edge
+    /// (BuildingLifeTrayLayout) and the Settings gear in the same corner (which is
+    /// itself above the tray), with a little clearance -- from the real geometry.
+    private var decoratePillLift: CGFloat { Self.overlayBottomPadding - Self.decorateBottom(collapsedTrayTop: trayLayout.collapsedTop) }
+    /// Where DECORATE's bottom edge goes, above the safe-area bottom (pure; tested).
+    static func decorateBottom(collapsedTrayTop: CGFloat) -> CGFloat {
+        let gearTop = ContinuousWalkControls.bottomPadding + gearSize
+        return max(collapsedTrayTop, gearTop) + decorateClearance
+    }
+    @ObservedObject private var trayLayout = BuildingLifeTrayLayout.shared
     @ObservedObject var state: DecoratorState
     @ObservedObject var store: MazeStore
 
@@ -3767,7 +3857,7 @@ struct DecoratorOverlay: View {
                     .padding(10)
                     .background(state.enabled ? Color.orange : Color.black.opacity(0.75), in: Capsule())
                     .foregroundStyle(.white)
-                    .offset(y: Self.decoratePillOffsetY)
+                    .offset(y: decoratePillLift)
                 Group {
                 if state.enabled {
                     Menu {
@@ -3820,6 +3910,9 @@ struct DecoratorOverlay: View {
                         // Auto Lights below -- it's a whole-floor surface
                         // change, not a per-cell placement.
                         Button("Surfaces") { showSurfacesSheet = true }
+                        // Oct 17: the remembered surfaces onto this cell, in one tap.
+                        Button("Apply Surface Kit") { state.applySurfaceKitAtCurrentCell() }
+                            .disabled(!state.canApplySurfaceKitAtCurrentCell())
                         // Sept 25 (Auto Lights), Sept 27 (config sheet):
                         // opens a small Spacing/Brightness sheet instead
                         // of acting immediately -- unlike Floor/Ceiling/

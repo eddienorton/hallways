@@ -46,12 +46,21 @@ final class AdministrationIDTerminal {
         case unavailable
         /// Oct 10: the face was badly placed -- asks for another try.
         case reposition(HallwaysFace.Framing)
+        /// Oct 11: the face check found no usable face BEFORE the shutter --
+        /// nothing was taken (no flash, no click); asks for another try.
+        case faceNotReady(IDFaceReadiness)
     }
     /// Oct 10 (face framing): badly framed captures in a row. After this many
     /// re-prompts the next capture is shown regardless, so an undetectable
     /// face (lighting, glasses, a mask) can never block the ID.
     static let maxFramingPrompts = 2
     private var framingPrompts = 0
+    /// Oct 11 (face check): presses declined in a row because no face/eyes
+    /// were seen. After this many, the next press takes the photo unchecked
+    /// (exactly as before the check), so a face the camera can't read -- odd
+    /// lighting, a mask, an eye patch -- can never block the ID.
+    static let maxFaceRefusals = 3
+    private var faceRefusals = 0
 
     private(set) var state: State = .form
     private weak var screen: SCNNode?
@@ -102,11 +111,13 @@ final class AdministrationIDTerminal {
     }
 
     /// Oct 6 (polish): take the waiting card (any tap while it is presented).
-    /// True only if there was a card to take.
+    /// True only if there was a card to take. Oct 24: also when the player turns
+    /// or walks away from it (`via` says which, in the flight recorder) -- the same
+    /// one card, the same takeCard; nothing happens before the card is fully out.
     @discardableResult
-    func takeWaitingCard() -> Bool {
+    func takeWaitingCard(via: String = "anywhere") -> Bool {
         guard case .dispensed(let photo) = state else { return false }
-        diag("idTerminal.cardTap", ["state": "dispensed", "via": "anywhere"])
+        diag("idTerminal.cardTap", ["state": "dispensed", "via": via])
         takeCard(photo)
         return true
     }
@@ -125,7 +136,7 @@ final class AdministrationIDTerminal {
         diag("idTerminal.tap", ["x": Double(point.x.rounded()), "y": Double(point.y.rounded()),
                                 "u": Double(uv.x), "v": Double(uv.y), "state": "\(state)"])
         switch state {
-        case .form, .unavailable, .reposition:
+        case .form, .unavailable, .reposition, .faceNotReady:
             if Self.takeRect.insetBy(dx: -20, dy: -20).contains(point) { takePhoto() }
         case .result(let photo):
             if Self.acceptRect.insetBy(dx: -16, dy: -10).contains(point) {
@@ -210,6 +221,9 @@ final class AdministrationIDTerminal {
         }
     }
 
+    /// Oct 21: the card has just been taken (Floor 2's build sets it: the walk toward Tinky).
+    static var onCardTaken: (() -> Void)?
+
     private func takeCard(_ photo: UIImage) {
         let number = cardNumber ?? EmployeeID.number ?? EmployeeID.makeNumber()
         state = .issued(photo)
@@ -226,6 +240,7 @@ final class AdministrationIDTerminal {
         Admission.isCompleted = true
         AdministrationReception.installOfficeOccupantIfDue()      // Oct 5: Fred is now at his desk
         AdministrationExitGuard.visitorAdmitted()                 // Oct 9: Juanita heads for the exit
+        Self.onCardTaken?()                                       // Oct 21: soon after, the walk toward Tinky
         diag("idTerminal.card.taken", ["number": number, "admissionCompleted": Admission.isCompleted,
                                         "isTransformOutput": photo === lastTransformOutput])
     }
@@ -252,17 +267,32 @@ final class AdministrationIDTerminal {
     private func takePhoto() {
         state = .capturing
         render()
-        diag("idTerminal.capture.begin", [:])
-        camera.capture { [weak self] image in
+        let requireFace = faceRefusals < Self.maxFaceRefusals
+        diag("idTerminal.capture.begin", ["faceCheck": requireFace, "refusals": faceRefusals])
+        camera.capture(requireFace: requireFace) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
-                guard let image else {
+                let image: UIImage
+                switch result {
+                case .unavailable:
                     diag("idTerminal.capture.failed", [:])
                     self.state = .unavailable
                     self.render()
                     return
+                case .notReady(let problem):
+                    // Oct 11: declined before the shutter -- no click, no
+                    // flash, no photo; the button is ready again at once.
+                    self.faceRefusals += 1
+                    diag("idTerminal.faceCheck.declined", ["problem": problem.rawValue, "refusals": self.faceRefusals])
+                    self.state = .faceNotReady(problem)
+                    self.render()
+                    return
+                case .photo(let captured):
+                    image = captured
                 }
-                SoundEffects.playCameraClick()
+                self.faceRefusals = 0
+                // Oct 15: no game click here any more -- the camera's own
+                // (system) shutter sound, at the moment of capture, is the one.
                 self.flash()
                 diag("idTerminal.capture.image", ["w": Double(image.size.width), "h": Double(image.size.height),
                                                   "orientation": image.imageOrientation.rawValue])
@@ -366,6 +396,12 @@ final class AdministrationIDTerminal {
                 button("TAKE ID PHOTO", in: takeRect, filled: true)
             case .capturing:
                 button("HOLD STILL", in: takeRect, filled: false)
+            case .faceNotReady(let problem):
+                button("TAKE ID PHOTO", in: takeRect, filled: true)
+                fittedText(problem.prompt.0, in: CGRect(x: 130, y: 1082, width: 540, height: 40),
+                           size: 32, weight: .bold, color: gold, kern: 2)
+                fittedText(problem.prompt.1, in: CGRect(x: 130, y: 1124, width: 540, height: 34),
+                           size: 26, weight: .semibold, color: paper, kern: 2)
             case .reposition(let framing):
                 button("TAKE ID PHOTO", in: takeRect, filled: true)
                 fittedText(framing.prompt.0, in: CGRect(x: 130, y: 1082, width: 540, height: 40),
@@ -530,7 +566,7 @@ final class AdministrationIDTerminal {
         for (radius, pipe) in [(CGFloat(0.34), CGFloat(0.012)), (CGFloat(0.26), CGFloat(0.006))] {
             let mark = SCNNode(geometry: SCNTorus(ringRadius: radius, pipeRadius: pipe))
             mark.geometry?.materials = [brass]
-            mark.position = SCNVector3(0, 0.058, 1.45)
+            mark.position = SCNVector3(0, 0.058, 1.56)   // Oct 11: under the landing pose (terminalStandOff 0.15)
             mark.scale = SCNVector3(1, 0.3, 1)
             root.addChildNode(mark)
         }
@@ -820,30 +856,94 @@ nonisolated enum KioskSound {
 
 // MARK: - Camera: one still from the front camera, no preview
 
+/// Oct 11: why a capture was declined BEFORE the shutter -- nothing was
+/// taken: no flash, no click, no photo. The kiosk shows `prompt` and stays
+/// ready for another try.
+nonisolated enum IDFaceReadiness: String {
+    case noFace, noEyes
+    /// The kiosk's on-screen prompt (two short lines, the building's voice).
+    var prompt: (String, String) {
+        switch self {
+        case .noFace: return ("FACE NOT FOUND", "PLEASE PRESENT ONE FACE TO THE CAMERA")
+        case .noEyes: return ("MISSING: TWO EYES", "PLEASE SHOW BOTH TO THE CAMERA")
+        }
+    }
+}
+
+/// Oct 11: what one press of TAKE ID PHOTO produced.
+nonisolated enum IDCaptureResult {
+    case photo(UIImage)
+    /// The face check never saw a usable face in time: no still was taken.
+    case notReady(IDFaceReadiness)
+    case unavailable
+}
+
 /// Starts the front camera only for the moment of the photo, lets exposure
 /// settle briefly, takes ONE still, and stops. Nothing is shown live and
 /// nothing is saved to the photo library.
-nonisolated final class IDPhotoCamera: NSObject, AVCapturePhotoCaptureDelegate, @unchecked Sendable {
+///
+/// Oct 11 -- FACE CHECK (`requireFace`): while exposure settles, the
+/// camera's live frames are checked with Vision (a face, and both eye
+/// landmark regions). The still is taken only when the LATEST checked frame
+/// is good and never before `settleTime` -- so a missing face never flashes,
+/// clicks or produces a photo. A slow first detection is not a missing face:
+/// frames keep being checked until `faceWindow` (from the start), and the
+/// still is taken the moment a good frame arrives. Only if no good frame has
+/// arrived by then is the capture declined. If no live frames can be read at
+/// all (the frame output can't be added, or none arrive), the old unchecked
+/// capture runs, so the check can never be what blocks the ID.
+nonisolated final class IDPhotoCamera: NSObject, AVCapturePhotoCaptureDelegate,
+                                       AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let queue = DispatchQueue(label: "hallways.idphoto.camera")
+    private let frameQueue = DispatchQueue(label: "hallways.idphoto.faceCheck")
     private let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
+    private let frames = AVCaptureVideoDataOutput()
     private var configured = false
-    private var completion: (@Sendable (UIImage?) -> Void)?
+    private var framesAttached = false
+    private var completion: (@Sendable (IDCaptureResult) -> Void)?
 
-    func capture(completion: @escaping @Sendable (UIImage?) -> Void) {
+    /// Exposure / white balance settle before any still (unchanged).
+    static let settleTime: TimeInterval = 0.7
+    /// How long, from the start, the face check keeps looking before it declines.
+    static let faceWindow: TimeInterval = 2.2
+
+    // Face-check bookkeeping -- touched only on `queue`.
+    private var checkID = 0
+    private var checkStarted: CFTimeInterval = 0
+    private var latestGood = false
+    private var problemSeen: IDFaceReadiness?
+    private var framesChecked = 0
+    private var lastConfidence: Double = -1
+
+    // Shared with the frame queue (which must never wait on `queue`).
+    private let checkLock = NSLock()
+    private var activeCheck: Int?
+    private var frameOrientation: CGImagePropertyOrientation = .up
+
+    private func setActiveCheck(_ id: Int?) {
+        checkLock.lock(); activeCheck = id; checkLock.unlock()
+    }
+    private func currentCheck() -> (id: Int, orientation: CGImagePropertyOrientation)? {
+        checkLock.lock(); defer { checkLock.unlock() }
+        return activeCheck.map { ($0, frameOrientation) }
+    }
+    private func isActive(_ id: Int) -> Bool { currentCheck()?.id == id }
+
+    func capture(requireFace: Bool, completion: @escaping @Sendable (IDCaptureResult) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            run(completion)
+            run(requireFace: requireFace, completion)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
-                if granted { self.run(completion) } else { completion(nil) }
+                if granted { self.run(requireFace: requireFace, completion) } else { completion(.unavailable) }
             }
         default:
-            completion(nil)
+            completion(.unavailable)
         }
     }
 
-    private func run(_ completion: @escaping @Sendable (UIImage?) -> Void) {
+    private func run(requireFace: Bool, _ completion: @escaping @Sendable (IDCaptureResult) -> Void) {
         queue.async {
             if !self.configured {
                 self.session.beginConfiguration()
@@ -852,13 +952,22 @@ nonisolated final class IDPhotoCamera: NSObject, AVCapturePhotoCaptureDelegate, 
                       let input = try? AVCaptureDeviceInput(device: device),
                       self.session.canAddInput(input), self.session.canAddOutput(self.output) else {
                     self.session.commitConfiguration()
-                    completion(nil)
+                    completion(.unavailable)
                     return
                 }
                 self.session.addInput(input)
                 self.session.addOutput(self.output)
+                // Oct 11: live frames for the face check (optional -- without
+                // them the capture simply runs unchecked, as before).
+                if self.session.canAddOutput(self.frames) {
+                    self.frames.alwaysDiscardsLateVideoFrames = true
+                    self.frames.setSampleBufferDelegate(self, queue: self.frameQueue)
+                    self.session.addOutput(self.frames)
+                    self.framesAttached = true
+                }
                 self.session.commitConfiguration()
                 self.configured = true
+                diag("idPhoto.camera.configured", ["faceCheckFrames": self.framesAttached])
             }
             if let connection = self.output.connection(with: .video) {
                 if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
@@ -867,12 +976,94 @@ nonisolated final class IDPhotoCamera: NSObject, AVCapturePhotoCaptureDelegate, 
                     connection.isVideoMirrored = true          // you, as you know your own face
                 }
             }
+            var orientation: CGImagePropertyOrientation = .leftMirrored   // front camera, portrait, unrotated buffer
+            if self.framesAttached, let connection = self.frames.connection(with: .video),
+               connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+                orientation = .up
+            }
+            self.checkLock.lock(); self.frameOrientation = orientation; self.checkLock.unlock()
             self.completion = completion
             self.session.startRunning()
-            self.queue.asyncAfter(deadline: .now() + 0.7) {   // let exposure/white balance settle
-                self.output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+            guard requireFace, self.framesAttached else {
+                self.queue.asyncAfter(deadline: .now() + Self.settleTime) {   // let exposure/white balance settle
+                    self.output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+                }
+                return
             }
+            self.beginFaceCheck()
         }
+    }
+
+    // MARK: The face check (on `queue`)
+
+    private func beginFaceCheck() {
+        checkID += 1
+        let id = checkID
+        checkStarted = CACurrentMediaTime()
+        latestGood = false
+        problemSeen = nil
+        framesChecked = 0
+        lastConfidence = -1
+        setActiveCheck(id)
+        queue.asyncAfter(deadline: .now() + Self.settleTime) { self.shootIfReady(id) }
+        queue.asyncAfter(deadline: .now() + Self.faceWindow) { self.faceWindowEnded(id) }
+    }
+
+    private func frameChecked(_ id: Int, problem: IDFaceReadiness?, confidence: Double) {
+        guard id == checkID, isActive(id) else { return }
+        framesChecked += 1
+        latestGood = problem == nil
+        lastConfidence = confidence
+        // "No eyes" means a face WAS there -- the more useful thing to say.
+        if let problem, problemSeen != .noEyes { problemSeen = problem }
+        shootIfReady(id)
+    }
+
+    private func shootIfReady(_ id: Int) {
+        guard id == checkID, isActive(id), latestGood,
+              CACurrentMediaTime() - checkStarted >= Self.settleTime - 0.01 else { return }
+        setActiveCheck(nil)
+        diag("idPhoto.faceCheck.passed", ["frames": framesChecked, "landmarkConfidence": lastConfidence,
+                                          "ms": ((CACurrentMediaTime() - checkStarted) * 1000).rounded()])
+        output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+    }
+
+    private func faceWindowEnded(_ id: Int) {
+        guard id == checkID, isActive(id) else { return }
+        setActiveCheck(nil)
+        guard framesChecked > 0 else {
+            // No live frame was ever read: no evidence of a missing face --
+            // take the photo exactly as before the check existed.
+            diag("idPhoto.faceCheck.noFrames", ["action": "uncheckedCapture"])
+            output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+            return
+        }
+        let problem = problemSeen ?? .noFace
+        diag("idPhoto.faceCheck.declined", ["problem": problem.rawValue, "frames": framesChecked,
+                                            "landmarkConfidence": lastConfidence])
+        session.stopRunning()
+        let done = completion
+        completion = nil
+        done?(.notReady(problem))
+    }
+
+    // MARK: Live frames (on `frameQueue`; late frames are simply dropped)
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard output === frames, let check = currentCheck(), let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let request = VNDetectFaceLandmarksRequest()
+        try? VNImageRequestHandler(cvPixelBuffer: pixels, orientation: check.orientation, options: [:]).perform([request])
+        let face = (request.results ?? []).max(by: { $0.boundingBox.width < $1.boundingBox.width })
+        let problem: IDFaceReadiness?
+        if let face {
+            let left = face.landmarks?.leftEye?.pointCount ?? 0, right = face.landmarks?.rightEye?.pointCount ?? 0
+            problem = left > 0 && right > 0 ? nil : .noEyes
+        } else {
+            problem = .noFace
+        }
+        let confidence = Double(face?.landmarks?.confidence ?? -1)
+        queue.async { self.frameChecked(check.id, problem: problem, confidence: confidence) }
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
@@ -881,7 +1072,7 @@ nonisolated final class IDPhotoCamera: NSObject, AVCapturePhotoCaptureDelegate, 
             self.session.stopRunning()
             let done = self.completion
             self.completion = nil
-            done?(image)
+            done?(image.map { .photo($0) } ?? .unavailable)
         }
     }
 }

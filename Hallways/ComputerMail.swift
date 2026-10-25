@@ -128,24 +128,47 @@ enum MailCatalog {
         // and reading it accepts nothing. The meeting itself (time, room,
         // what happens if it's missed) arrives in Phase 2 -- this text
         // deliberately promises no time or place yet.
+        // Oct 11 (Eddie's rewrite): warmer, from Juanita, and plain about
+        // what to do next -- the meeting is on Floor 3, in the Conference
+        // Room. Same id, so a copy already delivered shows this text too
+        // (the inbox resolves authored text when it is shown).
         AuthoredMail(
             id: BuildingDispatch.staffMeetingInvitationMailID,
-            sender: "Administration",
+            sender: "Juanita, Administration",
             senderAddress: "administration@hallways.internal",
-            subject: "New Employee Staff Meeting",
+            subject: "You're invited: THE BOX",
+            // Oct 12 (event history): the invitation now follows the player's
+            // first time at their computer, and announces THE BOX. No time:
+            // the meeting waits for the player.
             body: """
-            Welcome to the Hallways Building, employee {employeeNumber}.
+            Welcome aboard!
 
-            All new employees are invited to a staff meeting in the conference room.
+            Hope you're settling into your new office. The whole company is getting together, and we'd love you to be there.
 
-            The time will be announced shortly.
+            **The meeting is on Floor 3, in the Conference Room.**
 
-            Administration
+            The Hallways Corporation is presenting THE BOX \u{2014} and between you and me, you'll want to see this one.
+
+            Come along whenever you're ready. We'll save you a seat!
+
+            Juanita
             """,
             delivery: .byEvent)
     ]
 
     static func authored(_ id: String) -> AuthoredMail? { all.first { $0.id == id } }
+
+    /// Oct 11: a body as the reader shows it -- `**bold**` renders bold (only
+    /// the meeting invitation uses it); everything else is plain as before.
+    static func display(_ body: String) -> AttributedString {
+        (try? AttributedString(markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(body)
+    }
+
+    /// The one-line inbox preview (markup removed).
+    static func preview(_ body: String) -> String {
+        body.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "\n", with: " ")
+    }
 }
 
 final class MailStore: ObservableObject {
@@ -319,7 +342,7 @@ struct MailAppView: View {
                 }
                 Text(m.subject).font(.system(size: 14, weight: unread ? .semibold : .regular, design: .rounded))
                     .foregroundStyle(HallwaysOS.ink).lineLimit(1)
-                Text(m.body.replacingOccurrences(of: "\n", with: " "))
+                Text(MailCatalog.preview(m.body))
                     .font(.system(size: 13, design: .rounded)).foregroundStyle(HallwaysOS.inkSoft).lineLimit(2)
             }
         }
@@ -358,7 +381,7 @@ struct MailAppView: View {
                             .font(.system(size: 12, design: .rounded)).foregroundStyle(HallwaysOS.inkSoft)
                     }
                     Rectangle().fill(HallwaysOS.rule).frame(height: 1)
-                    Text(m.body).font(.system(size: 16, design: .rounded)).foregroundStyle(HallwaysOS.ink)
+                    Text(MailCatalog.display(m.body)).font(.system(size: 16, design: .rounded)).foregroundStyle(HallwaysOS.ink)
                         .lineSpacing(4).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(18)

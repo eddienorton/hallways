@@ -49,7 +49,7 @@ nonisolated protocol PosseMember: AnyObject {
 }
 
 enum Posse {
-    struct Record {
+    struct Record: Codable {
         var following = false
         /// Recruited at least once. Until then he turns up near wherever the
         /// player arrives (handy for testing); after, he lives where he is left.
@@ -60,8 +60,50 @@ enum Posse {
         var homeYaw: Float = 0
     }
 
-    /// Story state per member id; survives scene rebuilds (not app launches).
-    static var records: [String: Record] = [:]
+    /// Story state per member id; survives scene rebuilds -- and (Oct 11,
+    /// resume) app launches: met / following / home, saved on every change
+    /// (ResumeState.posseKey). No animation state: a follower simply turns up
+    /// around the player again, a member left somewhere is back at home.
+    static var records: [String: Record] = loadRecords() {
+        didSet {
+            guard ResumeState.isRecording, let data = try? JSONEncoder().encode(records) else { return }
+            UserDefaults.standard.set(data, forKey: ResumeState.posseKey)
+        }
+    }
+    private static func loadRecords() -> [String: Record] {
+        guard ResumeState.isRecording else { return [:] }
+        let d = UserDefaults.standard
+        guard let data = d.data(forKey: ResumeState.posseKey),
+              var saved = try? JSONDecoder().decode([String: Record].self, from: data) else { return [:] }
+        diag("resume.posseRestored", ["members": saved.count])
+        // Oct 17: Freddy (the living fire extinguisher) is removed from the game.
+        // A save that still carries his record has it dropped; nothing else in
+        // the save is touched.
+        if saved.removeValue(forKey: "freddy") != nil {
+            if let fixed = try? JSONEncoder().encode(saved) { d.set(fixed, forKey: ResumeState.posseKey) }
+            diag("posse.retiredMemberDropped", ["member": "freddy"])
+        }
+        return saved
+    }
+
+    /// Oct 16 (III): the following member drawn at a screen point (its drawn
+    /// bounds, grown for a finger), for the release gestures.
+    static func followingMember(at point: CGPoint, in view: SCNView) -> PosseMember? {
+        for m in members where m.isFollowing {
+            guard let n = m.sceneNode, n.parent != nil else { continue }
+            if let r = ToolBelt.screenRect(of: n, in: view, minimum: 0), r.contains(point) { return m }   // (his own shape: walking taps elsewhere stay walks)
+        }
+        return nil
+    }
+
+    /// Oct 16 (III): let a follower go -- swipe up on him, or press and hold
+    /// him. He stays where he is (his new home), as Posse.release always meant.
+    static func dismiss(_ member: PosseMember) {
+        guard member.isFollowing else { return }
+        release(member)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        diag("posse.dismissed", ["member": member.memberID, "floor": floor])
+    }
 
     /// This floor's live members (rebuilt with every scene).
     private static var members: [PosseMember] = []
@@ -89,19 +131,8 @@ enum Posse {
             diag("posse.heldBack", ["floor": floor, "following": records.filter { $0.value.following }.map(\.key).joined(separator: ",")])
             return
         }
-        let context = FloorContext(scene: scene, playerCamera: playerCamera, cells: cells, cellSize: Float(cellSize),
-                                   start: start, end: end, fires: fires, extinguish: extinguish)
-        let traceFreddy = ElevatorArrivalTrace.shared.beginPhase("Posse.placementAndFreddy")
-        let freddyPlacement = placement(for: Freddy.memberID, context: context, allowFirstMeeting: allowFirstMeetings)
-        if let freddy = Freddy.install(context: context, placement: freddyPlacement) {
-            members.append(freddy)
-        }
-        switch freddyPlacement {
-        case .besidePlayer?: Cast.log("freddy installed -- following, beside the player (floor \(floor))")
-        case .at(let p, _)?: Cast.log(String(format: "freddy installed -- at home (%.1f,%.1f) floor %ld", p.x, p.y, floor))
-        case nil: break
-        }
-        ElevatorArrivalTrace.shared.endPhase("Posse.placementAndFreddy", traceFreddy)
+        // Oct 17: Freddy, the only member installed here, is removed from the
+        // game -- no member is placed. (The posse machinery itself is kept.)
     }
 
     struct FloorContext {

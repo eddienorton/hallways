@@ -95,7 +95,7 @@ struct PlayerSettingsButton: View {
             }
         }
         .padding(.leading, 20)
-        .padding(.bottom, ContinuousWalkControls.bottomPadding)   // Oct 10: same (lower) line as the HUD row
+        .padding(.bottom, BuildingLifeTrayMetrics.cornerBottom)   // Oct 24: low in the corner (was the HUD row's line, Oct 10)
         .sheet(isPresented: $showingSettings) {
             PlayerSettingsSheet(store: store, onStartOver: onStartOver)
                 // Oct 9: the game goes quiet while Settings is up (not Mute:
@@ -120,9 +120,33 @@ private struct PlayerSettingsSheet: View {
     // gate, same idea as GridEditorView's own Reset Floor alert --
     // only Confirm actually calls into MazeStore.
     @State private var showingResetAllFloorsConfirmation = false
+    /// Oct 12: the Telephone voice audition (developer tools only; temporary).
+    @AppStorage(TelephoneVoice.defaultsKey) private var telephoneVoice = TelephoneVoice.original.rawValue
+    /// Oct 22 (musical identities): on unless switched off (HallwaysianMusic.isOn).
+    @AppStorage(HallwaysianMusic.defaultsKey) private var musicalIdentities = true
+    // Oct 24 (mud hunt): the diagnostic audio-off mode (AudioDiagnostics), from the next launch.
+    @AppStorage(AudioDiagnostics.audioOffKey) private var audioOffNextLaunch = false
     // Oct 2: Share Diagnostics (see DiagnosticRecorder).
     @State private var diagnosticsShare: DiagnosticsShareItem?
+    // Oct 16 (V): the tool presentation audition.
+    @ObservedObject private var toolTray = ToolTray.shared
+    @State private var toolSwitchRefusal: String?          // Oct 16 (VI): why Two Hands was refused (shown as an alert)
     @State private var preparingDiagnostics = false
+
+    /// (Built here, not inside `body`: the long string expressions there were too much for the type checker.)
+    private var markSlowdownFooter: String {
+        let base = "Developer: notes this moment in the performance history included in Share Diagnostics."
+        let active = PerfSwitches.activeList
+        guard !active.isEmpty else { return base }
+        return base + " EXPERIMENTS ON: " + active.joined(separator: ", ") + "."
+    }
+
+    private var audioOffFooter: String {
+        let base = "Turns off Hallways' audio processing entirely -- music, critter sounds, effects -- to help find the slowdown. "
+            + "Not the same as the speaker button. Quit and relaunch to apply. "
+        return base + (AudioDiagnostics.audioOff ? "Audio is OFF in this run." : "Audio is on in this run.")
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -178,6 +202,28 @@ private struct PlayerSettingsSheet: View {
                 } footer: {
                     Text("Sends Eddie a text log of what the game was doing, to help fix bugs. No photos or personal info.")
                 }
+                // Oct 21 (slowdown hunt): developer builds only -- a marker in the
+                // performance history at the moment the game feels slow.
+                if PerfMonitor.enabled {
+                    Section {
+                        Button("Mark Slowdown Now") {
+                            PerfMonitor.shared.mark("user: slow now")
+                        }
+                        .frame(minHeight: 44)
+                    } footer: {
+                        Text(markSlowdownFooter)
+                    }
+                }
+                // Oct 24 (mud hunt): audio switched OFF (not muted) for a whole run -- a
+                // controlled experiment. Read once at launch: quit and relaunch to apply.
+                Section {
+                    Toggle("Audio off (next launch)", isOn: $audioOffNextLaunch)
+                        .frame(minHeight: 44)
+                } header: {
+                    Text("DIAGNOSTICS")
+                } footer: {
+                    Text(audioOffFooter)
+                }
                 // Sept 27 (Designer/dev workflow): one global command
                 // for "DefaultMazes.json changed on another device, and
                 // this device still has local floor overrides from
@@ -218,6 +264,75 @@ private struct PlayerSettingsSheet: View {
                     }
                 } footer: {
                     Text("Replaces every customized floor with the current built-in defaults.")
+                }
+                // Oct 11: replay the Floor 3 staff meeting for timing passes.
+                Section {
+                    Button {
+                        ConferenceMeeting.debugReplay()
+                        dismiss()
+                    } label: {
+                        Text("Replay Conference Meeting")
+                    }
+                } footer: {
+                    Text("Puts the Floor 3 meeting room back to before the boss calls the meeting to order. Sit down to play it again. Nothing saved changes.")
+                }
+                // Oct 16 (V): TOOL PRESENTATION (audition; see ToolBelt.Presentation).
+                Section {
+                    // (refused: the control stays on Tool Tray, and an alert says exactly why)
+                    Picker("Show tools as", selection: Binding(
+                        get: { toolTray.mode },
+                        set: { toolSwitchRefusal = ToolBelt.setPresentation($0) })) {
+                        Text("Tool Tray (4)").tag(ToolBelt.Presentation.tray)
+                        Text("Two Hands (2)").tag(ToolBelt.Presentation.hands)
+                    }
+                    .pickerStyle(.segmented)
+                    // Oct 16 (VI): what is carried, each with its own Return (home to Supplies, or its bracket).
+                    ForEach(toolTray.items, id: \.self) { item in
+                        HStack {
+                            if let image = ToolIcons.image(item.tool) {
+                                Image(uiImage: image).resizable().scaledToFit().frame(width: 30, height: 30)
+                            }
+                            Text(item.title)
+                            Spacer()
+                            Button("Return") { ToolBelt.returnFromMenu(item) }
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                } header: {
+                    Text("Tool Presentation (audition)")
+                } footer: {
+                    Text(toolTray.mode == .tray && ToolBelt.handsBlockedMessage != nil
+                         ? "Carrying \(toolTray.items.count). \(ToolBelt.handsBlockedMessage ?? "")"
+                         : "The same tools either way: switching never adds, drops or returns anything.")
+                }
+                .alert("Two Hands holds two tools", isPresented: Binding(
+                    get: { toolSwitchRefusal != nil }, set: { if !$0 { toolSwitchRefusal = nil } })) {
+                    Button("OK", role: .cancel) { toolSwitchRefusal = nil }
+                } message: {
+                    Text(toolSwitchRefusal ?? "")
+                }
+                // Oct 22 (musical identities): the six Hallwaysians' song names and signatures.
+                Section {
+                    Toggle("Musical greetings", isOn: $musicalIdentities)
+                } header: {
+                    Text("Musical Identities (audition)")
+                } footer: {
+                    Text("Every resident has a short instrumental signature: it greets you with it when you tap to follow, now and then when you're near (one at a time), and checks in every half-minute or so while you follow it. Benny, Cecilia, Jolene, Eileen, Gloria and Layla also wear song names. Off: every original voice and sound at once, no ambient music or check-ins, and the six's original names (Feddy, Sister, Lanky, Stilts, Scope, Lopsy) from the next launch. Compare Music and Original any time in Building Life > Directory.")
+                }
+                // Oct 12: THE TELEPHONE VOICE AUDITION (temporary; see TelephoneVoice).
+                Section {
+                    Picker("Voice", selection: $telephoneVoice) {
+                        ForEach(TelephoneVoice.allCases) { voice in
+                            Text(voice.title).tag(voice.rawValue)
+                        }
+                    }
+                    Button("Play sample") {
+                        (TelephoneVoice(rawValue: telephoneVoice) ?? .original).playSample()
+                    }
+                } header: {
+                    Text("Telephone Voice (audition)")
+                } footer: {
+                    Text("Play sample: the same three presentation lines and a laugh. In the game the chosen voice is used the next time the meeting's cast is brought into the room -- a THE BOX replay into the empty room (tap the screen) or the next visit to Floor 3.")
                 }
                 }
             }

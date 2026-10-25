@@ -91,8 +91,13 @@ enum ConferenceRoom {
         }
 
         // The presentation board: centred on the north wall, facing the room.
+        // Oct 12 (playtest: "frame visible, surface missing"): the wall panels
+        // are 0.1 m thick, centred on the cell boundary, so the wall's face is
+        // at northZ + 0.05. At northZ + 0.02 the white board (0.025 deep) was
+        // sunk 5 mm INSIDE the wall -- hidden -- and its frame's front sat
+        // exactly on the wall's face (z-fighting). Now it hangs on the face.
         let board = makePresentationBoard()
-        board.position = SCNVector3((westX + eastX) / 2, 0, northZ + 0.02)
+        board.position = SCNVector3((westX + eastX) / 2, 0, northZ + 0.05 + 0.004)
         room.addChildNode(board)
 
         diag("conferenceRoom.installed", ["tableX": Double(cx), "tableZ": Double(cz), "chairs": seats.count,

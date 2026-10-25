@@ -50,6 +50,15 @@ enum LivingWorld {
     /// Oct 4 "DOUBLE THE ZOO": the 32 setting = today's full ALL cast plus a
     /// crowd of extra lighter residents (see Menagerie/Audition/Bobbin installs).
     static let crowdSize = 32
+
+    /// Oct 16 (Floor 4 PP): the little roaming inhabitants -- staplers,
+    /// slinkies, chairs, ladders, the dog and cat, the Bobbins -- are OFF for
+    /// now, so the building's architecture (and what's actually happening)
+    /// reads. Nothing is deleted: models, behaviour, sounds all stay. The Big
+    /// Shot (Floor 3), the meeting's cast, Jeff and every scripted character
+    /// are not ambient and are unaffected. Bring them back:
+    /// `-HallwaysAmbientCritters YES`.
+    nonisolated static var ambientCritters: Bool { UserDefaults.standard.bool(forKey: "HallwaysAmbientCritters") }
     static var isCrowd: Bool { population == crowdSize }
     /// The full ALL cast (cage included) is present at ALL and at 32.
     static var fullCast: Bool { isAll || isCrowd }

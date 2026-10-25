@@ -74,6 +74,7 @@ enum LightingDeterminismCheck {
     /// exactly the "code after construction" question under
     /// investigation.
     static func run(scene: SCNScene, floor: Int, mazeStore: MazeStore, buildNumber: Int, checkpoint: String) {
+        guard DevLog.verbose else { return }       // Oct 18: a finished investigation -- only with -HallwaysVerboseLogs YES
         let fixtures = captureFixtures(scene: scene, floor: floor, mazeStore: mazeStore)
         let currentLines = serialize(fixtures)
         let currentState = currentLines.joined(separator: "\n")
@@ -289,6 +290,7 @@ enum LightingDeterminismCheck {
     /// presentation would be trivially equal to model and this check
     /// would prove nothing).
     static func runPresentationCheck(scene: SCNScene, floor: Int, buildNumber: Int, checkpoint: String) {
+        guard DevLog.verbose else { return }       // Oct 18: as run(_:) above
         let fixtures = capturePresentationFixtures(scene: scene, floor: floor)
         let currentLines = serialize(fixtures)
         let currentState = currentLines.joined(separator: "\n")

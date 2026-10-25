@@ -6,33 +6,21 @@ import SceneKit
 struct ElevatorArrivalWorkTests {
     @Test(arguments: [1, 2, 7, 15])
     func countingUsesTheOriginalReadableSchedule(steps: Int) {
+        // Oct 18 (open the building): the car's one timing -- floors counted evenly,
+        // the last landing at the lead-in plus ElevatorTiming.ride (35% slower than
+        // the old 4.5 s count; longer for a longer run).
         let times = (1...steps).map { TapNavigationController.elevatorIndicatorStepDelay(step: $0, steps: steps) }
-        #expect(abs((times.last ?? 0) - 3.8) < 0.000001)
+        let lead = TapNavigationController.elevatorIndicatorLeadIn
+        #expect(abs((times.last ?? 0) - (lead + ElevatorTiming.ride(floors: steps))) < 0.000001)
+        #expect(abs(ElevatorTiming.ride(floors: 1) - 4.5 / 0.65) < 0.000001)
         for (index, time) in times.enumerated() {
-            let original = 0.5 + (4.5 - 0.5 - 0.7) * Double(index + 1) / Double(steps)
-            #expect(abs(time - original) < 0.000001)
+            let even = lead + ElevatorTiming.ride(floors: steps) * Double(index + 1) / Double(steps)
+            #expect(abs(time - even) < 0.000001)
+            if index > 0 { #expect(time > times[index - 1]) }                 // (never a pause, never backwards)
         }
     }
 
-    @Test func animalPixelsAreReusedButMaterialsRemainIndependent() throws {
-        let firstStarted = ProcessInfo.processInfo.systemUptime
-        let first = RealAnimalSkins.make()
-        let firstMS = (ProcessInfo.processInfo.systemUptime - firstStarted) * 1000
-        let reusedStarted = ProcessInfo.processInfo.systemUptime
-        let second = RealAnimalSkins.make()
-        let reusedMS = (ProcessInfo.processInfo.systemUptime - reusedStarted) * 1000
-        print("ARRIVAL_WORK_TEST animalMaterials firstRequestMS=\(firstMS) reusedRequestMS=\(reusedMS)")
-        let originals = [first.dogCoat, first.dogSaddle, first.dogCream, first.catTabby, first.catWhite, first.catDark]
-        let copies = [second.dogCoat, second.dogSaddle, second.dogCream, second.catTabby, second.catWhite, second.catDark]
-        for (a, b) in zip(originals, copies) {
-            #expect(a !== b)
-            let imageA = try #require(a.diffuse.contents as? UIImage)
-            let imageB = try #require(b.diffuse.contents as? UIImage)
-            #expect(imageA === imageB)
-            a.diffuse.contents = UIColor.magenta
-            #expect((b.diffuse.contents as? UIImage) === imageB)
-        }
-    }
+    // (Oct 19, Stage A: the Dog and Cat skins test went with the Dog and the Cat.)
 
     @Test func proceduralSurfacePixelsAreReusedAndMissingAssetsStayMissing() throws {
         let first = try #require(HallwayScene.resolveThemeImage(HallwayScene.officeWallGradientName))

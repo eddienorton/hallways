@@ -39,3 +39,10 @@ Watch the Xcode console for `[Cast]`, `[Lead]` and `[ELEVATOR] [Guide]` lines.
 17. **Footsteps.** Synthesized player footsteps (shoe/heel loops) during every walk.
 18. **Relaunch.** Mid-onboarding relaunch resumes in Administration with the right Jeff (door before ID, desk after).
 19. **One Jeff.** At every floor build the console shows exactly one `[Cast] floor N ready -- jeff: …` line and no `WARNING` lines.
+
+## Building life (Oct 18)
+20. **Residents in the log.** Every floor build and every 30 s the console shows one `[Life]` line per resident (butterfly, chair.1): floor, cell, dwelling/travelling/guiding, next decision, `rendered` when its body is in the scene.
+21. **Roaming chair.** Floors 3 and 4: a small wooden chair trots between places, stays a minute or three, and now and then takes the elevator (a distant ding, the doors; on arrival it steps out and trots off). It never moves the player and never takes the elevator while the player is within ~5 m of the doors or riding.
+22. **Rebuilds keep them.** A Decorate edit (or an editor change) on a floor with the butterfly or chair: they reappear exactly where they were (`backWhereShown`), not back at home.
+23. **Butterfly unchanged.** Floor 5 dark: she arrives by the elevator, hails, leads (flashlight first if not carried), waits, gives up after two tries, celebrates all eight circuits. Her place and memory survive the update (`butterfly.migrated` once in the log).
+24. **Elevator never held.** A character's door cycle that never finishes is released after 20 s (`elevator.character.watchdog`); the player's own elevator works afterwards.

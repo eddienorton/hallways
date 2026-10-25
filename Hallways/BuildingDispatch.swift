@@ -29,6 +29,11 @@ enum BuildingDispatch {
     static let staffMeetingInvitationMailID = "mail.admin.staffMeeting.invitation"
     /// The story beat recorded when the invitation is sent.
     static let staffMeetingInvitedBeat = "invite.staffMeeting.sent"
+    /// Oct 12 (event history): the player first sat down at their office
+    /// computer -- the event that, a short while later, brings the invitation.
+    static let computerFirstUseBeat = "computer.firstUse"
+    /// The pause between that and the invitation: pacing, never a deadline.
+    static let invitationDelay: TimeInterval = 30
 
     /// Send authored mail `id` to the player. False (and nothing happens) if
     /// there is no such mail or it has already been delivered: nothing is
@@ -101,8 +106,14 @@ enum BuildingDispatch {
     /// Phase 1: only the staff-meeting invitation. (No meeting, no follow-up
     /// text, and app-closed time is never treated as anything -- Phase 2.)
     static let rules: [Rule] = [
+        // Oct 12: no longer "as soon as admitted" -- events trigger events: the
+        // player sits at their office computer, and ~30 s later the invitation
+        // arrives (wherever they are by then; see `scheduleWake`).
         Rule(id: "invite.staffMeeting", firedBeat: staffMeetingInvitedBeat,
-             isDue: { $0.admissionCompleted },
+             isDue: { c in
+                 guard c.admissionCompleted, let used = c.beats.time(computerFirstUseBeat) else { return false }
+                 return c.now >= used.addingTimeInterval(invitationDelay)
+             },
              fire: { c in
                  _ = sendMail(staffMeetingInvitationMailID, at: c.now, mail: c.mail, phone: c.phone, history: c.history)
              }),
@@ -110,7 +121,8 @@ enum BuildingDispatch {
 
     /// Check every rule once, now. Called at natural gameplay moments
     /// (entering the building, returning to the app, arriving on a floor,
-    /// taking the phone out, sitting at the computer) -- never on a timer.
+    /// taking the phone out, sitting at the computer) -- and (Oct 12) when a
+    /// rule's short pause runs out (`scheduleWake`). Never a clock time.
     /// Returns the ids of the rules that fired.
     @discardableResult
     static func evaluate(_ context: Context, rules: [Rule] = BuildingDispatch.rules, reason: String = "") -> [String] {
@@ -127,7 +139,26 @@ enum BuildingDispatch {
     /// The game's entry point: the live context at the current time.
     @discardableResult
     static func evaluate(reason: String) -> [String] {
-        evaluate(.live(), reason: reason)
+        let fired = evaluate(.live(), reason: reason)
+        scheduleWake()
+        return fired
+    }
+
+    /// Oct 12: a rule waiting on a short pause (the invitation's 30 s) is
+    /// checked again the moment it falls due -- so it arrives wherever the
+    /// player has wandered, not at their next floor change. One pending wake
+    /// at a time; a relaunch inside the pause re-arms it at the next evaluate.
+    private static var wakeAt: Date?
+    static func scheduleWake(now: Date = Date()) {
+        let beats = StoryBeats.shared
+        guard !beats.has(staffMeetingInvitedBeat), let used = beats.time(computerFirstUseBeat) else { return }
+        let due = used.addingTimeInterval(invitationDelay)
+        guard due > now, wakeAt.map({ $0 > due || $0 < now }) ?? true else { return }
+        wakeAt = due
+        DispatchQueue.main.asyncAfter(deadline: .now() + due.timeIntervalSince(now) + 0.25) {
+            wakeAt = nil
+            evaluate(reason: "pause")
+        }
     }
 
     #if DEBUG

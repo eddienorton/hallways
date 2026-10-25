@@ -23,7 +23,7 @@ struct RecoveryMovementAudioTests {
         for _ in 0..<40 {
             time += 0.025; c.renderer(renderer, updateAtTime: time); await Task.yield()
         }
-        #expect(c.movementPace > 1.5)
+        #expect(c.movementPace > 1.4)                                    // (Oct 19: the fast pace is 1.44 now, was 1.6)
         #expect(c.cameraNode.position.x > 12) // Faster than the 6 units/sec walk.
         #expect(abs(Double(SoundEffects.walkingRate) - c.movementPace) < 0.001)
         let paceBeforeRelease = c.movementPace

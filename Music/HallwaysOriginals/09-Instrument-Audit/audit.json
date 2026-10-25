@@ -1,0 +1,277 @@
+{
+ "upright_bass": {
+  "zones": 10,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 41,
+  "sustainDb": -51.0,
+  "ringAt2_4sDb": -51.1,
+  "releaseDb": -0.0,
+  "clicksHeld": 0,
+  "loudnessDb": -32.3,
+  "clicksPhrase": 0
+ },
+ "electric_bass": {
+  "zones": 11,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 43,
+  "sustainDb": -12.5,
+  "ringAt2_4sDb": -7.7,
+  "releaseDb": -55.1,
+  "clicksHeld": 0,
+  "loudnessDb": -30.0,
+  "clicksPhrase": 0
+ },
+ "tuba": {
+  "zones": 11,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 44,
+  "sustainDb": -2.2,
+  "ringAt2_4sDb": -2.5,
+  "releaseDb": -69.4,
+  "clicksHeld": 0,
+  "loudnessDb": -32.6,
+  "clicksPhrase": 0
+ },
+ "piano": {
+  "zones": 38,
+  "emptyZones": 0,
+  "pitchOff": [
+   92,
+   92
+  ],
+  "heldNote": 60,
+  "sustainDb": -14.7,
+  "ringAt2_4sDb": -14.0,
+  "releaseDb": -46.1,
+  "clicksHeld": 0,
+  "loudnessDb": -35.3,
+  "clicksPhrase": 0
+ },
+ "electric_piano": {
+  "zones": 14,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 62,
+  "sustainDb": -41.1,
+  "ringAt2_4sDb": -11.5,
+  "releaseDb": -32.4,
+  "clicksHeld": 0,
+  "loudnessDb": -23.6,
+  "clicksPhrase": 0
+ },
+ "organ": {
+  "zones": 17,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 60,
+  "sustainDb": -0.3,
+  "ringAt2_4sDb": 2.4,
+  "releaseDb": -71.6,
+  "clicksHeld": 0,
+  "loudnessDb": -20.9,
+  "clicksPhrase": 0
+ },
+ "nylon_guitar": {
+  "zones": 11,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 60,
+  "sustainDb": -27.1,
+  "ringAt2_4sDb": -21.3,
+  "releaseDb": -32.4,
+  "clicksHeld": 0,
+  "loudnessDb": -29.7,
+  "clicksPhrase": 0
+ },
+ "electric_guitar": {
+  "zones": 12,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 62,
+  "sustainDb": -40.2,
+  "ringAt2_4sDb": -11.2,
+  "releaseDb": -19.0,
+  "clicksHeld": 0,
+  "loudnessDb": -32.4,
+  "clicksPhrase": 0
+ },
+ "harp": {
+  "zones": 16,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 66,
+  "sustainDb": -48.8,
+  "ringAt2_4sDb": -25.9,
+  "releaseDb": -16.6,
+  "clicksHeld": 0,
+  "loudnessDb": -28.1,
+  "clicksPhrase": 0
+ },
+ "marimba": {
+  "zones": 13,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 69,
+  "sustainDb": -56.4,
+  "ringAt2_4sDb": -56.4,
+  "releaseDb": -0.0,
+  "clicksHeld": 0,
+  "loudnessDb": -32.7,
+  "clicksPhrase": 0
+ },
+ "vibraphone": {
+  "zones": 10,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 71,
+  "sustainDb": -46.6,
+  "ringAt2_4sDb": -34.5,
+  "releaseDb": -12.7,
+  "clicksHeld": 0,
+  "loudnessDb": -35.6,
+  "clicksPhrase": 2
+ },
+ "glockenspiel": {
+  "zones": 5,
+  "emptyZones": 0,
+  "pitchOff": [
+   79,
+   95
+  ],
+  "heldNote": 87,
+  "sustainDb": -46.6,
+  "ringAt2_4sDb": -46.6,
+  "releaseDb": -0.0,
+  "clicksHeld": 0,
+  "loudnessDb": -38.3,
+  "clicksPhrase": 0
+ },
+ "violin": {
+  "zones": 14,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 74,
+  "sustainDb": 2.3,
+  "ringAt2_4sDb": 2.4,
+  "releaseDb": -72.1,
+  "clicksHeld": 0,
+  "loudnessDb": -31.7,
+  "clicksPhrase": 0
+ },
+ "cello": {
+  "zones": 13,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 54,
+  "sustainDb": -1.0,
+  "ringAt2_4sDb": -0.2,
+  "releaseDb": -66.9,
+  "clicksHeld": 0,
+  "loudnessDb": -31.0,
+  "clicksPhrase": 0
+ },
+ "flute": {
+  "zones": 13,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 78,
+  "sustainDb": -0.1,
+  "ringAt2_4sDb": -0.4,
+  "releaseDb": -73.9,
+  "clicksHeld": 0,
+  "loudnessDb": -29.1,
+  "clicksPhrase": 0
+ },
+ "clarinet": {
+  "zones": 14,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 69,
+  "sustainDb": -0.5,
+  "ringAt2_4sDb": -0.6,
+  "releaseDb": -75.2,
+  "clicksHeld": 0,
+  "loudnessDb": -28.0,
+  "clicksPhrase": 0
+ },
+ "harmonica": {
+  "zones": 12,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 76,
+  "sustainDb": -0.1,
+  "ringAt2_4sDb": -0.1,
+  "releaseDb": -68.6,
+  "clicksHeld": 0,
+  "loudnessDb": -27.5,
+  "clicksPhrase": 0
+ },
+ "tenor_sax": {
+  "zones": 13,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 62,
+  "sustainDb": 0.3,
+  "ringAt2_4sDb": 0.7,
+  "releaseDb": -73.1,
+  "clicksHeld": 0,
+  "loudnessDb": -28.5,
+  "clicksPhrase": 0
+ },
+ "french_horn": {
+  "zones": 13,
+  "emptyZones": 0,
+  "pitchOff": [
+   41,
+   44
+  ],
+  "heldNote": 59,
+  "sustainDb": -0.1,
+  "ringAt2_4sDb": -0.2,
+  "releaseDb": -74.0,
+  "clicksHeld": 0,
+  "loudnessDb": -26.6,
+  "clicksPhrase": 0
+ },
+ "trumpet": {
+  "zones": 10,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 68,
+  "sustainDb": -0.4,
+  "ringAt2_4sDb": -0.5,
+  "releaseDb": -69.8,
+  "clicksHeld": 0,
+  "loudnessDb": -26.7,
+  "clicksPhrase": 0
+ },
+ "trombone": {
+  "zones": 9,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "heldNote": 52,
+  "sustainDb": 0.7,
+  "ringAt2_4sDb": 0.5,
+  "releaseDb": -70.6,
+  "clicksHeld": 0,
+  "loudnessDb": -30.5,
+  "clicksPhrase": 0
+ },
+ "drums": {
+  "zones": 20,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "loudnessDb": -32.8,
+  "clicksPhrase": 0
+ },
+ "percussion": {
+  "zones": 9,
+  "emptyZones": 0,
+  "pitchOff": [],
+  "loudnessDb": -35.2,
+  "clicksPhrase": 0
+ }
+}

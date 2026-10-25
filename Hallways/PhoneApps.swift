@@ -4,6 +4,11 @@ import Combine
 
 // Oct 8 -- THE PHONE'S FIRST APPS: Building GPS, HallChat, Mail, Directory.
 //
+// Oct 21: the phone is retired from the screen. Mail and HallChat are shown in
+// the Building Life tray's Messages (BuildingLifeTray.swift); Building GPS, the
+// staff Directory, Contacts and the Home screen are not reachable for now --
+// their code and data are kept so any of them can be given a place again.
+//
 // The phone and the office computer are two physical interfaces to ONE
 // Hallways information environment. Nothing here is a phone-only universe:
 //   - Mail on the phone IS the office computer's mailbox (MailStore.shared):
@@ -33,12 +38,12 @@ import Combine
 // MARK: - Taps on phone content
 
 extension View {
-    /// A tap on the phone's content: acted on only when the phone is held
-    /// high enough to read, and never when the touch was a drag that moved it.
+    /// A tap on an app's content. (Oct 21: the phone is retired -- these apps now
+    /// sit in the Building Life tray, where only the tray's handle resizes it, so
+    /// a tap is simply a tap. It used to wait until the phone was held up high
+    /// enough to read, and ignore the end of a drag that moved the phone.)
     func phoneTap(_ action: @escaping () -> Void) -> some View {
-        contentShape(Rectangle()).onTapGesture {
-            if HallPhone.shared.acceptsContentTap { action() }
-        }
+        contentShape(Rectangle()).onTapGesture { action() }
     }
 }
 
@@ -58,6 +63,12 @@ final class PhoneApps: ObservableObject {
     @Published var chatThread: String?
     @Published var mailMessage: String?
     @Published var directoryEntry: String?
+    /// Oct 18: Contacts' open entry (nil = the list).
+    @Published var contactEntry: String?
+    // Oct 19: Building Life -- open flat (full-screen) or not; its tab; the floor looked at closely.
+    @Published var buildingLifeOpen = false
+    @Published var buildingLifeTab = 0
+    @Published var buildingLifeFloor: Int?
 
     private var planImages: [String: UIImage] = [:]
     private var liveKey: String?
@@ -84,6 +95,23 @@ final class PhoneApps: ObservableObject {
         history.record(.mailMessageRead, subject: id, floor: floor, detail: ["device": "phone"])
     }
 
+    /// Oct 17: the side (in cells) of the square grid every Building GPS map is
+    /// drawn on -- the building's 15, or more if any floor reaches past
+    /// column/row 14 (Floor 5 does). One size for every floor: one scale.
+    private var gpsGridKey: Int?
+    private var gpsGridValue = 15
+    func gpsGridSize(_ store: MazeStore) -> Int {
+        if gpsGridKey == store.version { return gpsGridValue }
+        var extent = 15
+        for id in store.buildingFloorIDs {
+            guard let plan = store.floorPlan(id: id) else { continue }
+            for c in plan.cells { extent = max(extent, c.row + 1, c.col + 1) }
+        }
+        gpsGridKey = store.version
+        gpsGridValue = extent
+        return extent
+    }
+
     func resetGPSView() {
         gpsZoom = 1; gpsZoomBase = 1
         gpsPan = .zero; gpsPanBase = .zero
@@ -91,10 +119,10 @@ final class PhoneApps: ObservableObject {
 
     /// The live floor the player is on (the old mini-map's full map), redrawn
     /// only when the player's cell or facing changes.
-    func liveFloorImage(_ c: TapNavigationController) -> UIImage {
-        let key = "\(ObjectIdentifier(c).hashValue)|\(c.currentCell.row),\(c.currentCell.col)|\(c.facing)"
+    func liveFloorImage(_ c: TapNavigationController, gridSize: Int = 15) -> UIImage {
+        let key = "\(ObjectIdentifier(c).hashValue)|\(c.currentCell.row),\(c.currentCell.col)|\(c.facing)|\(gridSize)"
         if key == liveKey, let image = liveImage { return image }
-        let image = c.currentFloorMapImage(includeWallObjectIndicators: true)
+        let image = c.currentFloorMapImage(includeWallObjectIndicators: true, gridSize: gridSize)
         liveKey = key
         liveImage = image
         return image
@@ -102,14 +130,15 @@ final class PhoneApps: ObservableObject {
 
     /// Another floor, from its stored plan. No one is drawn on it: the
     /// player's position is only known on the floor they are on.
-    func planImage(_ plan: BuildingFloorPlan, version: Int) -> UIImage {
-        let key = "\(plan.id)|\(version)"
+    func planImage(_ plan: BuildingFloorPlan, version: Int, gridSize: Int = 15) -> UIImage {
+        let key = "\(plan.id)|\(version)|\(gridSize)"
         if let image = planImages[key] { return image }
         let image = HallwayScene.makeFloorMapTexture(
             cells: plan.cells, end: plan.elevator,
             playerAt: GridCoordinate(row: -100, col: -100),          // off the map: nobody is here
             roomDoors: plan.roomDoors, bathroomDoors: plan.bathroomDoors,
-            wallObjectFaces: plan.wallObjectFaces, doorFaces: plan.doorFaces, exitSignFaces: plan.exitSignFaces)
+            wallObjectFaces: plan.wallObjectFaces, doorFaces: plan.doorFaces, exitSignFaces: plan.exitSignFaces,
+            gridSize: gridSize)
         planImages[key] = image
         return image
     }
@@ -120,6 +149,10 @@ final class PhoneApps: ObservableObject {
         chatThread = nil
         mailMessage = nil
         directoryEntry = nil
+        contactEntry = nil
+        buildingLifeOpen = false
+        buildingLifeTab = 0
+        buildingLifeFloor = nil
         planImages = [:]
         liveKey = nil
         liveImage = nil
@@ -361,9 +394,12 @@ enum PhoneStyle {
     static let chat = Color(red: 0.93, green: 0.58, blue: 0.2)
     static let mail = Color(red: 0.2, green: 0.5, blue: 0.9)
     static let directory = Color(red: 0.62, green: 0.38, blue: 0.78)
-    /// The phone's bottom tenth is in the player's hand (past the screen
-    /// edge): content keeps clear of it.
-    static let handClearance: CGFloat = 96
+    static let contacts = Color(red: 0.86, green: 0.42, blue: 0.36)
+    static let buildingLife = Color(red: 0.23, green: 0.52, blue: 0.36)
+    /// Space kept under an app's content. (Oct 21: was 96 -- the phone's bottom
+    /// tenth sat in the player's hand, past the screen edge. In the tray the
+    /// bottom is the tray's own, above the home indicator.)
+    static let handClearance: CGFloat = 16
 }
 
 /// The bar across the top of every app: back on the left, title centred.
@@ -428,6 +464,8 @@ struct PhoneHomeScreen: View {
                 appIcon(.hallChat, "HallChat", art: .chat, unread: chat.unreadCount)
                 appIcon(.mail, "Mail", art: .mail, unread: mail.unreadCount)
                 appIcon(.directory, "Directory", art: .directory, unread: 0)
+                appIcon(.contacts, "Contacts", art: .contacts, unread: 0)
+                appIcon(.buildingLife, "Building Life", art: .buildingLife, unread: 0)
             }
             .padding(.top, 6)
             Spacer(minLength: 0)
@@ -517,7 +555,7 @@ struct PhoneNotificationBanners: View {
 /// Hallways' own app icon artwork: a rounded tile with its own gradient
 /// and a small composed picture -- not anyone else's icons.
 struct PhoneAppIcon: View {
-    enum Art { case gps, chat, mail, directory }
+    enum Art { case gps, chat, mail, directory, contacts, buildingLife }
     let art: Art
 
     var body: some View {
@@ -541,6 +579,8 @@ struct PhoneAppIcon: View {
         case .chat: return [Color(red: 0.99, green: 0.7, blue: 0.32), Color(red: 0.88, green: 0.46, blue: 0.14)]
         case .mail: return [Color(red: 0.36, green: 0.64, blue: 0.98), Color(red: 0.15, green: 0.4, blue: 0.82)]
         case .directory: return [Color(red: 0.74, green: 0.52, blue: 0.9), Color(red: 0.48, green: 0.28, blue: 0.68)]
+        case .contacts: return [Color(red: 0.98, green: 0.6, blue: 0.48), Color(red: 0.8, green: 0.32, blue: 0.3)]
+        case .buildingLife: return [Color(red: 0.38, green: 0.72, blue: 0.5), Color(red: 0.15, green: 0.42, blue: 0.3)]
         }
     }
 
@@ -592,6 +632,32 @@ struct PhoneAppIcon: View {
                 }
                 .foregroundStyle(colors[1].opacity(0.6))
                 .offset(x: s * 0.12)
+            }
+        case .buildingLife:
+            // A little building in section: floors, and a few residents on them.
+            ZStack {
+                RoundedRectangle(cornerRadius: s * 0.04).fill(Color.white.opacity(0.92)).frame(width: s * 0.46, height: s * 0.6)
+                VStack(spacing: s * 0.09) {
+                    ForEach(0..<4, id: \.self) { _ in Rectangle().fill(colors[1].opacity(0.35)).frame(width: s * 0.46, height: s * 0.025) }
+                }
+                Circle().fill(colors[1]).frame(width: s * 0.08).offset(x: -s * 0.1, y: -s * 0.15)
+                Circle().fill(Color(red: 0.95, green: 0.55, blue: 0.2)).frame(width: s * 0.08).offset(x: s * 0.08, y: s * 0.02)
+                Circle().fill(colors[1]).frame(width: s * 0.08).offset(x: -s * 0.03, y: s * 0.19)
+            }
+        case .contacts:
+            // A round face (no mouth: critters don't talk) with a little sound wave.
+            ZStack {
+                Circle().fill(Color.white).frame(width: s * 0.44, height: s * 0.44).offset(x: -s * 0.07)
+                HStack(spacing: s * 0.07) {
+                    Circle().frame(width: s * 0.07, height: s * 0.07)
+                    Circle().frame(width: s * 0.07, height: s * 0.07)
+                }
+                .foregroundStyle(colors[1])
+                .offset(x: -s * 0.07, y: -s * 0.03)
+                Image(systemName: "wave.3.right")
+                    .font(.system(size: s * 0.18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .offset(x: s * 0.24)
             }
         }
     }
@@ -676,12 +742,13 @@ struct BuildingGPSApp: View {
         Group {
             if viewing == current {
                 if let controller = navBridge.controller {
-                    LiveFloorMap(controller: controller, apps: apps)
+                    LiveFloorMap(controller: controller, apps: apps, gridSize: apps.gpsGridSize(mazeStore))
                 } else {
                     Text("Locating...").font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft)
                 }
             } else if let plan = mazeStore.floorPlan(id: viewing) {
-                Image(uiImage: apps.planImage(plan, version: mazeStore.version)).resizable().interpolation(.high)
+                Image(uiImage: apps.planImage(plan, version: mazeStore.version, gridSize: apps.gpsGridSize(mazeStore)))
+                    .resizable().interpolation(.high)
             } else {
                 Text("No plan for this floor").font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft)
             }
@@ -731,8 +798,9 @@ struct BuildingGPSApp: View {
 private struct LiveFloorMap: View {
     @ObservedObject var controller: TapNavigationController
     let apps: PhoneApps
+    var gridSize: Int = 15
     var body: some View {
-        Image(uiImage: apps.liveFloorImage(controller)).resizable().interpolation(.high)
+        Image(uiImage: apps.liveFloorImage(controller, gridSize: gridSize)).resizable().interpolation(.high)
     }
 }
 
@@ -749,7 +817,7 @@ struct HallChatApp: View {
                 PhoneTopBar(title: info.title, back: "HallChat", tint: PhoneStyle.chat) { apps.chatThread = nil }
                 thread(info)
             } else {
-                PhoneTopBar(title: "HallChat", back: "Home", tint: PhoneStyle.chat) { phone.open(.home) }
+                PhoneTopBar(title: "HallChat", back: "Back", tint: PhoneStyle.chat) { phone.open(.home) }   // (Oct 21: back to Building Life)
                 list
             }
             Spacer(minLength: 0)
@@ -842,7 +910,7 @@ struct PhoneMailApp: View {
                 PhoneTopBar(title: "Mail", back: "Inbox", tint: PhoneStyle.mail) { apps.mailMessage = nil }
                 detail(m)
             } else {
-                PhoneTopBar(title: "Mail", back: "Home", tint: PhoneStyle.mail) { phone.open(.home) }
+                PhoneTopBar(title: "Mail", back: "Back", tint: PhoneStyle.mail) { phone.open(.home) }   // (Oct 21: back to Building Life)
                 list
             }
             Spacer(minLength: 0)
@@ -880,7 +948,7 @@ struct PhoneMailApp: View {
                         }
                         Text(m.subject).font(.system(size: 14, weight: unread ? .semibold : .regular, design: .rounded))
                             .foregroundStyle(PhoneStyle.ink).lineLimit(1)
-                        Text(m.body.replacingOccurrences(of: "\n", with: " "))
+                        Text(MailCatalog.preview(m.body))
                             .font(.system(size: 13, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft).lineLimit(1)
                     }
                 }
@@ -900,7 +968,7 @@ struct PhoneMailApp: View {
                 Text(m.date.formatted(date: .abbreviated, time: .shortened)).font(.system(size: 12, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft)
             }
             Rectangle().fill(PhoneStyle.rule).frame(height: 1)
-            Text(m.body).font(.system(size: 15, design: .rounded)).foregroundStyle(PhoneStyle.ink)
+            Text(MailCatalog.display(m.body)).font(.system(size: 15, design: .rounded)).foregroundStyle(PhoneStyle.ink)
                 .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
@@ -986,5 +1054,108 @@ struct DirectoryApp: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
         .overlay(alignment: .bottom) { Rectangle().fill(PhoneStyle.rule).frame(height: 1).padding(.leading, 14) }
+    }
+}
+
+
+// MARK: - Contacts (Oct 18)
+
+/// The characters the player has met (ContactsStore), each with its portrait,
+/// a line about it, and its sound. Nothing else: no calling, no tracking.
+struct ContactsApp: View {
+    let phone: HallPhone                                  // not observed: moving the phone never redraws the app
+    @ObservedObject private var apps = PhoneApps.shared
+    @ObservedObject private var store = ContactsStore.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let id = apps.contactEntry, let c = CharacterRegistry.identity(id), store.hasMet(id) {
+                PhoneTopBar(title: c.name, back: "Contacts", tint: PhoneStyle.contacts) { apps.contactEntry = nil }
+                detail(c)
+            } else {
+                PhoneTopBar(title: "Contacts", back: "Home", tint: PhoneStyle.contacts) { phone.open(.home) }
+                if store.contacts.isEmpty {
+                    Text("No contacts yet.\nThe building's residents appear here as you meet them.")
+                        .font(.system(size: 14, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 40).padding(.horizontal, 24)
+                }
+                ForEach(store.contacts) { c in
+                    HStack(spacing: 12) {
+                        portrait(c, size: 46)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.name).font(.system(size: 16, weight: .semibold, design: .rounded)).foregroundStyle(PhoneStyle.ink)
+                            Text(c.blurb).font(.system(size: 12, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft).lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .bold)).foregroundStyle(PhoneStyle.rule)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .phoneTap { apps.contactEntry = c.id }
+                    Rectangle().fill(PhoneStyle.rule).frame(height: 1).padding(.leading, 72)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, PhoneStyle.handClearance)
+    }
+
+    private func portrait(_ c: CharacterIdentity, size: CGFloat) -> some View {
+        ZStack {
+            Circle().fill(LinearGradient(colors: [c.tint.opacity(0.25), c.tint.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+            if let image = store.portrait(c.id) {
+                Image(uiImage: image).resizable().scaledToFit().padding(size * 0.04)
+            } else {
+                Image(systemName: c.symbol).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+    }
+
+    private func detail(_ c: CharacterIdentity) -> some View {
+        VStack(spacing: 14) {
+            portrait(c, size: 128).padding(.top, 16)
+            Text(c.name).font(.system(size: 22, weight: .bold, design: .rounded)).foregroundStyle(PhoneStyle.ink)
+            Text(c.blurb).font(.system(size: 14, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft)
+                .multilineTextAlignment(.center).padding(.horizontal, 22)
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.wave.2.fill").font(.system(size: 15, weight: .bold))
+                Text("Hear").font(.system(size: 15, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 22).padding(.vertical, 10)
+            .background(PhoneStyle.contacts, in: Capsule())
+            .phoneTap { store.preview(c.id) }
+            if let when = store.met[c.id] {
+                Text("Met " + when.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 12, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft.opacity(0.8))
+            }
+        }
+    }
+}
+
+/// Oct 18: a soft pulse in the phone's status strip while a critter is heard
+/// nearby -- stronger the nearer (louder) it is; nothing when none is. It says
+/// that something is close, never where. Off with -HallwaysPhoneProximity NO.
+struct CritterProximityPulse: View {
+    let light: Bool
+    private var enabled: Bool { UserDefaults.standard.object(forKey: "HallwaysPhoneProximity") as? Bool ?? true }
+
+    var body: some View {
+        if enabled {
+            TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                let level = CGFloat(AudioWatch.nearness())
+                let beat = 0.5 + 0.5 * sin(context.date.timeIntervalSinceReferenceDate * (2 + Double(level) * 5))
+                ZStack {
+                    Circle().stroke(lineWidth: 1.5).frame(width: 8 + 8 * level * CGFloat(beat), height: 8 + 8 * level * CGFloat(beat))
+                        .opacity(Double(level) * 0.7)
+                    Circle().frame(width: 5, height: 5).opacity(level > 0.02 ? 0.35 + 0.65 * Double(level) : 0)
+                }
+                .foregroundStyle(light ? Color.white : Color(red: 0.86, green: 0.42, blue: 0.36))
+                .frame(width: 18, height: 18)
+            }
+        }
     }
 }

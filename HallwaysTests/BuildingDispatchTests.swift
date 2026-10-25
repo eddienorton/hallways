@@ -136,7 +136,8 @@ struct BuildingDispatchEvaluateTests {
 
     @Test func theInvitationIsAuthoredEventOnlyAndNeverAtFirstLogin() {
         let mail = MailCatalog.authored(invite)
-        #expect(mail?.sender == "Administration")
+        #expect(mail?.sender == "Juanita, Administration")      // Oct 11: Eddie's rewrite
+        #expect(mail?.body.contains("Floor 3, in the Conference Room") == true)
         if case .byEvent = mail?.delivery {} else { Issue.record("the invitation must be sent only by Dispatch") }
         let storage = ThrowawayStorage()
         let store = storage.mail()
@@ -154,9 +155,24 @@ struct BuildingDispatchEvaluateTests {
         #expect(phone.notifications.isEmpty)
     }
 
+    /// Oct 12: the invitation follows the player's first time at the office
+    /// computer by ~30 s (not admission itself).
+    @Test func theInvitationWaitsForTheComputerAndAShortPause() {
+        let storage = ThrowawayStorage()
+        let beats = StoryBeats(defaults: storage.defaults), phone = HallPhone()
+        #expect(BuildingDispatch.evaluate(context(storage, beats: beats, phone: phone, admitted: true, at: t0)).isEmpty)
+        _ = beats.record(BuildingDispatch.computerFirstUseBeat, at: t0)
+        let early = t0.addingTimeInterval(BuildingDispatch.invitationDelay - 1)
+        #expect(BuildingDispatch.evaluate(context(storage, beats: beats, phone: phone, admitted: true, at: early)).isEmpty)
+        let due = t0.addingTimeInterval(BuildingDispatch.invitationDelay)
+        #expect(BuildingDispatch.evaluate(context(storage, beats: beats, phone: phone, admitted: true, at: due)) == ["invite.staffMeeting"])
+        #expect(phone.notifications.count == 1)
+    }
+
     @Test func afterAdmissionTheInvitationArrivesOnceAndWaitsUnread() {
         let storage = ThrowawayStorage()
         let beats = StoryBeats(defaults: storage.defaults), phone = HallPhone()
+        _ = beats.record(BuildingDispatch.computerFirstUseBeat, at: t0.addingTimeInterval(-BuildingDispatch.invitationDelay))   // Oct 12
         let fired = BuildingDispatch.evaluate(context(storage, beats: beats, phone: phone, admitted: true, at: t0))
         #expect(fired == ["invite.staffMeeting"])
         let mail = storage.mail()
@@ -179,9 +195,10 @@ struct BuildingDispatchEvaluateTests {
     @Test func readingTheInvitationAcceptsNothing() {
         let storage = ThrowawayStorage()
         let beats = StoryBeats(defaults: storage.defaults)
+        _ = beats.record(BuildingDispatch.computerFirstUseBeat, at: t0.addingTimeInterval(-BuildingDispatch.invitationDelay))   // Oct 12
         BuildingDispatch.evaluate(context(storage, beats: beats, phone: HallPhone(), admitted: true, at: t0))
         storage.mail().markRead(invite)
-        #expect(Set(beats.beats.keys) == [BuildingDispatch.staffMeetingInvitedBeat])
+        #expect(Set(beats.beats.keys) == [BuildingDispatch.computerFirstUseBeat, BuildingDispatch.staffMeetingInvitedBeat])
     }
 
     @Test func evaluationUsesOnlyTheInjectedTime() {

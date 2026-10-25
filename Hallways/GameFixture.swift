@@ -707,6 +707,11 @@ enum SuppliesShowroom {
     // MARK: Build
 
     static func install(into root: SCNNode, cellSize: CGFloat, cells: Set<GridCoordinate>) {
+        // Oct 25 (PP 4): Floor 4 is Recording A -- the showroom is never built into the studios' layout.
+        guard !StudioRegistry.isStudioFloor(floor) else {
+            slots = [:]; sceneRoot = nil
+            diag("supplies.notInstalled", ["why": "studio floor (Recording A)"]); return
+        }
         guard roomCells.isSubset(of: cells), cells.contains(foyerCell) else {
             diag("supplies.layoutMismatch", ["cells": cells.count]); return
         }
@@ -3141,6 +3146,14 @@ enum FloorFiveBlackout {
 
     static func install(into root: SCNNode, cellSize: CGFloat, cells floorCells: Set<GridCoordinate>,
                         elevator: GridCoordinate = MazeStore.floor2ElevatorCoordinate) {
+        // Oct 25 (PP 4): Floor 5 is Recording B -- none of the old floor (panel, rooms, area isolation,
+        // emergency fill) is built into the studios' layout. Its lights are the layout's own, as authored.
+        guard !StudioRegistry.isStudioFloor(floor) else {
+            panel = nil; door = nil; closedHit = nil; emergency = nil
+            fixtures = [:]; equipment = [:]; levers = [:]; flags = [:]; locator = nil
+            diag("floor5.notInstalled", ["why": "studio floor (Recording B)"])
+            return
+        }
         let needed = circuits.reduce(Set<GridCoordinate>()) { $0.union($1.cells) }
         guard needed.isSubset(of: floorCells) else {
             diag("floor5.layoutMismatch", ["cells": floorCells.count, "missing": needed.subtracting(floorCells).count]); return

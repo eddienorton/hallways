@@ -57,11 +57,20 @@ enum RoomRegistry {
                          blocked: ConferenceRoom.tableBayCells),
             AuthoredRoom(floor: PlayerOffice.floor, name: "Office", cells: PlayerOffice.officeCells,
                          blocked: PlayerOffice.deskBayCells),
-            AuthoredRoom(floor: SuppliesShowroom.floor, name: "Supply Room", cells: SuppliesShowroom.roomCells),
         ]
+        // Oct 25 (PP 4): the six recording studios (StudioRegistry -- by id and cells, named from there).
+        for studio in StudioRegistry.all {
+            rooms.append(AuthoredRoom(floor: studio.floor, name: studio.name, cells: studio.cells))
+        }
+        // The retired floors' rooms -- only where those layouts still are (never on a studio floor).
+        if !StudioRegistry.isStudioFloor(SuppliesShowroom.floor) {
+            rooms.append(AuthoredRoom(floor: SuppliesShowroom.floor, name: "Supply Room", cells: SuppliesShowroom.roomCells))
+        }
         // Floor 5's rooms (its breaker circuits 5-8; 1-4 are its halls).
-        for c in FloorFiveBlackout.circuits where c.number >= 5 {
-            rooms.append(AuthoredRoom(floor: FloorFiveBlackout.floor, name: c.label.capitalized, cells: c.cells))
+        if !StudioRegistry.isStudioFloor(FloorFiveBlackout.floor) {
+            for c in FloorFiveBlackout.circuits where c.number >= 5 {
+                rooms.append(AuthoredRoom(floor: FloorFiveBlackout.floor, name: c.label.capitalized, cells: c.cells))
+            }
         }
         return rooms
     }

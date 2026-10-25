@@ -1286,7 +1286,24 @@ private enum MazeLibrary {
     /// never replaced by a device-local override.
     /// Oct 6: + the player's office floor (PlayerOffice.floor) -- the
     /// opening of the game is authored data too.
+    /// (Oct 25, PP 4: the studio floors are NOT bundle-owned -- Decorate may save them; an old
+    /// copy from before the studios is retired once instead: retireOverridesFromBeforeTheStudios.)
     static let bundleOwnedFloorIDs: Set<Int> = [Admission.administrationFloor, PlayerOffice.floor]
+
+    /// Oct 25 (PP 4): the studio floors were rebuilt (Recording A and B). A device copy of Floor 4
+    /// or 5 SAVEd before that is the OLD layout (the supply room, the breakers) and would otherwise
+    /// hide the studios forever. Once, on the first launch with the studios, those floors stop being
+    /// overridden (their ids leave the saved set; mazes.json itself isn't touched -- the old copy is
+    /// simply no longer read). A floor SAVEd after that is honoured as usual: Decorate keeps working.
+    private static let studioLayoutKey = "maze.studioLayout.v1"
+    static func retireOverridesFromBeforeTheStudios(_ defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: studioLayoutKey) else { return }
+        defaults.set(true, forKey: studioLayoutKey)
+        let stale = savedOverrideIDs().intersection(StudioRegistry.floors)
+        guard !stale.isEmpty else { return }
+        for id in stale { clearSaved(id) }
+        diag("maps.studioOverridesRetired", ["floors": stale.sorted().map(String.init).joined(separator: ",")])
+    }
     private static func overrideIDsIgnoringBundleOwned() -> Set<Int> {
         savedOverrideIDs().intersection(bundleOwnedFloorIDs)
     }
@@ -1302,6 +1319,8 @@ private enum MazeLibrary {
     static func loadAll() -> [Int: MazeRecord] {
         guard let url = Bundle.main.url(forResource: "DefaultMazes", withExtension: "json"),
               let bundled = readMaps(at: url) else { return [:] }
+        retireOverridesFromBeforeTheStudios()                       // Oct 25 (PP 4): once
+
         print("[Maps] Loaded \(bundled.count) bundled floors")
         var merged = bundled
         // Oct 5 (Administration): floors the game authors itself are always

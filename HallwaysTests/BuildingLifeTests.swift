@@ -375,20 +375,22 @@ struct BuildingLifeTests {
         #expect(south.arrivals == [GridCoordinate(row: 12, col: 8)])                                          // (not the doorway, not the furniture)
     }
 
-    /// A room the game's own code defines with no door of its own -- Floor 4's
-    /// Supply Room, straight off its foyer -- is a destination by its own definition.
+    /// A room the game's own code defines -- registered by its own definition even with no door of
+    /// its own on a plan. (Oct 25, PP 4: was Floor 4's Supply Room, retired; now a studio's cells on a
+    /// bare plan with no doors at all.)
     @Test func anAuthoredRoomIsADestinationWithoutADoor() throws {
-        var cells = SuppliesShowroom.roomCells
-        cells.insert(GridCoordinate(row: 10, col: 6))
-        cells.insert(SuppliesShowroom.foyerCell)
-        let floor4 = FloorPlan(floor: SuppliesShowroom.floor, cells: cells, doors: [:], bathroomDoors: [:],
-                               elevator: GridCoordinate(row: 10, col: 6), furnished: [], cellSize: 3.52)
+        let studio = try #require(StudioRegistry.studio(id: "studio.a"))
+        var cells = studio.cells
+        cells.insert(studio.vestibule)
+        cells.insert(GridCoordinate(row: 10, col: 9))
+        let floor4 = FloorPlan(floor: studio.floor, cells: cells, doors: [:], bathroomDoors: [:],
+                               elevator: GridCoordinate(row: 10, col: 9), furnished: [], cellSize: 3.52)
         let rooms = floor4.rooms
-        #expect(rooms.map(\.name) == ["Supply Room"])
-        #expect(Set(try #require(rooms.first).arrivals) == SuppliesShowroom.roomCells)
+        #expect(rooms.map(\.name) == ["Studio A"])
+        #expect(Set(try #require(rooms.first).arrivals) == studio.cells)
         // ...and not on a floor whose map doesn't have its cells any more.
-        let edited = FloorPlan(floor: SuppliesShowroom.floor, cells: [GridCoordinate(row: 10, col: 6), SuppliesShowroom.foyerCell],
-                               doors: [:], bathroomDoors: [:], elevator: GridCoordinate(row: 10, col: 6), furnished: [], cellSize: 3.52)
+        let edited = FloorPlan(floor: studio.floor, cells: [GridCoordinate(row: 10, col: 9), studio.vestibule],
+                               doors: [:], bathroomDoors: [:], elevator: GridCoordinate(row: 10, col: 9), furnished: [], cellSize: 3.52)
         #expect(edited.rooms.isEmpty)
     }
 

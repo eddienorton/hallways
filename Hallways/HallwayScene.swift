@@ -4209,7 +4209,7 @@ enum HallwayScene {
         // wall of the open cell at (row: 8, col: 5). It is deliberately a
         // static scene prop for now; no persistence, pickup, fire, or mission
         // behavior is attached.
-        if floorNumber == 4 {
+        if floorNumber == 4, !StudioRegistry.isStudioFloor(4) {   // (Oct 25, PP 4: never into Recording A's studios)
             root.addChildNode(makeFireExtinguisherNode(
                 at: GridCoordinate(row: 8, col: 5),
                 direction: .north,

@@ -53,7 +53,9 @@ struct CellSurfaceOverrideTests {
         // The bundled DefaultMazes.json predates cellSurfaces entirely.
         let url = try #require(Bundle.main.url(forResource: "DefaultMazes", withExtension: "json"))
         let floors = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
-        #expect(floors.allSatisfy { $0["cellSurfaces"] == nil })
+        // (Oct 25: Floor 5 had its own cellSurfaces before PP 4, and both studio floors have them now --
+        // the floors without any are what this checks still load.)
+        #expect(floors.contains { $0["cellSurfaces"] == nil })
         try withIsolatedPersistence { _ in
             let store = MazeStore()
             store.switchTo(id: 3)

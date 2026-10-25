@@ -57,8 +57,9 @@ struct MissionRetirementTests {
         }
     }
 
-    // 1, 2, 3 -- built (and built again, as leaving and coming back does) with every circuit saved
-    // off: the hall's fixture at full strength, no emergency fill.
+    // 1, 2, 3 -- Oct 25 (PP 4): Floor 5 is Recording B now -- the blackout's install builds nothing there
+    // at all (no panel, no area isolation, no emergency fill), however often the floor is built, with
+    // every circuit saved off: the floor's own lights stay exactly as authored.
     @Test func floorFiveIsBuiltLitEveryTime() {
         withSavedCircuits(0) {
             for visit in 1...2 {
@@ -67,7 +68,8 @@ struct MissionRetirementTests {
                 let bulb = f.root.childNodes.first?.childNodes.first
                 #expect(f.lamp.intensity == 300, "visit \(visit)")
                 #expect(bulb?.isHidden == false, "visit \(visit)")
-                #expect(FloorFiveBlackout.emergencyIntensity == 0, "visit \(visit)")
+                #expect(f.root.childNode(withName: "floorFive", recursively: false) == nil, "visit \(visit)")
+                #expect(FloorFiveBlackout.emergencyIntensity == nil, "visit \(visit)")
             }
             #expect(FloorFiveBlackout.savedMask == 0)                       // (still never written)
         }
@@ -103,14 +105,12 @@ struct MissionRetirementTests {
         #expect(reg.available().count == TaskRegistry.placeholderCount)    // the placeholders FOLLOW leads to remain
     }
 
-    // 10 -- the supply room is retired as a mission but still a residents' room.
-    @Test func theSupplyRoomIsRetiredButStillARoom() throws {
+    // 10 -- Oct 25 (PP 4): the supply room is retired, and Floor 4 is Recording A -- the Supply Room is
+    // no longer one of its rooms; its three studios are (StudioTests has the rest).
+    @Test func theSupplyRoomIsRetiredAndFloorFourHasTheStudios() throws {
         #expect(SuppliesShowroom.retired)
-        var cells = SuppliesShowroom.roomCells
-        cells.insert(GridCoordinate(row: 10, col: 6))
-        cells.insert(SuppliesShowroom.foyerCell)
-        let floor4 = FloorPlan(floor: SuppliesShowroom.floor, cells: cells, doors: [:], bathroomDoors: [:],
-                               elevator: GridCoordinate(row: 10, col: 6), furnished: [], cellSize: 3.52)
-        #expect(floor4.rooms.map(\.name) == ["Supply Room"])
+        #expect(StudioRegistry.isStudioFloor(SuppliesShowroom.floor))
+        #expect(!RoomRegistry.authored.contains { $0.name == "Supply Room" })
+        #expect(RoomRegistry.authored.filter { $0.floor == SuppliesShowroom.floor }.map(\.name) == ["Studio A", "Studio B", "Studio C"])
     }
 }

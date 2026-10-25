@@ -546,18 +546,33 @@ struct BuildingLifeFloorView: View {
 
 struct BuildingLifeDirectory: View {
     @ObservedObject var model: BuildingLifeModel
+    /// Oct 25 (PP 5 recovery): which Music Lab -- TRACKS (the default: the Hallways Originals' own audio stems,
+    /// StemLab -- choose a piece, play it whole, switch its tracks on and off) or ARRANGER (MusicLab: the
+    /// SoundFont band arranging a composition by layers).
+    @State private var arranger = false
 
     var body: some View {
         // Oct 24 (Music Lab): the band's selector and controls, fixed above the list (the list
         // below re-sorts by nearness; the lab never moves). Level 2: the musicians' tiles head
         // the scrolling list (eight of them scroll rather than crowd). Leaving the Directory stops it.
         VStack(spacing: 0) {
-        MusicLabControls()
-            .padding(.bottom, 10)
+        labPicker
+        if arranger {
+            MusicLabControls()
+                .padding(.bottom, 10)
+        } else {
+            StemLabControls()
+                .padding(.bottom, 10)
+        }
         ScrollView {
             LazyVStack(spacing: 0) {
-                MusicLabMusicians()
-                    .padding(.bottom, 14)
+                if arranger {
+                    MusicLabMusicians()
+                        .padding(.bottom, 14)
+                } else {
+                    StemLabMusicians()
+                        .padding(.bottom, 14)
+                }
                 Text("Everyone in the building, nearest first. The meter is how near they are through the building -- warmer is nearer. Listen for them too.")
                     .font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(PhoneStyle.inkSoft)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.bottom, 8)
@@ -593,8 +608,29 @@ struct BuildingLifeDirectory: View {
             .padding(.bottom, 30)
         }
         }
-        .onAppear { MusicLab.shared.directoryOpened() }              // Oct 24: the lab has the audio focus
-        .onDisappear { MusicLab.shared.directoryClosed() }
+        .onAppear {                                                  // Oct 24: the lab has the audio focus
+            MusicLab.shared.directoryOpened()
+            StemLab.shared.directoryOpened()
+        }
+        .onDisappear {
+            StemLab.shared.directoryClosed()
+            MusicLab.shared.directoryClosed()
+        }
+    }
+
+    /// TRACKS / ARRANGER: switching stops whatever is playing (one lab at a time).
+    private var labPicker: some View {
+        Picker("Music Lab", selection: Binding(get: { arranger }, set: { on in
+            StemLab.shared.stop()
+            MusicLab.shared.stop()
+            arranger = on
+        })) {
+            Text("TRACKS").tag(false)
+            Text("ARRANGER").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
     }
 }
 

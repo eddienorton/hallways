@@ -84,6 +84,7 @@ final class ResidentMusicConductor {
             || OfficeComputer.shared.isActive || BonzoEviction.isActive || BoxReveal.isRunning || Admission.isPending
             || HallwaysAudio.shared.isMuted || HallwaysAudio.shared.isSuppressed
             || MusicLab.isActive                                  // Oct 24: the Music Lab is playing -- no other music
+            || StemLab.isActive                                   // Oct 25: the tracks lab too
     }
 
     /// May a resident's own (unscheduled) musical hello play now? (A Hallwaysian

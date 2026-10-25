@@ -539,6 +539,10 @@ nonisolated final class BandEngine: @unchecked Sendable {
             guard let arranger else { return }
             timer?.cancel(); timer = nil                                    // (a start while running: one clock only)
             buildGraph()
+            // Oct 25 (stuck-note fix): a (re)start drops every pending event -- the note-offs of notes already
+            // sounding included -- so those notes are released here first; a musician left out is silenced
+            // as well as switched off (it was only switched off, and its sounding notes never ended).
+            for u in units.values where !u.sounding.isEmpty { silence(u) }
             let ids = Set(lineup.map(\.who))
             for u in units.values where !ids.contains(u.who) { u.on = false }
             for m in lineup { unit(for: m.who, instrument: m.instrument).on = true }
@@ -870,9 +874,20 @@ nonisolated final class BandEngine: @unchecked Sendable {
     /// Release every sounding note (the instrument's own release); fade a singer out.
     private func silence(_ u: Unit) {
         if let s = u.sampler {
-            for p in u.sounding.keys { s.stopNote(p, onChannel: 0) }
+            let held = Array(u.sounding.keys)
+            for p in held { s.stopNote(p, onChannel: 0) }
             u.sounding = [:]
             s.sendController(64, withValue: 0, onChannel: 0)
+            // Oct 25 (stuck-note fix): a note-on is handed to the sampler up to `dispatchAhead` early, stamped
+            // to sound a moment later; an immediate stop comes BEFORE it, and that note then never ends (its
+            // note-off was dropped with the pending events). The same notes are stopped again once that
+            // moment has certainly passed.
+            if !held.isEmpty {
+                queue.asyncAfter(deadline: .now() + Self.dispatchAhead + 0.05) {
+                    guard s.engine != nil else { return }                                    // (let go meanwhile)
+                    for p in held where u.sounding[p] == nil { s.stopNote(p, onChannel: 0) }   // (not one played again since)
+                }
+            }
         }
         u.lastSung = nil
         u.lastPart = nil

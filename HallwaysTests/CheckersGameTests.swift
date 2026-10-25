@@ -96,17 +96,24 @@ struct CheckersGameTests {
     // board at the moment of capture.
     @Test func aCaptureRemovesTheJumpedPieceAndLandsBeyondIt() {
         var game = CheckersGame()
-        #expect(game.playerMove(CheckersMove(from: c(5, 2), to: c(4, 3), captured: nil)))
-        #expect(game.computerMove(CheckersMove(from: c(0, 5), to: c(1, 4), captured: nil)))
-        #expect(game.playerMove(CheckersMove(from: c(4, 1), to: c(5, 2), captured: nil)))
-        #expect(game.computerMove(CheckersMove(from: c(1, 6), to: c(0, 5), captured: nil)))
-        #expect(game.playerMove(CheckersMove(from: c(3, 0), to: c(4, 1), captured: nil)))
-        #expect(game.computerMove(CheckersMove(from: c(6, 5), to: c(5, 4), captured: nil)))
+        let playerMove99 = game.playerMove(CheckersMove(from: c(5, 2), to: c(4, 3), captured: nil))
+        #expect(playerMove99)
+        let computerMove100 = game.computerMove(CheckersMove(from: c(0, 5), to: c(1, 4), captured: nil))
+        #expect(computerMove100)
+        let playerMove101 = game.playerMove(CheckersMove(from: c(4, 1), to: c(5, 2), captured: nil))
+        #expect(playerMove101)
+        let computerMove102 = game.computerMove(CheckersMove(from: c(1, 6), to: c(0, 5), captured: nil))
+        #expect(computerMove102)
+        let playerMove103 = game.playerMove(CheckersMove(from: c(3, 0), to: c(4, 1), captured: nil))
+        #expect(playerMove103)
+        let computerMove104 = game.computerMove(CheckersMove(from: c(6, 5), to: c(5, 4), captured: nil))
+        #expect(computerMove104)
 
         // Move 6: player jumps (4,3) over (5,4) landing at (6,5).
         let capture = CheckersMove(from: c(4, 3), to: c(6, 5), captured: c(5, 4))
         #expect(game.legalMovesForCurrentTurn.contains(capture))
-        #expect(game.playerMove(capture))
+        let playerMove109 = game.playerMove(capture)
+        #expect(playerMove109)
         #expect(game.board.piece(at: c(5, 4)) == nil, "the jumped computer piece must be removed")
         #expect(game.board.piece(at: c(6, 5)) == CheckersPiece(side: .player))
         #expect(game.board.piece(at: c(4, 3)) == nil)
@@ -115,7 +122,8 @@ struct CheckersGameTests {
         // the piece that just landed at (6,5), removing it in turn.
         let recapture = CheckersMove(from: c(7, 6), to: c(5, 4), captured: c(6, 5))
         #expect(game.legalMovesForCurrentTurn.contains(recapture))
-        #expect(game.computerMove(recapture))
+        let computerMove118 = game.computerMove(recapture)
+        #expect(computerMove118)
         #expect(game.board.piece(at: c(6, 5)) == nil, "the recaptured player piece must be removed")
         #expect(game.board.piece(at: c(5, 4)) == CheckersPiece(side: .computer))
         #expect(game.phase == .playerTurn)
@@ -129,17 +137,23 @@ struct CheckersGameTests {
     // the capture, per Eddie's "use standard mandatory captures."
     @Test func aCaptureIsMandatoryEvenWhenOtherOrdinaryMovesExist() {
         var game = CheckersGame()
-        #expect(game.playerMove(CheckersMove(from: c(5, 2), to: c(4, 3), captured: nil)))
-        #expect(game.computerMove(CheckersMove(from: c(0, 5), to: c(1, 4), captured: nil)))
-        #expect(game.playerMove(CheckersMove(from: c(4, 1), to: c(5, 2), captured: nil)))
-        #expect(game.computerMove(CheckersMove(from: c(1, 6), to: c(0, 5), captured: nil)))
-        #expect(game.playerMove(CheckersMove(from: c(3, 0), to: c(4, 1), captured: nil)))
-        #expect(game.computerMove(CheckersMove(from: c(6, 5), to: c(5, 4), captured: nil)))
+        let playerMove132 = game.playerMove(CheckersMove(from: c(5, 2), to: c(4, 3), captured: nil))
+        #expect(playerMove132)
+        let computerMove133 = game.computerMove(CheckersMove(from: c(0, 5), to: c(1, 4), captured: nil))
+        #expect(computerMove133)
+        let playerMove134 = game.playerMove(CheckersMove(from: c(4, 1), to: c(5, 2), captured: nil))
+        #expect(playerMove134)
+        let computerMove135 = game.computerMove(CheckersMove(from: c(1, 6), to: c(0, 5), captured: nil))
+        #expect(computerMove135)
+        let playerMove136 = game.playerMove(CheckersMove(from: c(3, 0), to: c(4, 1), captured: nil))
+        #expect(playerMove136)
+        let computerMove137 = game.computerMove(CheckersMove(from: c(6, 5), to: c(5, 4), captured: nil))
+        #expect(computerMove137)
 
         #expect(game.phase == .playerTurn)
         let legal = game.legalMovesForCurrentTurn
         #expect(legal.count == 1)
-        #expect(legal.allSatisfy(\.isCapture))
+        #expect(legal.allSatisfy { $0.isCapture })
         #expect(legal.first == CheckersMove(from: c(4, 3), to: c(6, 5), captured: c(5, 4)))
 
         // Confirm this wasn't simply the ONLY legal-looking move --
@@ -147,7 +161,8 @@ struct CheckersGameTests {
         // are excluded purely by the mandatory-capture rule.
         let ordinaryElsewhere = CheckersMove(from: c(7, 2), to: c(6, 3), captured: nil)
         #expect(!legal.contains(ordinaryElsewhere))
-        #expect(!game.playerMove(ordinaryElsewhere))
+        let playerMove150 = game.playerMove(ordinaryElsewhere)
+        #expect(!playerMove150)
     }
 
     // Eddie's required test: "multiple jumps" (and, along the way,
@@ -180,7 +195,8 @@ struct CheckersGameTests {
         // First leg: computer jumps (3,4) over (2,3) landing at (1,2).
         let firstLeg = CheckersMove(from: c(3, 4), to: c(1, 2), captured: c(2, 3))
         #expect(game.legalMovesForCurrentTurn.contains(firstLeg))
-        #expect(game.computerMove(firstLeg))
+        let computerMove183 = game.computerMove(firstLeg)
+        #expect(computerMove183)
         // The turn does not pass -- another capture is available from
         // the square just landed on, so the SAME side must continue.
         #expect(game.phase == .computerTurn)
@@ -191,7 +207,8 @@ struct CheckersGameTests {
         // computer's far row, so this also promotes the piece to king.
         let secondLeg = CheckersMove(from: c(1, 2), to: c(3, 0), captured: c(2, 1))
         #expect(game.legalMovesForCurrentTurn.contains(secondLeg))
-        #expect(game.computerMove(secondLeg))
+        let computerMove194 = game.computerMove(secondLeg)
+        #expect(computerMove194)
         #expect(game.board.piece(at: c(2, 1)) == nil, "both jumped pieces must be removed")
         #expect(game.board.piece(at: c(2, 3)) == nil)
 
@@ -303,8 +320,10 @@ struct CheckersGameTests {
     // or dead end."
     @Test func resetReturnsToAFreshStandardBoardAndPlayerTurn() {
         var game = CheckersGame()
-        #expect(game.playerMove(CheckersMove(from: c(1, 2), to: c(0, 3), captured: nil)))
-        #expect(game.computerMove(game.legalMovesForCurrentTurn.first!))
+        let playerMove306 = game.playerMove(CheckersMove(from: c(1, 2), to: c(0, 3), captured: nil))
+        #expect(playerMove306)
+        let computerMove307 = game.computerMove(game.legalMovesForCurrentTurn.first!)
+        #expect(computerMove307)
         game.reset()
         #expect(game.phase == .playerTurn)
         #expect(game.mustContinueFrom == nil)

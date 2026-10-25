@@ -46,12 +46,14 @@ struct MinefieldGameTests {
     @Test func flagsToggleAndProtectTheCell() {
         var rng = SeededRNG(seed: 2)
         var g = MinefieldGame(mines: [i(0, 0)])
-        #expect(g.toggleFlag(i(0, 0)))
+        let toggleFlag49 = g.toggleFlag(i(0, 0))
+        #expect(toggleFlag49)
         #expect(g.cells[i(0, 0)] == .flagged)
         #expect(g.minesLeft == MinefieldGame.mineCount - 1)
         #expect(g.reveal(i(0, 0), rng: &rng) == .nothing)  // flagged: a tap can't reveal it
         #expect(g.phase == .playing)
-        #expect(g.toggleFlag(i(0, 0)))
+        let toggleFlag54 = g.toggleFlag(i(0, 0))
+        #expect(toggleFlag54)
         #expect(g.cells[i(0, 0)] == .hidden)
     }
 
@@ -62,7 +64,8 @@ struct MinefieldGameTests {
         #expect(g.phase == .lost)
         #expect(g.exploded == i(2, 2))
         #expect(g.reveal(i(4, 8), rng: &rng) == .nothing)  // nothing more once lost
-        #expect(!g.toggleFlag(i(4, 8)))
+        let toggleFlag65 = g.toggleFlag(i(4, 8))
+        #expect(!toggleFlag65)
     }
 
     @Test func winWhenEverySafeCellIsOpenFlagsOrNot() {

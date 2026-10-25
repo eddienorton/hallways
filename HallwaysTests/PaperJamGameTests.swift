@@ -11,39 +11,49 @@ struct PaperJamGameTests {
 
     @Test func horizontalMovementAndWalls() {
         var g = PaperJamGame(rows: [], current: piece(.o, column: 0))
-        #expect(!g.move(by: -1))                                      // left wall
-        #expect(g.move(by: 1))
+        let leftWall = g.move(by: -1)
+        #expect(!leftWall)                                            // left wall
+        let movedRight = g.move(by: 1)
+        #expect(movedRight)
         #expect(g.current?.column == 1)
         g = PaperJamGame(rows: [], current: piece(.o, column: PaperJamGame.width - 2))
-        #expect(!g.move(by: 1))                                       // right wall
+        let rightWall = g.move(by: 1)
+        #expect(!rightWall)                                           // right wall
     }
 
     @Test func movementBlockedByTheStack() {
         // O piece resting on the floor at columns 2-3; a block at column 4 on the bottom row.
         var g = PaperJamGame(rows: ["....#..."], current: piece(.o, row: PaperJamGame.height - 2, column: 2))
-        #expect(!g.move(by: 1))
-        #expect(g.move(by: -1))
+        let intoStack = g.move(by: 1)
+        #expect(!intoStack)
+        let awayFromStack = g.move(by: -1)
+        #expect(awayFromStack)
     }
 
     @Test func rotationTurnsAndKicksOffWalls() {
         var g = PaperJamGame(rows: [], current: piece(.t, row: 3, column: 2))
-        #expect(g.rotate())
+        let turned = g.rotate()
+        #expect(turned)
         #expect(g.current?.rotation == 1)
         // A vertical I against the right wall: turning flat must nudge it back inside.
         var h = PaperJamGame(rows: [], current: piece(.i, row: 3, column: PaperJamGame.width - 3, rotation: 1))
         #expect(h.current.map { h.fits($0) } == true)
-        #expect(h.rotate())
+        let kicked = h.rotate()
+        #expect(kicked)
         #expect(h.current!.cells.allSatisfy { $0.column >= 0 && $0.column < PaperJamGame.width })
         // O never turns.
         var o = PaperJamGame(rows: [], current: piece(.o))
-        #expect(!o.rotate())
+        let oTurned = o.rotate()
+        #expect(!oTurned)
     }
 
     @Test func fallingLandingAndLocking() {
         var g = PaperJamGame(rows: [], current: piece(.o, row: PaperJamGame.height - 3))
-        #expect(g.stepDown())
+        let fell = g.stepDown()
+        #expect(fell)
         #expect(g.isGrounded)
-        #expect(!g.stepDown())
+        let fellAgain = g.stepDown()
+        #expect(!fellAgain)
         g.lock()
         #expect(g.current == nil)
         #expect(g.board[PaperJamGame.height - 1][2] == .o && g.board[PaperJamGame.height - 2][3] == .o)

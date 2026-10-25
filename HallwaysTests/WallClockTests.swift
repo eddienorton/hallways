@@ -106,11 +106,18 @@ struct WallClockTests {
         try body()
     }
 
+    /// The two default clocks, exactly as MazeStore.swift's MazeRecord.defaultClocks seeds them
+    /// (MazeRecord is private to MazeStore.swift, so a test can't read it; change both together).
+    private static let defaultClocks: [Int: WallFace] = [
+        1: WallFace(coord: GridCoordinate(row: 12, col: 7), direction: .west),
+        2: WallFace(coord: GridCoordinate(row: 10, col: 6), direction: .north)
+    ]
+
     @Test func clocksPersistAreExclusiveAndDefaultsStayDeleted() throws {
         try withIsolatedPersistence {
             let store = MazeStore()
             store.switchTo(id: 2)
-            let elevatorClock = try #require(MazeRecord.defaultClocks[2])
+            let elevatorClock = Self.defaultClocks[2]!
             #expect(store.clocks.contains(elevatorClock))                 // Floor 2 default
             // A second clock on another free wall; it takes that face.
             let face = try #require(store.cells.sorted { ($0.row, $0.col) < ($1.row, $1.col) }.lazy.flatMap { c in
@@ -128,7 +135,7 @@ struct WallClockTests {
             #expect(relaunched.clocks.contains(face))                     // survives a restart
             #expect(!relaunched.clocks.contains(elevatorClock))           // a deleted default stays deleted
             relaunched.switchTo(id: 1)
-            #expect(relaunched.clocks.contains(try #require(MazeRecord.defaultClocks[1])))  // lobby default
+            #expect(relaunched.clocks.contains(Self.defaultClocks[1]!))  // lobby default
         }
     }
 }

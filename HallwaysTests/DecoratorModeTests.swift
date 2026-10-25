@@ -164,14 +164,14 @@ struct DecoratorModeTests {
         let a = GridCoordinate(row: 0, col: 0)
         let b = GridCoordinate(row: 1, col: 0)
         let built = HallwayScene.build(fromMaze: [a, b], cellSize: 3.2, wallHeight: 3,
-            missionSigns: [:], pictures: [a: (direction: .east, size: .standard)],
+            missionSigns: [:], pictures: [WallFace(coord: a, direction: .east): .standard],
             floorNumber: 2, playerStart: a, playerEnd: b)
         var pictureFrame: SCNNode?
         built.scene.rootNode.enumerateChildNodes { node, _ in
             if let target = DecoratorTarget.read(node), target.kind == .picture { pictureFrame = node }
         }
         let frame = try #require(pictureFrame)
-        #expect(DecoratorTarget.read(frame) == DecoratorTarget(floor: 2, coord: a, kind: .picture))
+        #expect(DecoratorTarget.read(frame) == DecoratorTarget(floor: 2, coord: a, kind: .picture, direction: .east))
         let box = try #require(frame.geometry as? SCNBox)
         #expect(abs(box.width - 0.7) < 0.001)
         #expect(abs(box.height - 0.95) < 0.001)
@@ -190,7 +190,7 @@ struct DecoratorModeTests {
         let a = GridCoordinate(row: 0, col: 0)
         let b = GridCoordinate(row: 1, col: 0)
         let built = HallwayScene.build(fromMaze: [a, b], cellSize: 3.2, wallHeight: 3,
-            missionSigns: [:], pictures: [a: (direction: .east, size: .standard)],
+            missionSigns: [:], pictures: [WallFace(coord: a, direction: .east): .standard],
             floorNumber: 2, playerStart: a, playerEnd: b)
         var wallSurfaceTargets: [DecoratorTarget] = []
         built.scene.rootNode.enumerateChildNodes { node, _ in
@@ -219,7 +219,7 @@ struct DecoratorModeTests {
         let a = GridCoordinate(row: 0, col: 0)
         let b = GridCoordinate(row: 1, col: 0)
         let built = HallwayScene.build(fromMaze: [a, b], cellSize: 3.2, wallHeight: 3,
-            missionSigns: [:], pictures: [a: (direction: .east, size: .small)],
+            missionSigns: [:], pictures: [WallFace(coord: a, direction: .east): .small],
             floorNumber: 2, playerStart: a, playerEnd: b)
         let backfillTarget = PictureBackfillTarget(floor: 2, coord: a, direction: .east)
         var backfillNodes: [SCNNode] = []

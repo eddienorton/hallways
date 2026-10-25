@@ -360,17 +360,17 @@ struct HallwaysTests {
     // functional door it always was.
     @Test func roomDoorPlacementWithoutTheDecorativeFlagDecodesAsFunctional() throws {
         let data = Data(#"{"coord":{"row":3,"col":5},"direction":"north","roomNumber":301}"#.utf8)
-        let decoded = try #require(JSONDecoder().decode(RoomDoorPlacement.self, from: data))
+        let decoded = try JSONDecoder().decode(RoomDoorPlacement.self, from: data)          // a decode failure throws: the test fails
         #expect(decoded.roomNumber == 301)
         #expect(!decoded.isDecorative)
         // New-style JSON round-trips the flag both ways.
-        let encoded = try #require(JSONEncoder().encode(decoded))
+        let encoded = try JSONEncoder().encode(decoded)
         let encodedDict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         #expect(encodedDict["isDecorative"] as? Bool == false)
         let decorated = RoomDoorPlacement(coord: GridCoordinate(row: 4, col: 0), direction: .west,
                                           roomNumber: 201, isDecorative: true)
-        let reencoded = try #require(JSONEncoder().encode(decorated))
-        let roundTripped = try #require(JSONDecoder().decode(RoomDoorPlacement.self, from: reencoded))
+        let reencoded = try JSONEncoder().encode(decorated)
+        let roundTripped = try JSONDecoder().decode(RoomDoorPlacement.self, from: reencoded)
         #expect(roundTripped.isDecorative)
     }
 
@@ -637,8 +637,8 @@ struct HallwaysTests {
         let controller = TapNavigationController(cameraNode: camera, scene: scene,
             cells: cells, cellSize: 3.2, startCell: start, startFacing: .north, endCell: end,
             objects: [object: .heart],
-            pictures: [WallFace(coord: picture, direction: .east)],
-            floorMaps: [map: .north])
+            floorMaps: [map: .north],
+            pictures: [WallFace(coord: picture, direction: .east)])
         let renderer = SCNRenderer(device: nil, options: nil)
         var time = 1.0
 
@@ -651,7 +651,7 @@ struct HallwaysTests {
         await finishMove(controller, renderer: renderer, time: &time)
         #expect(controller.currentCell == end)
         #expect(!controller.isAnimating)
-        #expect(controller.collectedCoords.isEmpty)
+        #expect(controller.collectedObjects.isEmpty)                  // nothing picked up (collectedCoords is private)
 
         // Tap: first tap presents the object (back off, no movement), the
         // second lands ON its cell -- the object stop is intact.

@@ -30,19 +30,24 @@ struct SolitaireGameTests {
     @Test func stockDealsOneThenRecyclesWasteInOrder() {
         var game = SolitaireGame(stock: [c(.two, .clubs, up: false), c(.three, .hearts, up: false)],
                                  waste: [], tableau: empty7(), foundations: empty4())
-        #expect(game.tapStock())
+        let tapStock33 = game.tapStock()
+        #expect(tapStock33)
         #expect(game.waste.map(\.card.rank) == [.three])
         #expect(game.waste.last?.faceUp == true)
-        #expect(game.tapStock())
+        let tapStock36 = game.tapStock()
+        #expect(tapStock36)
         #expect(game.waste.map(\.card.rank) == [.three, .two])
         #expect(game.stock.isEmpty)
-        #expect(game.tapStock())                                   // recycle
+        let tapStock39 = game.tapStock()
+        #expect(tapStock39)                                   // recycle
         #expect(game.waste.isEmpty)
         #expect(game.stock.count == 2 && game.stock.allSatisfy { !$0.faceUp })
-        #expect(game.tapStock())                                   // same order again
+        let tapStock42 = game.tapStock()
+        #expect(tapStock42)                                   // same order again
         #expect(game.waste.map(\.card.rank) == [.three])
         var empty = SolitaireGame(stock: [], waste: [], tableau: empty7(), foundations: empty4())
-        #expect(!empty.tapStock())
+        let tapStock45 = empty.tapStock()
+        #expect(!tapStock45)
     }
 
     @Test func singleAndRunTableauMovesAndReveal() {
@@ -53,7 +58,8 @@ struct SolitaireGameTests {
         // 8H-7S run onto 9S.
         #expect(game.canSelect(.tableau(0), index: 1))
         #expect(!game.canSelect(.tableau(0), index: 0))           // face down
-        #expect(game.move(SolitaireSelection(pile: .tableau(0), index: 1), to: .tableau(1)))
+        let move56 = game.move(SolitaireSelection(pile: .tableau(0), index: 1), to: .tableau(1))
+        #expect(move56)
         #expect(game.tableau[1].map(\.card.rank) == [.nine, .eight, .seven])
         #expect(game.tableau[0].count == 1 && game.tableau[0][0].faceUp)   // revealed
         // Illegal: same colour.
@@ -66,7 +72,8 @@ struct SolitaireGameTests {
         t[1] = [c(.queen, .spades)]
         var game = SolitaireGame(stock: [], waste: [], tableau: t, foundations: empty4())
         #expect(!game.canMove(SolitaireSelection(pile: .tableau(1), index: 0), to: .tableau(2)))
-        #expect(game.move(SolitaireSelection(pile: .tableau(0), index: 0), to: .tableau(2)))
+        let move69 = game.move(SolitaireSelection(pile: .tableau(0), index: 0), to: .tableau(2))
+        #expect(move69)
         #expect(game.tableau[2].first?.card.rank == .king)
     }
 
@@ -75,10 +82,12 @@ struct SolitaireGameTests {
                                  tableau: empty7(), foundations: empty4())
         let top = SolitaireSelection(pile: .waste, index: 1)
         #expect(game.foundationTarget(for: top) == 0)
-        #expect(game.move(top, to: .foundation(0)))
+        let move78 = game.move(top, to: .foundation(0))
+        #expect(move78)
         let two = SolitaireSelection(pile: .waste, index: 0)
         #expect(!game.canMove(two, to: .foundation(1)))           // empty pile needs an ace
-        #expect(game.move(two, to: .foundation(0)))
+        let move81 = game.move(two, to: .foundation(0))
+        #expect(move81)
         #expect(game.foundations[0].count == 2)
         // No foundation-to-foundation shuffling.
         #expect(!game.canMove(SolitaireSelection(pile: .foundation(0), index: 1), to: .foundation(1)))

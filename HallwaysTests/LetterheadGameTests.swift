@@ -26,16 +26,21 @@ struct LetterheadGameTests {
         spell("LETTER", in: &r)
         #expect(r.currentWord == "LETTER")
         // Every tile is used: no further tap can add a seventh letter.
-        #expect(!r.tap(r.tiles[0].id, now: t0))
+        let tap29 = r.tap(r.tiles[0].id, now: t0)
+        #expect(!tap29)
     }
 
     @Test func eachTileOnlyOnceAndBackspaceFreesIt() {
         var r = round("PLANET", known: ["PLAN", "PLANET"])
         let p = r.tiles.first { $0.letter == "P" }!.id
-        #expect(r.tap(p, now: t0))
-        #expect(!r.tap(p, now: t0))
-        #expect(r.backspace())
-        #expect(r.tap(p, now: t0))
+        let tap35 = r.tap(p, now: t0)
+        #expect(tap35)
+        let tap36 = r.tap(p, now: t0)
+        #expect(!tap36)
+        let backspace37 = r.backspace()
+        #expect(backspace37)
+        let tap38 = r.tap(p, now: t0)
+        #expect(tap38)
         #expect(r.clear() && r.currentWord.isEmpty)
     }
 
@@ -79,7 +84,8 @@ struct LetterheadGameTests {
         #expect(r.remaining(at: t0.addingTimeInterval(40)) == LetterheadRound.duration - 40)
         let after = t0.addingTimeInterval(LetterheadRound.duration + 1)
         #expect(r.isOver(at: after))
-        #expect(!r.tap(r.tiles[0].id, now: after))
+        let tap82 = r.tap(r.tiles[0].id, now: after)
+        #expect(!tap82)
         spell("PLAN", in: &r)                               // taps at t0, before the end
         #expect(r.submit(now: after) { _ in true } == .timeUp)
         #expect(r.found.isEmpty)

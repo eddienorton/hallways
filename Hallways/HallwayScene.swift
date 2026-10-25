@@ -115,9 +115,74 @@ enum HallwayScene {
 
     /// Oct 8 (final): the widest a button's lettering may be (m), set on its
     /// own rather than derived from the button -- LOBBY gets room to read at
-    /// nearly the digits' height (0.045 m cap). Numbers keep 0.0675.
+    /// nearly the digits' height. Oct 25: with the larger caps, 0.15 -> 0.19
+    /// (LOBBY) and 0.0675 -> 0.085 (numbers).
     static func elevatorButtonLabelMaxWidth(floor: Int) -> Float {
-        floor == 1 ? 0.15 : 0.0675
+        floor == 1 ? 0.19 : 0.085
+    }
+
+    /// Oct 25 (PP 2, seven floors): the cab panel's dimensions (m), shared by
+    /// its builder (addElevatorDoor) and the tap test (TapNavigationController
+    /// .pressElevatorButton / pressElevatorButtonDoorsOpen), so the target
+    /// always grows with the drawing. Caps ~27% larger than before (0.048 ->
+    /// 0.061); the plate re-proportioned so rims never touch and LOBBY's oval
+    /// (elevatorButtonWidthScale, 1.9) sits well inside it: 0.40 m wide
+    /// (was 0.35); seven floors make four rows -- 6|7, 4|5, 2|3, LOBBY.
+    enum ElevatorPanelMetrics {
+        static let buttonRadius: CGFloat = 0.061       // the cap (was 0.048)
+        static let rimRadius: CGFloat = 0.076          // the dark ring round it (was 0.063)
+        static let colSpacing: CGFloat = 0.19          // centre to centre (was 0.16): 0.038 m between rims
+        static let rowSpacing: CGFloat = 0.18          // (was 0.145): 0.028 m between rims
+        static let marginX: CGFloat = 0.105            // plate 0.40 m wide (was 0.095 / 0.35)
+        static let marginY: CGFloat = 0.105            // (was 0.075)
+        /// The digits' height on a cap (was 0.045).
+        static let digitHeight: Float = 0.057
+        /// A tap counts for the nearest button whose centre is within this
+        /// (measured in the cap's own proportions -- LOBBY's oval across its
+        /// width divided by its scale): the whole visible rim plus a finger's
+        /// slack, never more than halfway to a neighbour. (Was a fixed 0.085.)
+        static var hitRadius: Float {
+            Float(min(rimRadius + 0.012, min(colSpacing, rowSpacing) / 2))
+        }
+    }
+
+    /// Oct 25 (PP 2): the one definition of a cab floor button's look, used by
+    /// the panel's build and by every press / light-up in
+    /// TapNavigationController, so selected, unselected, pressed and released
+    /// can't drift apart. Unselected is a light brushed silver-gray (was white
+    /// 0.82 at metalness 0.6, which read as dark grey in the cab); selected is
+    /// the same orange as ever.
+    enum ElevatorButtonLook {
+        static let unselectedDiffuse = UIColor(white: 0.86, alpha: 1)
+        static let unselectedGlow = UIColor(white: 0.10, alpha: 1)      // a touch of its own light: legible in a dim cab
+        static let unselectedMetalness: CGFloat = 0.25
+        static let unselectedRoughness: CGFloat = 0.32
+        static let selectedDiffuse = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
+        /// A press (the trip chosen): as before.
+        static let selectedGlow = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
+        /// The softer glow setElevatorControlButtonLit has always used.
+        static let softGlow = UIColor(red: 0.5, green: 0.32, blue: 0.05, alpha: 1)
+
+        static func unselected() -> SCNMaterial {
+            let m = SCNMaterial()
+            m.lightingModel = .physicallyBased
+            m.diffuse.contents = unselectedDiffuse
+            m.emission.contents = unselectedGlow
+            m.metalness.contents = unselectedMetalness
+            m.roughness.contents = unselectedRoughness
+            return m
+        }
+
+        /// Its own material (the caps share the unselected one).
+        static func selected(glow: UIColor = selectedGlow) -> SCNMaterial {
+            let m = SCNMaterial()
+            m.lightingModel = .physicallyBased
+            m.diffuse.contents = selectedDiffuse
+            m.emission.contents = glow
+            m.metalness.contents = 0.6
+            m.roughness.contents = 0.3
+            return m
+        }
     }
 
     /// Oct 8: the hardcoded lobby mirror's wall face (Floor 1): mounted on
@@ -3035,12 +3100,15 @@ enum HallwayScene {
                 // packing them. The plate now hugs the button array.
                 // plateThickness and the plate's own mounting
                 // position/orientation below remain unchanged.
-                let buttonRadius: CGFloat = 0.048
-                let rimRadius: CGFloat = 0.063
-                let colSpacing: CGFloat = 0.16
-                let rowSpacing: CGFloat = 0.145
-                let marginX: CGFloat = 0.095            // Oct 8 final: 0.075 -> 0.095 (plate 0.31 -> 0.35 m wide) for LOBBY
-                let marginY: CGFloat = 0.075
+                // Oct 25 (PP 2, seven floors): every dimension now comes from
+                // HallwayScene.ElevatorPanelMetrics (shared with the tap test),
+                // caps ~27% larger. (Was 0.048 / 0.063 / 0.16 / 0.145 / 0.095 / 0.075.)
+                let buttonRadius = ElevatorPanelMetrics.buttonRadius
+                let rimRadius = ElevatorPanelMetrics.rimRadius
+                let colSpacing = ElevatorPanelMetrics.colSpacing
+                let rowSpacing = ElevatorPanelMetrics.rowSpacing
+                let marginX = ElevatorPanelMetrics.marginX
+                let marginY = ElevatorPanelMetrics.marginY
                 let plateThickness: CGFloat = 0.02
                 let plateWidth = colSpacing + marginX * 2
                 let plateHeight = CGFloat(max(rows - 1, 0)) * rowSpacing + marginY * 2
@@ -3112,7 +3180,7 @@ enum HallwayScene {
                 // is a texture (HallwayScene.elevatorIndicatorImage) that
                 // TapNavigationController redraws while travelling.
                 do {
-                    let displayWidth: CGFloat = 0.3, displayHeight: CGFloat = 0.17
+                    let displayWidth: CGFloat = 0.34, displayHeight: CGFloat = 0.19     // Oct 25: was 0.3 x 0.17 (in step with the larger plate)
                     let housingMaterial = SCNMaterial()
                     housingMaterial.diffuse.contents = UIColor(white: 0.08, alpha: 1)
                     housingMaterial.lightingModel = .physicallyBased
@@ -3142,11 +3210,7 @@ enum HallwayScene {
                 recessMaterial.metalness.contents = 0.5
                 recessMaterial.roughness.contents = 0.5
 
-                let buttonMetal = SCNMaterial()
-                buttonMetal.diffuse.contents = UIColor(white: 0.82, alpha: 1)
-                buttonMetal.lightingModel = .physicallyBased
-                buttonMetal.metalness.contents = 0.6
-                buttonMetal.roughness.contents = 0.3
+                let buttonMetal = ElevatorButtonLook.unselected()     // Oct 25: one shared look (ElevatorButtonLook)
 
                 // Destination lamps are neutral until the rider selects a trip.
                 let contentTop = plateHeight / 2 - marginY
@@ -3202,7 +3266,7 @@ enum HallwayScene {
                     digitMaterial.isDoubleSided = true
                     digitText.materials = [digitMaterial]
                     let (lo, hi) = digitText.boundingBox
-                    let digitScale = min(0.045 / max(hi.y - lo.y, 1), Self.elevatorButtonLabelMaxWidth(floor: floorLabel) / max(hi.x - lo.x, 1))
+                    let digitScale = min(ElevatorPanelMetrics.digitHeight / max(hi.y - lo.y, 1), Self.elevatorButtonLabelMaxWidth(floor: floorLabel) / max(hi.x - lo.x, 1))
                     // Sept 26 (still invisible, second pass): found the
                     // actual bug on inspection -- the previous single-
                     // node version applied BOTH the 180-degree Y turn

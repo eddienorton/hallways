@@ -15,17 +15,21 @@
 //
 
 nonisolated enum FloorMusic {
+    /// Oct 25 (PP 2, seven floors): a temporary, valid map for the building in use (1-7). Not the studios'
+    /// soundtrack -- that is still to be designed. Rock Shuffle has no floor of its own meanwhile. Floors
+    /// 8-16 (out of use: ActiveBuilding) keep their earlier lines, unused until those floors return.
     static let assignments: [Int: String] = [
-        1: "night-porter",        // the lobby: soul-jazz blues
-        2: "velvet-hour",         // bossa nova, warm and easy
-        3: "minuet",              // minuet and trio
-        4: "clockwork",           // funk, mechanical
-        5: "after-hours",         // lights out: the dreamy, mysterious waltz
-        6: "rock-shuffle",        // boogie shuffle
-        7: "midnight-express",    // swing
-        8: "bossa-nova",          // Rua das Lâmpadas
-        9: "night-porter",        // (again, eight floors from the lobby)
-        10: "minuet",             // (again, seven floors from the 3rd)
+        1: "night-porter",        // Lobby: soul-jazz blues
+        2: "velvet-hour",         // Administration: bossa nova, warm and easy
+        3: "minuet",              // Office / Conference: minuet and trio
+        4: "clockwork",           // Recording A: funk
+        5: "midnight-express",    // Recording B: swing
+        6: "after-hours",         // Musical Maze: the dreamy, mysterious waltz
+        7: "bossa-nova",          // Record Gallery: Rua das Lâmpadas
+        // out of use (8-16), as before:
+        8: "bossa-nova",
+        9: "night-porter",
+        10: "minuet",
         11: "clockwork",
         12: "velvet-hour",
         13: "after-hours",

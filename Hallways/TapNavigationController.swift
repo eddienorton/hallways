@@ -3197,12 +3197,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                                  .moveBy(x: 0, y: 0, z: -0.006, duration: 0.14)]), forKey: "press")
         ElevatorRideSound.click(on: cameraNode)
         guard readEmployeeID(forFloor: floor, doors: "open") else { return false }      // (refused: as a tap would be)
-        let lit = SCNMaterial()
-        lit.lightingModel = .physicallyBased
-        lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
-        lit.emission.contents = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
-        lit.metalness.contents = 0.6
-        lit.roughness.contents = 0.3
+        let lit = HallwayScene.ElevatorButtonLook.selected()          // Oct 25: the one shared look
         cap.geometry?.materials = [lit]
         cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)
         diag("elevator.button.pressed", ["from": floorNumber, "to": floor, "doors": "open", "by": "follow"])
@@ -7999,15 +7994,9 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// navigation, ride state, or floor destination -- see the call
     /// site's own comment for why that's guaranteed.
     func setElevatorControlButtonLit(plate: SCNNode, floor: Int) {
-        let normalMaterial = SCNMaterial()
-        normalMaterial.diffuse.contents = UIColor(white: 0.82, alpha: 1)
-        normalMaterial.lightingModel = .physicallyBased
-        normalMaterial.metalness.contents = 0.6
-        normalMaterial.roughness.contents = 0.3
-
-        let activeMaterial = normalMaterial.copy() as! SCNMaterial
-        activeMaterial.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
-        activeMaterial.emission.contents = UIColor(red: 0.5, green: 0.32, blue: 0.05, alpha: 1)
+        // Oct 25: the shared looks (HallwayScene.ElevatorButtonLook) -- this one keeps its softer glow.
+        let normalMaterial = HallwayScene.ElevatorButtonLook.unselected()
+        let activeMaterial = HallwayScene.ElevatorButtonLook.selected(glow: HallwayScene.ElevatorButtonLook.softGlow)
 
         let targetName = "elevatorControlButton_\(floor)"
         for node in plate.childNodes where node.name?.hasPrefix("elevatorControlButton_") == true {
@@ -11294,7 +11283,13 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
                                 + ContinuousWalkControls.rowHeight) + 24
             tanBelow = min(tanHalf, tanFull * max(0.3, (halfH - reserve) / halfH))
         }
-        let below = eyeY - (p.y - halfHeight), above = (p.y + halfHeight) - eyeY
+        var below = eyeY - (p.y - halfHeight), above = (p.y + halfHeight) - eyeY
+        // Oct 25 (PP 2): the floor indicator above the plate is part of what must be in view.
+        if let indicator = scene?.rootNode.childNode(withName: "elevatorFloorIndicator", recursively: true) {
+            let (ilo, ihi) = indicator.boundingBox
+            above = max(above, indicator.worldPosition.y + (ihi.y - ilo.y) / 2 - eyeY)
+        }
+        below = max(below, 0)
         var distance = max(Self.elevatorPanelMinViewDistance, below / tanBelow, above / tanHalf)
         let half = Float(cellSize) / 2 - 0.4                        // stay this far inside the cab walls
         distance = min(distance, Float(cellSize) - 0.45)
@@ -11358,7 +11353,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             let d = hypotf((child.position.x - local.x) / max(child.scale.x, 1), child.position.y - local.y)
             if best == nil || d < best!.distance { best = (floor, child, d) }
         }
-        guard let best, best.distance < 0.085 else {                    // on the plate, between buttons:
+        guard let best, best.distance < HallwayScene.ElevatorPanelMetrics.hitRadius else {   // on the plate, between buttons (Oct 25: was a fixed 0.085):
             if elevatorPanelAssistAllowed {
                 landAtElevatorPanel(reason: "panel, no button")         // "the controls" -- land square
             } else {
@@ -11386,12 +11381,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         // button doesn't light, the car stays put, departure stays armed.
         guard readEmployeeID(forFloor: best.floor, doors: "sealed") else { return true }
         // Light the chosen button (its own material copy -- the caps share one).
-        let lit = SCNMaterial()
-        lit.lightingModel = .physicallyBased
-        lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
-        lit.emission.contents = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
-        lit.metalness.contents = 0.6
-        lit.roughness.contents = 0.3
+        let lit = HallwayScene.ElevatorButtonLook.selected()          // Oct 25: the one shared look
         cap.geometry?.materials = [lit]
         elevatorDepart = nil
         diag("elevator.button.pressed", ["from": floorNumber, "to": best.floor])
@@ -11429,7 +11419,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             let d = hypotf((child.position.x - local.x) / max(child.scale.x, 1), child.position.y - local.y)
             if best == nil || d < best!.distance { best = (floor, child, d) }
         }
-        guard let best, best.distance < 0.085 else {
+        guard let best, best.distance < HallwayScene.ElevatorPanelMetrics.hitRadius else {   // (Oct 25: was a fixed 0.085)
             diag("elevator.button.missed", ["doors": "open"])
             return alignToElevatorPanelFromOpenCab(hit: hit, onPlate: true)
         }
@@ -11445,12 +11435,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
         }
         // Oct 9: the employee-ID reader. Refused: doors stay open, nothing moves.
         guard readEmployeeID(forFloor: best.floor, doors: "open") else { return true }
-        let lit = SCNMaterial()
-        lit.lightingModel = .physicallyBased
-        lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
-        lit.emission.contents = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
-        lit.metalness.contents = 0.6
-        lit.roughness.contents = 0.3
+        let lit = HallwayScene.ElevatorButtonLook.selected()          // Oct 25: the one shared look
         cap.geometry?.materials = [lit]
         cameraNode.removeAction(forKey: Self.elevatorPanelApproachActionKey)
         diag("elevator.button.pressed", ["from": floorNumber, "to": best.floor, "doors": "open"])
@@ -11531,12 +11516,7 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
             cap.removeAction(forKey: "press")
             cap.runAction(.sequence([.moveBy(x: 0, y: 0, z: 0.006, duration: 0.06),
                                      .moveBy(x: 0, y: 0, z: -0.006, duration: 0.14)]), forKey: "press")
-            let lit = SCNMaterial()
-            lit.lightingModel = .physicallyBased
-            lit.diffuse.contents = UIColor(red: 1.0, green: 0.82, blue: 0.35, alpha: 1)
-            lit.emission.contents = UIColor(red: 0.85, green: 0.55, blue: 0.1, alpha: 1)
-            lit.metalness.contents = 0.6
-            lit.roughness.contents = 0.3
+            let lit = HallwayScene.ElevatorButtonLook.selected()      // Oct 25: the one shared look
             cap.geometry?.materials = [lit]
         }
         ElevatorRideSound.click(on: cameraNode)

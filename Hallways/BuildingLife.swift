@@ -530,7 +530,7 @@ final class BuildingLife {
             r.room = nil
             r.roomName = nil
             r.shown = nil
-            r.why = outOfUse ? "F\(was) is out of use for now (the ten-floor experiment): on F\(r.floor) instead"
+            r.why = outOfUse ? "F\(was) is out of use for now (the building is floors 1-\(ActiveBuilding.topFloor) for now): on F\(r.floor) instead"
                              : "the car started afresh: set down on F\(r.floor)"
             residents[id] = r
             moved.append("\(id) F\(was)->F\(r.floor)")

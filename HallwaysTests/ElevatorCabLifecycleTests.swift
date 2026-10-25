@@ -216,7 +216,7 @@ struct ElevatorCabLifecycleTests {
         for floor in 1...16 {
             let cap = try #require(plate.childNode(withName: "elevatorControlButton_\(floor)", recursively: false))
             let color = try #require(cap.geometry?.firstMaterial?.diffuse.contents as? UIColor)
-            #expect(color == UIColor(white: 0.82, alpha: 1))
+            #expect(color == HallwayScene.ElevatorButtonLook.unselectedDiffuse)     // Oct 25: the shared silver-gray (was white 0.82)
         }
     }
 }

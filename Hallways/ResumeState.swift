@@ -100,6 +100,10 @@ enum ResumeState {
     static var resumesAtSavedPoint: Bool {
         let d = UserDefaults.standard
         guard isRecording, d.bool(forKey: Admission.initialEntranceKey), let p = point else { return false }
+        // Oct 25 (seven floors): a point saved on a floor now out of use (8-16) isn't resumed -- the
+        // ordinary launch runs instead (the street intro, then the lobby), exactly as launchFloor already
+        // decides. The point itself, the ID, the prologue and every other saved thing are kept.
+        guard ActiveBuilding.isActive(p.floor) else { return false }
         return d.bool(forKey: Admission.prologueCompletedKey) || p.floor == Admission.administrationFloor
             || escortPending(onFloor: p.floor) != nil
     }

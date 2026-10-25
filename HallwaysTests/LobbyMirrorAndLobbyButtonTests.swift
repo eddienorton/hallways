@@ -56,11 +56,14 @@ struct LobbyMirrorAndLobbyButtonTests {
         let lobbyText = try #require(plate.childNode(withName: "elevatorControlButtonLabel_1", recursively: false)?.childNodes.first)
         let (lo, hi) = lobbyText.boundingBox
         #expect(Float(hi.x - lo.x) * lobbyText.scale.x > 0.1)            // was ~0.068 (1.6) / ~0.11 now ~0.15
-        #expect(Float(hi.x - lo.x) * lobbyText.scale.x <= 0.15 + 1e-4)
+        #expect(Float(hi.x - lo.x) * lobbyText.scale.x <= HallwayScene.elevatorButtonLabelMaxWidth(floor: 1) + 1e-4)   // Oct 25: 0.15 -> 0.19
         // The oval rim still sits inside the (wider) plate.
         let plateBox = try #require(plate.geometry as? SCNBox)
-        #expect(plateBox.width > 0.34 && plateBox.width < 0.36)
-        #expect(0.063 * 2 * 1.9 < Double(plateBox.width))
+        // Oct 25 (PP 2): the plate is 0.40 m wide (was 0.35) for the larger caps.
+        let m = HallwayScene.ElevatorPanelMetrics.self
+        #expect(abs(plateBox.width - (m.colSpacing + m.marginX * 2)) < 1e-6)
+        #expect(plateBox.width > 0.39 && plateBox.width < 0.41)
+        #expect(Double(m.rimRadius) * 2 * 1.9 < Double(plateBox.width))
         #expect(plate.childNode(withName: "elevatorControlButton_2", recursively: false)?.scale.x == 1)
         let two = try #require(plate.childNode(withName: "elevatorControlButtonLabel_2", recursively: false))
         #expect((two.childNodes.first?.geometry as? SCNText)?.string as? String == "2")

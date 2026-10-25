@@ -118,6 +118,7 @@ final class ResidentMusicConductor {
         ResidentWalkingMusic.shared.ensureRunning()                     // Oct 23: walking music (its own 4 Hz; it minds the switch itself)
         LivingOrchestra.shared.ensureRunning()                          // Oct 24: the living orchestra (prototype; its own engine and 10 Hz)
         WalkingBand.shared.ensureRunning()                              // Oct 25: the walking band (experiment; off: -HallwaysWalkingBand NO)
+        FloorSoundtrack.shared.ensureRunning()                          // Oct 25 (PP 7): floors 4-7's songs (off: -HallwaysFloorSoundtracks NO)
         guard HallwaysianMusic.isOn else { followed = nil; return }
         let perf = PerfMonitor.begin("music.tick"); defer { PerfMonitor.end(perf) }
         let now = CACurrentMediaTime()
@@ -145,6 +146,7 @@ final class ResidentMusicConductor {
         }
         lastDistance = seen
         guard !Self.storyQuiet, now >= hushUntil else { return }
+        guard !FloorSoundtrack.shared.ownsFloor else { return }           // Oct 25 (PP 7): the floor's song is its music
         // 1. The followed one's check-in.
         if let id = target, now >= nextCheckIn {
             if let n = near.first(where: { $0.p.residentID == id }),          // (guiding the player to a task, too)
@@ -207,6 +209,11 @@ enum ResidentMusic {
     static func greet(_ id: String, on node: SCNNode) -> Bool {
         guard HallwaysianMusic.isOn else { return false }
         guard !MusicLab.isActive else { return false }                   // Oct 24: the lab is playing -- its ordinary sound instead
+        // Oct 25 (PP 7): on a soundtrack floor the follower's music is its part in the song -- no signature over it
+        if FloorSoundtrack.shared.ownsFloor {
+            LifeLog.event(id, "music.skipped", ["why": "the floor's soundtrack plays"])
+            return true
+        }
         guard node.parent != nil, let source = HallwaysianMusic.source(id) else {
             LifeLog.event(id, "music.skipped", ["why": node.parent == nil ? "no body in the scene" : "its file isn't ready yet"])
             return true
@@ -228,6 +235,7 @@ enum ResidentMusic {
     static func farewell(_ id: String) {
         guard HallwaysianMusic.isOn else { return }
         guard !MusicLab.isActive else { return }                         // Oct 24: the lab is playing
+        guard !FloorSoundtrack.shared.ownsFloor else { return }          // Oct 25 (PP 7): the floor's song instead
         guard let node = BuildingLife.shared.presentations.first(where: { $0.residentID == id })?.bodyNode,
               let source = HallwaysianMusic.source(id, low: true) else {
             LifeLog.event(id, "music.skipped", ["why": "goodbye: no body here, or its file isn't ready yet"])

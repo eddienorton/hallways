@@ -1,0 +1,370 @@
+{
+ "format": "hallways-song-harmony/1",
+ "composition": "lantern-room",
+ "beatsPerBar": 3,
+ "source": "Music/HallwaysOriginals/06-Music-Lab-Level-3/source/lantern.py -- build_loop(): CH (bars 1-16), CH[:8] (17-24), CH[8:] (25-32). Chord tones: labkit.py QUAL.",
+ "bars": [
+  [
+   {
+    "beat": 0,
+    "chord": "Dm",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm/C",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Gm",
+    "tones": [
+     7,
+     10,
+     2
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F",
+    "tones": [
+     5,
+     9,
+     0
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "C/E",
+    "tones": [
+     0,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Gm7",
+    "tones": [
+     7,
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm/C",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Gm",
+    "tones": [
+     7,
+     10,
+     2
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F",
+    "tones": [
+     5,
+     9,
+     0
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "C/E",
+    "tones": [
+     0,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dm",
+    "tones": [
+     2,
+     5,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Gm7",
+    "tones": [
+     7,
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bb",
+    "tones": [
+     10,
+     2,
+     5
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ]
+ ]
+}

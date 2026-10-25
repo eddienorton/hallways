@@ -118,7 +118,8 @@ final class WalkingBand {
         let lab = MusicLab.shared
         let t = Self.tuning
         // who is following the player, with an instrument (not a voice)
-        let musical = FollowMe.ids.filter { id in
+        // Oct 25 (PP 7): on a floor with its own soundtrack (FloorSoundtrack) the followers play there instead
+        let musical = FloorSoundtrack.shared.ownsFloor ? [] : FollowMe.ids.filter { id in
             guard let inst = BandInstruments.byResident[id] else { return false }
             return BandInstruments.voices[inst] == nil
         }

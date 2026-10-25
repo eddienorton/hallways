@@ -1,0 +1,77 @@
+{
+ "format": "hallways-floor-soundtracks/1",
+ "about": "PP 7 (Oct 25). Which Hallways Originals song each floor plays (its recorded loop stems), which of its tracks always play (baseline), and which Hallwaysian instruments may take each other track when they FOLLOW the player (instrument identities: BandInstruments.byResident). A follower whose instrument has no free track here sings instead (Hallways/Voices). Change anything here: no code change. Floors not listed keep the living orchestra.",
+ "level": 0.5,
+ "voiceLevel": 0.5,
+ "fadeBars": 1,
+ "floorFadeSeconds": 1.2,
+ "pitchMethod": "keepLength",
+ "floors": {
+  "4": "going-up",
+  "5": "night-shift-waltz",
+  "6": "lantern-room",
+  "7": "rua-das-lampadas"
+ },
+ "songs": {
+  "going-up": {
+   "baseline": ["tinky", "gloria", "eileen", "juanita", "telephone"],
+   "parts": {
+    "juanita": ["trumpet"],
+    "telephone": ["tenor_sax"],
+    "chair": ["trombone"],
+    "pottle": ["clarinet"],
+    "camera": ["vibraphone"],
+    "eileen": ["piano"],
+    "gloria": ["upright_bass"],
+    "tinky": ["drums"]
+   },
+   "harmony": "song-harmony-goingup",
+   "voice": {"slotBars": 2, "beat": 0, "soloEvery": 2}
+  },
+  "night-shift-waltz": {
+   "baseline": ["juanita", "gloria", "eileen"],
+   "parts": {
+    "juanita": ["clarinet"],
+    "tinky": ["marimba", "glockenspiel", "percussion"],
+    "gloria": ["upright_bass"],
+    "eileen": ["nylon_guitar"]
+   },
+   "harmony": "song-harmony-nightshift",
+   "voice": {"slotBars": 2, "beat": 0, "soloEvery": 2}
+  },
+  "lantern-room": {
+   "baseline": ["flute", "harp", "violins", "violas", "basses"],
+   "parts": {
+    "glock": ["glockenspiel"],
+    "harp": ["harp"],
+    "flute": ["flute"],
+    "violin": ["violin"],
+    "violins": ["violin"],
+    "violas": [],
+    "cellos": ["cello"],
+    "basses": ["upright_bass"],
+    "horn": ["french_horn"]
+   },
+   "harmony": "song-harmony-lanternroom",
+   "voice": {"slotBars": 1, "beat": 0, "soloEvery": 2}
+  },
+  "rua-das-lampadas": {
+   "baseline": ["guitar", "piano", "bass", "shaker", "claves"],
+   "parts": {
+    "lead": ["tenor", "soprano", "alto", "bass_voice"],
+    "harmony": ["alto", "soprano", "bass_voice", "tenor"],
+    "flute": ["flute"],
+    "guitar": ["nylon_guitar"],
+    "piano": ["piano"],
+    "bass": ["upright_bass"],
+    "congas": ["percussion"],
+    "bongos": ["drums"],
+    "shaker": [],
+    "claves": []
+   },
+   "harmony": "song-harmony-ruadaslampadas",
+   "voice": {"slotBars": 2, "beat": 0, "soloEvery": 2}
+  }
+ },
+ "voices": {}
+}

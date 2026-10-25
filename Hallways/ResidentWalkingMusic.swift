@@ -189,6 +189,7 @@ final class ResidentWalkingMusic {
         // 2. Allowed at all? (Off, Mute, a story: anything sounding fades.)
         // Oct 24: and never while the living orchestra plays (LivingOrchestra) -- the two don't compete.
         let allowed = HallwaysianMusic.isOn && !ResidentMusicConductor.storyQuiet && !LivingOrchestra.shared.isActive
+            && !FloorSoundtrack.shared.ownsFloor                              // Oct 25 (PP 7): nor on a soundtrack floor
         guard allowed else {
             for id in Array(sounding.keys) { fade(id, why: "quiet (identities off, Mute, or a story)") }
             presence = [:]

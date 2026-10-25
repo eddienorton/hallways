@@ -1,0 +1,468 @@
+{
+ "format": "hallways-song-harmony/1",
+ "composition": "rua-das-lampadas",
+ "beatsPerBar": 4,
+ "source": "Music/HallwaysOriginals/06-Music-Lab-Level-3/source/bossa.py (A, BR) in bossa_vocal.py build_loop(): verse A, verse A, bridge BR, verse A. Chord tones: labkit.py QUAL.",
+ "bars": [
+  [
+   {
+    "beat": 0,
+    "chord": "Dmaj9",
+    "tones": [
+     2,
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bm7",
+    "tones": [
+     11,
+     2,
+     6,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A13",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     11,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F#m7",
+    "tones": [
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "B7b9",
+    "tones": [
+     11,
+     3,
+     6,
+     9,
+     0
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7sus4",
+    "tones": [
+     9,
+     2,
+     4,
+     7
+    ]
+   },
+   {
+    "beat": 2,
+    "chord": "A7b9",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     10
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dmaj9",
+    "tones": [
+     2,
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bm7",
+    "tones": [
+     11,
+     2,
+     6,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A13",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     11,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F#m7",
+    "tones": [
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "B7b9",
+    "tones": [
+     11,
+     3,
+     6,
+     9,
+     0
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7sus4",
+    "tones": [
+     9,
+     2,
+     4,
+     7
+    ]
+   },
+   {
+    "beat": 2,
+    "chord": "A7b9",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     10
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Gmaj9",
+    "tones": [
+     7,
+     11,
+     2,
+     6,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Gm6",
+    "tones": [
+     7,
+     10,
+     2,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F#m7",
+    "tones": [
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "B7b9",
+    "tones": [
+     11,
+     3,
+     6,
+     9,
+     0
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A13",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     11,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F#m7",
+    "tones": [
+     6,
+     9,
+     1,
+     4
+    ]
+   },
+   {
+    "beat": 2,
+    "chord": "B7",
+    "tones": [
+     11,
+     3,
+     6,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em7",
+    "tones": [
+     4,
+     7,
+     11,
+     2
+    ]
+   },
+   {
+    "beat": 2,
+    "chord": "A7",
+    "tones": [
+     9,
+     1,
+     4,
+     7
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Dmaj9",
+    "tones": [
+     2,
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Bm7",
+    "tones": [
+     11,
+     2,
+     6,
+     9
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A13",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     11,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "F#m7",
+    "tones": [
+     6,
+     9,
+     1,
+     4
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "B7b9",
+    "tones": [
+     11,
+     3,
+     6,
+     9,
+     0
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "Em9",
+    "tones": [
+     4,
+     7,
+     11,
+     2,
+     6
+    ]
+   }
+  ],
+  [
+   {
+    "beat": 0,
+    "chord": "A7sus4",
+    "tones": [
+     9,
+     2,
+     4,
+     7
+    ]
+   },
+   {
+    "beat": 2,
+    "chord": "A7b9",
+    "tones": [
+     9,
+     1,
+     4,
+     7,
+     10
+    ]
+   }
+  ]
+ ]
+}

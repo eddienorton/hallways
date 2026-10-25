@@ -321,6 +321,7 @@ final class LivingOrchestra {
         let t = OrchestraConfig.tuning
         // The whole orchestra: down for Mute, Settings, a story; up again after.
         let quiet = HallwaysAudio.shared.isMuted || HallwaysAudio.shared.isSuppressed || ResidentMusicConductor.storyQuiet
+            || FloorSoundtrack.shared.ownsFloor                              // Oct 25 (PP 7): this floor plays its own song
         let masterGoal: Float = quiet ? 0 : t.masterLevel * WalkingBand.shared.ambience   // (Oct 25: ducked under the walking band)
         let mk = Float(1 - exp(-Self.interval / t.masterResponse))
         let m = deck.master + (masterGoal - deck.master) * mk

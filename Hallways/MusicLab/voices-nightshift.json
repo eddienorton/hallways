@@ -1,0 +1,434 @@
+{
+ "format": "hallways-voice-harmony/1",
+ "composition": "night-shift-waltz",
+ "source": "Music/HallwaysOriginals/01-The-Night-Shift-Waltz/source/original1.py -- build_loop(): PROG_A (bars 1-16), PROG_B (17-32), PROG_A (33-48); chord tones from its CH voicing table (bass root, chord third, bass fifth, then the guitar voicing's other notes). Checked against midi/loop-gloria.mid (the bass's first note of every bar is the root).",
+ "beatsPerBar": 3,
+ "bars": [
+  {
+   "chord": "Am",
+   "tones": [
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Am/G",
+   "tones": [
+    7,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Fmaj7",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Am",
+   "tones": [
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Am/G",
+   "tones": [
+    7,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "D9",
+   "tones": [
+    2,
+    6,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Fmaj7",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Dm7",
+   "tones": [
+    2,
+    5,
+    9,
+    0
+   ]
+  },
+  {
+   "chord": "G7",
+   "tones": [
+    7,
+    11,
+    2,
+    5
+   ]
+  },
+  {
+   "chord": "Cmaj7",
+   "tones": [
+    0,
+    4,
+    7,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Fmaj7#11",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Bm7b5",
+   "tones": [
+    11,
+    2,
+    5,
+    9
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Am",
+   "tones": [
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Fmaj7",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "G6",
+   "tones": [
+    7,
+    11,
+    2,
+    4
+   ]
+  },
+  {
+   "chord": "Em7",
+   "tones": [
+    4,
+    7,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Am7",
+   "tones": [
+    9,
+    0,
+    4,
+    7
+   ]
+  },
+  {
+   "chord": "Dm7",
+   "tones": [
+    2,
+    5,
+    9,
+    0
+   ]
+  },
+  {
+   "chord": "G7",
+   "tones": [
+    7,
+    11,
+    2,
+    5
+   ]
+  },
+  {
+   "chord": "Cmaj7",
+   "tones": [
+    0,
+    4,
+    7,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "C7",
+   "tones": [
+    0,
+    4,
+    7,
+    10
+   ]
+  },
+  {
+   "chord": "Fmaj7",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Fm6",
+   "tones": [
+    5,
+    8,
+    0,
+    2
+   ]
+  },
+  {
+   "chord": "Em7",
+   "tones": [
+    4,
+    7,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "A7",
+   "tones": [
+    9,
+    1,
+    4,
+    7
+   ]
+  },
+  {
+   "chord": "Dm7",
+   "tones": [
+    2,
+    5,
+    9,
+    0
+   ]
+  },
+  {
+   "chord": "G7",
+   "tones": [
+    7,
+    11,
+    2,
+    5
+   ]
+  },
+  {
+   "chord": "Esus4",
+   "tones": [
+    4,
+    9,
+    11
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Am",
+   "tones": [
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Am/G",
+   "tones": [
+    7,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Fmaj7",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Am",
+   "tones": [
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Am/G",
+   "tones": [
+    7,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "D9",
+   "tones": [
+    2,
+    6,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Fmaj7",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Dm7",
+   "tones": [
+    2,
+    5,
+    9,
+    0
+   ]
+  },
+  {
+   "chord": "G7",
+   "tones": [
+    7,
+    11,
+    2,
+    5
+   ]
+  },
+  {
+   "chord": "Cmaj7",
+   "tones": [
+    0,
+    4,
+    7,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Fmaj7#11",
+   "tones": [
+    5,
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "Bm7b5",
+   "tones": [
+    11,
+    2,
+    5,
+    9
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  },
+  {
+   "chord": "Am",
+   "tones": [
+    9,
+    0,
+    4
+   ]
+  },
+  {
+   "chord": "E7",
+   "tones": [
+    4,
+    8,
+    11,
+    2
+   ]
+  }
+ ]
+}

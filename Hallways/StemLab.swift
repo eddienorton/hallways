@@ -174,6 +174,9 @@ nonisolated final class StemDeck: @unchecked Sendable {
     private(set) var sampleRate: Double = 44100
     /// Where each loop pass starts in the stem files (the manifest's loopStartFrame; 0 for lossless loops).
     private var loopStart: AVAudioFramePosition = 0
+    /// Oct 25 (PP 6, VOICES): other players on this engine (VoiceLab's voice), started at the stems' own
+    /// instant -- their sample timeline is the stems': frame 0 = the loop's first frame. None: as before.
+    private var companions: [AVAudioPlayerNode] = []
 
     /// Opens every musician's stem for `mode`. Nil: a stem is missing or unreadable.
     init?(composition c: StemComposition, mode: Mode, volumes: [String: Float]) {
@@ -220,6 +223,7 @@ nonisolated final class StemDeck: @unchecked Sendable {
         let gen = generation
         lock.unlock()
         for p in players.values { p.stop() }
+        for p in companions { p.stop() }
         do {
             if !engine.isRunning { try engine.start() }
         } catch {
@@ -247,7 +251,16 @@ nonisolated final class StemDeck: @unchecked Sendable {
         }
         let at = AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.12))
         for id in order { players[id]?.play(at: at) }
+        for p in companions { p.play(at: at) }
         return true
+    }
+
+    /// Oct 25 (PP 6): one more player on this engine, into its mixer (so the lab's master fade and Mute
+    /// apply to it); started with the stems by start(), stopped by stop(). Attach before start().
+    func addCompanion(_ node: AVAudioPlayerNode, format: AVAudioFormat) {
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        companions.append(node)
     }
 
     private func queue(_ id: String, gen: Int) {
@@ -268,6 +281,7 @@ nonisolated final class StemDeck: @unchecked Sendable {
         generation += 1
         lock.unlock()
         for p in players.values { p.stop() }
+        for p in companions { p.stop() }
         engine.stop()
     }
 
@@ -320,6 +334,10 @@ final class StemLab: ObservableObject {
     static let stopFade: Double = 0.3
 
     private var deck: StemDeck?
+    /// Oct 25 (PP 6): the deck playing now (VoiceLab reads its clock).
+    var currentDeck: StemDeck? { deck }
+    /// Oct 25 (PP 6): called with each new deck just before it starts (VoiceLab adds its voice). Nil: as before.
+    var deckWillStart: ((StemDeck, StemComposition) -> Void)?
     private var level: [String: Float] = [:]                 // each musician's volume now
     private var target: [String: Float] = [:]                // ... and where it's gliding
     private var masterLevel: Float = 0
@@ -473,6 +491,7 @@ final class StemLab: ObservableObject {
         deck = d
         stopToken += 1
         Self.setActive(true)
+        deckWillStart?(d, c)
         let deckID = ObjectIdentifier(d)                     // (the end of THIS deck's performance only)
         let started = d.start {
             DispatchQueue.main.async { MainActor.assumeIsolated { StemLab.shared.performanceEnded(deckID) } }

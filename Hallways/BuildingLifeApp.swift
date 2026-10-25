@@ -549,7 +549,9 @@ struct BuildingLifeDirectory: View {
     /// Oct 25 (PP 5 recovery): which Music Lab -- TRACKS (the default: the Hallways Originals' own audio stems,
     /// StemLab -- choose a piece, play it whole, switch its tracks on and off) or ARRANGER (MusicLab: the
     /// SoundFont band arranging a composition by layers).
-    @State private var arranger = false
+    /// Oct 25 (PP 6): a third, VOICES (VoiceLab: the original Night Shift Waltz with one recorded critter voice).
+    @State private var labMode: LabMode = .tracks
+    enum LabMode: Hashable { case tracks, arranger, voices }
 
     var body: some View {
         // Oct 24 (Music Lab): the band's selector and controls, fixed above the list (the list
@@ -557,20 +559,28 @@ struct BuildingLifeDirectory: View {
         // the scrolling list (eight of them scroll rather than crowd). Leaving the Directory stops it.
         VStack(spacing: 0) {
         labPicker
-        if arranger {
+        switch labMode {
+        case .arranger:
             MusicLabControls()
                 .padding(.bottom, 10)
-        } else {
+        case .tracks:
             StemLabControls()
+                .padding(.bottom, 10)
+        case .voices:
+            VoiceLabControls()
                 .padding(.bottom, 10)
         }
         ScrollView {
             LazyVStack(spacing: 0) {
-                if arranger {
+                switch labMode {
+                case .arranger:
                     MusicLabMusicians()
                         .padding(.bottom, 14)
-                } else {
+                case .tracks:
                     StemLabMusicians()
+                        .padding(.bottom, 14)
+                case .voices:
+                    VoiceLabPanel()
                         .padding(.bottom, 14)
                 }
                 Text("Everyone in the building, nearest first. The meter is how near they are through the building -- warmer is nearer. Listen for them too.")
@@ -613,20 +623,24 @@ struct BuildingLifeDirectory: View {
             StemLab.shared.directoryOpened()
         }
         .onDisappear {
+            VoiceLab.shared.directoryClosed()
             StemLab.shared.directoryClosed()
             MusicLab.shared.directoryClosed()
         }
     }
 
-    /// TRACKS / ARRANGER: switching stops whatever is playing (one lab at a time).
+    /// TRACKS / ARRANGER / VOICES: switching stops whatever is playing (one lab at a time).
     private var labPicker: some View {
-        Picker("Music Lab", selection: Binding(get: { arranger }, set: { on in
+        Picker("Music Lab", selection: Binding(get: { labMode }, set: { mode in
+            guard mode != labMode else { return }
             StemLab.shared.stop()
             MusicLab.shared.stop()
-            arranger = on
+            if labMode == .voices { VoiceLab.shared.leave() }
+            labMode = mode
         })) {
-            Text("TRACKS").tag(false)
-            Text("ARRANGER").tag(true)
+            Text("TRACKS").tag(LabMode.tracks)
+            Text("ARRANGER").tag(LabMode.arranger)
+            Text("VOICES").tag(LabMode.voices)
         }
         .pickerStyle(.segmented)
         .padding(.horizontal, 14)

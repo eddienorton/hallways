@@ -79,7 +79,7 @@ final class TaskRegistry {
     let defaults: UserDefaults
     let persists: Bool
     /// The breakers' own answer: all eight of Floor 5's circuits on (tests may stand in).
-    var fuseBoxDone: () -> Bool = { FloorFiveBlackout.savedMask & 0xFF == 0xFF }
+    var fuseBoxDone: () -> Bool = { FloorFiveBlackout.allPowered }
     private(set) var tasks: [BuildingTask] = []
     private var loaded = false
 
@@ -134,7 +134,9 @@ final class TaskRegistry {
 
     /// Its state now: the fuse box is completed when the breakers say so.
     func state(of t: BuildingTask) -> BuildingTask.State {
-        if t.kind == .fuseBox, fuseBoxDone() { return .completed }
+        // Oct 25 (PP 3): the Floor 5 blackout is retired -- task.01 is never an objective again
+        // (it stays in the saved list, completed: the save's shape is unchanged).
+        if t.kind == .fuseBox, FloorFiveBlackout.retired || fuseBoxDone() { return .completed }
         return t.state
     }
 

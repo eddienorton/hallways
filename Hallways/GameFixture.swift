@@ -586,6 +586,11 @@ enum SupplyModels {
 /// Floor 4: the maintenance supply room -- architecture, clutter, and where each tool lives.
 enum SuppliesShowroom {
     static let floor = 4
+    /// Oct 25 (PP 3, the musical redesign): the supply room is RETIRED as a mission --
+    /// its tools can't be taken (Supplies.toolTapped), nothing is awarded, nobody
+    /// guides the player here. The room, its fixtures and its registration as a
+    /// residents' room stay until Floor 4 is rebuilt as Recording A. (false: as before.)
+    static let retired = true
     /// The room (3 x 3 cells) and the short way in from the elevator.
     static let roomCells: Set<GridCoordinate> = Set((9...11).flatMap { r in (8...10).map { GridCoordinate(row: r, col: $0) } })
     static let foyerCell = GridCoordinate(row: 10, col: 7)
@@ -2499,6 +2504,12 @@ enum Supplies {
             release(tool, controller: c)
             return
         }
+        // Oct 25 (PP 3): the supply room's purpose is retired -- nothing is taken from it (a tool
+        // carried from an old save can still be put back, above). The room stays as it is.
+        if SuppliesShowroom.retired {
+            diag("supplies.toolTapped", ["tool": tool.rawValue, "how": "retired"])
+            return
+        }
         if ToolBelt.isFull { refuse(tool, controller: c); return }
         let p = c.cameraNode.position
         // Oct 16 (IV): in reach -- taken where the player stands, no walk at all.
@@ -3036,6 +3047,15 @@ struct ToolTrayView: View {
 //              off. One of ResumeState.allKeys: Start Over = the blackout.
 enum FloorFiveBlackout {
     static let floor = 5
+    /// Oct 25 (PP 3, the musical redesign): THE BLACKOUT IS RETIRED. Floor 5 is
+    /// always fully lit: every circuit counts as ON whatever was saved (old saves
+    /// with circuits off, Start Over, a fresh game), nothing is ever written to
+    /// floor5.circuits.v1 again, and Panel 5A is inert (a tap on it does nothing --
+    /// no cover, no breakers). The rooms, their equipment and the per-area light
+    /// isolation are still built by install (residents' rooms and the decorated
+    /// lights depend on them); only the darkness is gone. The types and the saved
+    /// key stay until Floor 5 is rebuilt as Recording B. (false: the old mission.)
+    static let retired = true
     /// Oct 16's single-breaker save: no longer read (Start Over still clears it).
     nonisolated static let restoredKey = "floor5.powerRestored.v1"
     /// Oct 17: the eight circuits (bit n-1 = circuit n ON).
@@ -3078,8 +3098,16 @@ enum FloorFiveBlackout {
     // MARK: State
 
     static var savedMask: Int { UserDefaults.standard.integer(forKey: circuitsKey) }
-    static func isOn(_ n: Int) -> Bool { savedMask & (1 << (n - 1)) != 0 }
+    /// Oct 25 (PP 3): what the floor actually shows -- all eight ON while the blackout is retired,
+    /// whatever savedMask says. Everything that lights, darkens or reports the floor reads this.
+    static var effectiveMask: Int { retired ? 0xFF : savedMask }
+    /// All eight circuits on (the locator, the emergency fill, the butterfly's concern, task.01).
+    static var allPowered: Bool { effectiveMask & 0xFF == 0xFF }
+    static func isOn(_ n: Int) -> Bool { effectiveMask & (1 << (n - 1)) != 0 }
+    /// Tests: the emergency fill's intensity on the floor now built (nil: none built).
+    static var emergencyIntensity: CGFloat? { emergency?.light?.intensity }
     private static func store(_ n: Int, on: Bool) {
+        guard !retired else { return }                                    // (Oct 25: never written while retired)
         var m = savedMask
         if on { m |= 1 << (n - 1) } else { m &= ~(1 << (n - 1)) }
         UserDefaults.standard.set(m, forKey: circuitsKey)
@@ -3141,7 +3169,7 @@ enum FloorFiveBlackout {
         emergency = fill
         for c in circuits { setPowered(c.number, isOn(c.number), animated: false) }
         updateEmergency(animated: false)
-        diag("floor5.installed", ["mask": savedMask, "fixtures": fixtures.values.reduce(0) { $0 + $1.count },
+        diag("floor5.installed", ["mask": savedMask, "retired": retired, "shown": effectiveMask, "fixtures": fixtures.values.reduce(0) { $0 + $1.count },
                                   "tagged": tagged, "landingLights": landing.count])
     }
 
@@ -3916,6 +3944,12 @@ enum FloorFiveBlackout {
             break
         }
         guard onPanel else { return false }
+        // Oct 25 (PP 3): the blackout is retired -- the panel is inert. The tap is the panel's
+        // (nothing behind it is walked into), and nothing happens: no cover, no breaker, no walk-up.
+        if retired {
+            diag("floor5.panelTap", ["retired": true])
+            return true
+        }
         approachToken += 1                                       // (any earlier walk-up's errand is void)
         let p = panel.worldPosition
         let level = hypotf(eye.x - p.x, eye.z - p.z)
@@ -3992,6 +4026,7 @@ enum FloorFiveBlackout {
 
     /// Throw breaker `n` the other way: saved at once, then its area follows.
     private static func toggle(_ n: Int) {
+        guard !retired else { return }                                    // (Oct 25: the panel is inert)
         let on = !isOn(n)
         store(n, on: on)
         setLever(n, on: on, animated: true)
@@ -4058,14 +4093,14 @@ enum FloorFiveBlackout {
         guard let locator else { return }
         // Oct 22 (morning): steady red, no longer blinking (it was irritating) -- the same
         // meaning: lit while any circuit is off, dark once all eight are on.
-        if savedMask & 0xFF == 0xFF { locator.off() } else { locator.steady() }
+        if allPowered { locator.off() } else { locator.steady() }       // (Oct 25: the floor as shown)
     }
 
     /// The emergency fill: on while any circuit is off.
     private static func updateEmergency(animated: Bool) {
         updateLocator()
         guard let fill = emergency?.light else { return }
-        let target: CGFloat = savedMask & 0xFF == 0xFF ? 0 : 42
+        let target: CGFloat = allPowered ? 0 : 42                         // (Oct 25: the floor as shown)
         guard animated else { fill.intensity = target; return }
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 1.2
@@ -4891,8 +4926,11 @@ final class InformantGuide {
 /// flashlight on its bench; with one -> Floor 5's panel.
 final class FloorFiveLightsConcern: InformantConcern {
     let name = "floor5Lights"
-    var isActive: Bool { FloorFiveBlackout.savedMask & 0xFF != 0xFF }
-    var progress: Int { (FloorFiveBlackout.savedMask & 0xFF).nonzeroBitCount }
+    /// Oct 25 (PP 3): never, while the blackout is retired -- so the butterfly never
+    /// prompts, never guides to the panel or to Floor 4's flashlight, never makes a
+    /// trip for it, and never celebrates it; she lives her own life.
+    var isActive: Bool { !FloorFiveBlackout.retired && !FloorFiveBlackout.allPowered }
+    var progress: Int { (FloorFiveBlackout.effectiveMask & 0xFF).nonzeroBitCount }
 
     func nextWaypoint(onFloor floor: Int) -> InformantWaypoint? {
         guard isActive else { return nil }
@@ -5842,6 +5880,12 @@ final class ButterflyFloor: ResidentPresentation {
     }
 
     func start(arrivedRiding: Bool) {
+        // Oct 25 (PP 3): the lights mission is retired -- a journey under way in an old save
+        // (engaged, or riding with the player) is let go, so she never resumes guiding.
+        if !Butterfly.concern.isActive, life.memory.engaged || life.memory.riding {
+            var m = life.memory; m.engaged = false; m.riding = false; life.memory = m
+            log("missionRetired")
+        }
         if life.memory.riding {
             // She was with the player: in the cab with them, or (a relaunch) just behind them.
             life.floor = floor

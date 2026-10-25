@@ -92,25 +92,23 @@ struct TaskRegistryTests {
         #expect(ResumeState.allKeys.contains(TaskRegistry.storageKey))     // (Start Over clears it)
     }
 
-    // MARK: The fuse box is the breakers' to complete
+    // MARK: The fuse box -- retired (Oct 25, PP 3)
 
-    @Test func theFuseBoxIsCompletedOnlyByTheBreakers() throws {
+    /// Oct 25 (PP 3): the Floor 5 blackout is retired, so task.01 is completed whatever the breakers'
+    /// test says -- never available, never assigned. (Was: theFuseBoxIsCompletedOnlyByTheBreakers --
+    /// available until all eight breakers were on. MissionRetirementTests covers the rest.)
+    @Test func theFuseBoxIsRetired() throws {
         let storage = ThrowawayStorage()
         let reg = TaskRegistry(defaults: storage.defaults, persists: false)
         var allOn = false
         reg.fuseBoxDone = { allOn }
         reg.ensureGenerated(plans: building(), seed: 5)
         let fuse = try #require(reg.task(TaskRegistry.fuseBoxID))
-        #expect(reg.state(of: fuse) == .available)
-        // Led there and arrived: still available (arriving isn't completing).
-        #expect(reg.assign(fuse.id))
-        #expect(reg.state(of: try #require(reg.task(fuse.id))) == .assigned)
-        #expect(reg.unassign(fuse.id) == .available)
-        // Every breaker on: completed -- never offered again.
+        #expect(reg.state(of: fuse) == .completed)
+        #expect(!reg.assign(fuse.id))
+        #expect(!reg.available().contains { $0.id == fuse.id })
         allOn = true
         #expect(reg.state(of: fuse) == .completed)
-        #expect(!reg.available().contains { $0.id == fuse.id })
-        #expect(!reg.assign(fuse.id))
     }
 
     // MARK: Choosing
@@ -242,11 +240,11 @@ struct TaskRegistryTests {
         #expect(TaskGuide.current?.guide == b)
         #expect(ga.released == [true])                                              // (released: back to its own life)
         #expect(reg.state(of: try #require(reg.task(first))) == .available)
-        #expect(reg.available().count == 19)                                        // (only b's task is taken)
+        #expect(reg.available().count == TaskRegistry.placeholderCount - 1)        // (only b's task is taken; Oct 25: task.01 retired, never available)
         // Stopped (a tap on it again): released, its task back.
         TaskGuide.release(b, outcome: .canceled, why: "test", life: life, registry: reg)
         #expect(TaskGuide.current == nil && gb.released == [true])
-        #expect(reg.available().count == 20)
+        #expect(reg.available().count == TaskRegistry.placeholderCount)            // (Oct 25: the 19 placeholders; task.01 retired)
     }
 
     @Test func theButterflyIsFollowedButDoesntLead() {
@@ -267,7 +265,7 @@ struct TaskRegistryTests {
         life.presentations = [Flier()]
         #expect(!TaskGuide.assign(guide: "butterfly", floor: 3, life: life, registry: reg))
         #expect(TaskGuide.current == nil)
-        #expect(reg.available().count == 20)
+        #expect(reg.available().count == TaskRegistry.placeholderCount)            // (Oct 25: the 19 placeholders; task.01 retired)
     }
 
     // MARK: Critter size
@@ -296,7 +294,7 @@ struct TaskRegistryTests {
         life.store(r)
         #expect(!TaskGuide.check(now: BuildingClock.now(), life: life, registry: reg))
         #expect(TaskGuide.current == nil && guide.released == [true])
-        #expect(reg.available().count == 20)
+        #expect(reg.available().count == TaskRegistry.placeholderCount)            // (Oct 25: the 19 placeholders; task.01 retired)
     }
 }
 

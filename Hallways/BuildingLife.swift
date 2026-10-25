@@ -1242,8 +1242,13 @@ enum FloorPresenter {
         ElevatorBoard.attach(controller)
         let stage = FloorStage(floor: floor, root: root, camera: camera, controller: controller, context: context)
         FollowMe.floorBuilt(floor: floor, plan: plans(floor))               // Oct 23 (FOLLOW ME): its followers come along (before anyone is shown)
-        life.playerPosition = { [weak camera] in
+        life.playerPosition = { [weak camera, weak controller] in
             guard let camera else { return nil }
+            // Oct 25 (PP 8, the mud fix): the camera as last drawn, from the frame snapshot (no scene-lock wait).
+            if let controller, controller.cameraNode === camera {
+                let p = controller.drawnPlayerPose().position
+                return SIMD2<Float>(p.x, p.z)
+            }
             let p = camera.presentation.worldPosition
             return SIMD2<Float>(p.x, p.z)
         }

@@ -2703,8 +2703,13 @@ struct HallwaySceneView: UIViewRepresentable {
                     cells: mazeStore.cells.subtracting(AdministrationReception.staffCells),
                     doors: mazeStore.roomEntranceDoors.mapValues { $0.direction },
                     cellSize: Float(mazeStore.cellSize),
-                    playerPose: { [weak cameraNode] in
+                    playerPose: { [weak cameraNode, weak navController] in
                         guard let cameraNode else { return nil }
+                        // Oct 25 (PP 8, the mud fix): the camera as last drawn, from the frame snapshot (no scene-lock wait).
+                        if let navController, navController.cameraNode === cameraNode {
+                            let pose = navController.drawnPlayerPose()
+                            return (position: SIMD2<Float>(pose.position.x, pose.position.z), yaw: pose.yaw)
+                        }
                         let scnT = FrameTiming.start()                        // Oct 24: SceneKit wait (measurement only)
                         let p = cameraNode.presentation.worldPosition
                         let yaw = cameraNode.presentation.eulerAngles.y
@@ -2752,8 +2757,13 @@ struct HallwaySceneView: UIViewRepresentable {
                     cells: mazeStore.cells,
                     doors: mazeStore.roomEntranceDoors.mapValues { $0.direction },
                     cellSize: Float(mazeStore.cellSize),
-                    playerPose: { [weak cameraNode] in
+                    playerPose: { [weak cameraNode, weak navController] in
                         guard let cameraNode else { return nil }
+                        // Oct 25 (PP 8, the mud fix): the camera as last drawn, from the frame snapshot (no scene-lock wait).
+                        if let navController, navController.cameraNode === cameraNode {
+                            let pose = navController.drawnPlayerPose()
+                            return (position: SIMD2<Float>(pose.position.x, pose.position.z), yaw: pose.yaw)
+                        }
                         let scnT = FrameTiming.start()                        // Oct 24: SceneKit wait (measurement only)
                         let p = cameraNode.presentation.worldPosition
                         let yaw = cameraNode.presentation.eulerAngles.y
@@ -3609,9 +3619,10 @@ struct HallwaySceneView: UIViewRepresentable {
     /// MirrorCamera's demand checks (a read of the camera node; no raycast).
     static func mirrorPlayerPose(_ coordinator: Coordinator) -> () -> (position: SIMD2<Float>, yaw: Float)? {
         { [weak coordinator] in
-            guard let camera = coordinator?.navigationController?.cameraNode.presentation else { return nil }
-            let p = camera.worldPosition
-            return (SIMD2<Float>(p.x, p.z), camera.eulerAngles.y)
+            // Oct 25 (PP 8, the mud fix): the camera as last drawn, from the frame snapshot (no scene-lock wait).
+            guard let nav = coordinator?.navigationController else { return nil }
+            let pose = nav.drawnPlayerPose()
+            return (SIMD2<Float>(pose.position.x, pose.position.z), pose.yaw)
         }
     }
 

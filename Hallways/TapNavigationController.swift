@@ -44,6 +44,10 @@ import UIKit
 
 final class TapNavigationController: NSObject, SCNSceneRendererDelegate, ObservableObject {
     let cameraNode: SCNNode
+    /// Oct 25 (PP 8, the mud fix): this scene's drawn camera pose and elevator door, captured once per
+    /// rendered frame (renderer(_:didRenderScene:atTime:)) so main-thread timers needn't wait on SceneKit's
+    /// scene lock to read them. One per controller: a new scene never sees the old one's values.
+    let presentationSnapshot = PresentationSnapshot()
     private let cells: Set<GridCoordinate>
     private let cellSize: CGFloat
     private let endCell: GridCoordinate
@@ -8566,10 +8570,27 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
     /// How far open the doors are as drawn now (0 shut .. 1 fully open).
     var elevatorDoorsOpenFraction: Double {
         guard let right = elevatorRightDoor, let rc = elevatorRightClosedPosition else { return 0 }
-        let scnT = pthread_main_np() != 0 ? FrameTiming.start() : 0       // Oct 24: SceneKit wait, main only (measurement)
-        let r = right.presentation.position
-        FrameTiming.shared.record(.scnDoorFrac, since: scnT)
+        let r: SCNVector3
+        if let f = presentationSnapshot.fresh(), f.hasRightDoor {
+            r = SCNVector3(f.rightDoor)                                    // Oct 25 (PP 8): the door as last drawn -- no scene-lock wait
+        } else {
+            let scnT = pthread_main_np() != 0 ? FrameTiming.start() : 0   // Oct 24: SceneKit wait, main only (measurement)
+            r = right.presentation.position                                // (no fresh frame: before the first, or not rendering)
+            FrameTiming.shared.record(.scnDoorFrac, since: scnT)
+        }
         return min(1, max(0, Double(hypotf(r.x - rc.x, r.z - rc.z)) / 0.8))
+    }
+
+    /// Oct 25 (PP 8): the player camera as last drawn -- its presentation world position and yaw (Euler Y) --
+    /// from the per-frame snapshot, with no wait on SceneKit's scene lock. No fresh frame (before this scene's
+    /// first, or nothing rendering): read directly, exactly as the callers used to.
+    func drawnPlayerPose() -> (position: SIMD3<Float>, yaw: Float) {
+        if let f = presentationSnapshot.fresh() { return (f.cameraWorld, f.cameraYaw) }
+        let scnT = FrameTiming.start()                                     // Oct 24: SceneKit wait (measurement only)
+        let p = cameraNode.presentation
+        let pose = (position: p.simdWorldPosition, yaw: p.eulerAngles.y)
+        FrameTiming.shared.record(.scnPose, since: scnT)
+        return pose
     }
 
     /// The building's doors are free to be the car's (nobody else's in play).
@@ -11917,6 +11938,11 @@ final class TapNavigationController: NSObject, SCNSceneRendererDelegate, Observa
 
     func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
         FrameTiming.shared.rendererDidRender()                            // Oct 24: callback spans (measurement only)
+        // Oct 25 (PP 8, the mud fix): the frame just drawn -- the camera and the elevator door as presented --
+        // published for the main thread's timers (this thread holds SceneKit's scene lock already: no wait).
+        let drawnCamera = cameraNode.presentation
+        presentationSnapshot.publish(cameraWorld: drawnCamera.simdWorldPosition, cameraYaw: drawnCamera.eulerAngles.y,
+                                     rightDoor: elevatorRightDoor?.presentation.simdPosition, at: CACurrentMediaTime())
         RenderHealth.shared.frameRendered()                               // Oct 9: measurement only
         PerfMonitor.shared.frameRendered()                                // Oct 21: frame gaps (measurement only)
         if renderer.currentViewport.width > 0, renderer.currentViewport.height > 0 {
